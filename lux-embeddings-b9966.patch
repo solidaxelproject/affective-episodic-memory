@@ -1,0 +1,1028 @@
+diff --git a/include/llama.h b/include/llama.h
+index a311ac2..ead40be 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -707,6 +707,18 @@ extern "C" {
+                          int32_t   il_start,
+                          int32_t   il_end);
+ 
++    // Like llama_set_adapter_cvec, with an extra mode: when relative is true the
++    // vector is applied as h += rms(h) * dir per token (premultiply dir by
++    // alpha*sqrt(n_embd) to obtain h += alpha*||h||*dir_unit).
++    LLAMA_API int32_t llama_set_adapter_cvec_ext(
++            struct llama_context * ctx,
++                     const float * data,
++                          size_t   len,
++                         int32_t   n_embd,
++                         int32_t   il_start,
++                         int32_t   il_end,
++                            bool   relative);
++
+     //
+     // Memory
+     //
+diff --git a/src/llama-adapter.cpp b/src/llama-adapter.cpp
+index 3e0fe66..fb3723f 100644
+--- a/src/llama-adapter.cpp
++++ b/src/llama-adapter.cpp
+@@ -22,7 +22,15 @@ ggml_tensor * llama_adapter_cvec::tensor_for(int il) const {
+ ggml_tensor * llama_adapter_cvec::apply_to(ggml_context * ctx, ggml_tensor * cur, int  il) const {
+     ggml_tensor * layer_dir = tensor_for(il);
+     if (layer_dir != nullptr) {
+-        cur = ggml_add(ctx, cur, layer_dir);
++        if (relative) {
++            // h += rms(h) * dir, per token; with dir premultiplied by alpha*sqrt(n_embd)
++            // this equals h += alpha*||h||*dir_unit (parity with the HF-lab hook injection)
++            ggml_tensor * ss  = ggml_sum_rows(ctx, ggml_sqr(ctx, cur));
++            ggml_tensor * rms = ggml_sqrt(ctx, ggml_scale(ctx, ss, 1.0f / (float) cur->ne[0]));
++            cur = ggml_add(ctx, cur, ggml_mul(ctx, ggml_repeat(ctx, layer_dir, cur), rms));
++        } else {
++            cur = ggml_add(ctx, cur, layer_dir);
++        }
+     }
+ 
+     return cur;
+@@ -97,9 +105,12 @@ bool llama_adapter_cvec::apply(
+         size_t len,
+         int32_t n_embd,
+         int32_t il_start,
+-        int32_t il_end) {
++        int32_t il_end,
++        bool relative) {
+     const auto & hparams = model.hparams;
+ 
++    this->relative = relative;
++
+     if (data == nullptr) {
+         // disable the current control vector (but leave allocated for later)
+         layer_start = -1;
+diff --git a/src/llama-adapter.h b/src/llama-adapter.h
+index f0b1e50..4bb8169 100644
+--- a/src/llama-adapter.h
++++ b/src/llama-adapter.h
+@@ -25,7 +25,8 @@ struct llama_adapter_cvec {
+             size_t len,
+             int32_t n_embd,
+             int32_t il_start,
+-            int32_t il_end);
++            int32_t il_end,
++            bool relative = false);
+ 
+ private:
+     bool init(const llama_model & model);
+@@ -33,6 +34,10 @@ private:
+     int32_t layer_start = -1;
+     int32_t layer_end   = -1;
+ 
++    // relative mode: h += rms(h) * dir per token (instead of h += dir);
++    // the caller premultiplies dir by alpha*sqrt(n_embd) to get h += alpha*||h||*dir_unit
++    bool relative = false;
++
+     std::vector<ggml_context_ptr> ctxs;
+     std::vector<ggml_backend_buffer_ptr> bufs;
+ 
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 5edfc85..90260d4 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -1258,10 +1258,11 @@ bool llama_context::set_adapter_cvec(
+                  size_t   len,
+                 int32_t   n_embd,
+                 int32_t   il_start,
+-                int32_t   il_end) {
+-    LLAMA_LOG_DEBUG("%s: il_start = %d, il_end = %d\n", __func__, il_start, il_end);
++                int32_t   il_end,
++                   bool   relative) {
++    LLAMA_LOG_DEBUG("%s: il_start = %d, il_end = %d, relative = %d\n", __func__, il_start, il_end, relative);
+ 
+-    bool res = cvec->apply(model, data, len, n_embd, il_start, il_end);
++    bool res = cvec->apply(model, data, len, n_embd, il_start, il_end, relative);
+ 
+     sched_need_reserve = true;
+ 
+@@ -3791,6 +3792,19 @@ int32_t llama_set_adapter_cvec(
+     return res ? 0 : -1;
+ }
+ 
++int32_t llama_set_adapter_cvec_ext(
++        llama_context * ctx,
++          const float * data,
++               size_t   len,
++              int32_t   n_embd,
++              int32_t   il_start,
++              int32_t   il_end,
++                 bool   relative) {
++    bool res = ctx->set_adapter_cvec(data, len, n_embd, il_start, il_end, relative);
++
++    return res ? 0 : -1;
++}
++
+ //
+ // memory
+ //
+diff --git a/src/llama-context.h b/src/llama-context.h
+index bf91daa..c796bf2 100644
+--- a/src/llama-context.h
++++ b/src/llama-context.h
+@@ -128,7 +128,8 @@ struct llama_context {
+                  size_t   len,
+                 int32_t   n_embd,
+                 int32_t   il_start,
+-                int32_t   il_end);
++                int32_t   il_end,
++                   bool   relative = false);
+ 
+     // process a single ubatch with a specific graph type
+     // if memory_context is provided, it will be applied first to the context's memory
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 98d0cca..1cc19d4 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -10,6 +10,7 @@
+ #include "build-info.h"
+ #include "common.h"
+ #include "fit.h"
++#include "gguf.h"
+ #include "llama.h"
+ #include "log.h"
+ #include "sampling.h"
+@@ -18,10 +19,14 @@
+ #include "mtmd-helper.h"
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <cstddef>
++#include <cstring>
+ #include <cinttypes>
+ #include <exception>
++#include <limits>
+ #include <memory>
++#include <mutex>
+ #include <filesystem>
+ #include <utility>
+ #include <fstream>
+@@ -430,6 +435,11 @@ struct server_slot {
+             return 0;
+         }
+ 
++        // raw-embedding prompts have placeholder tokens only - a draft built on them would be garbage
++        if (task->has_input_embd()) {
++            return 0;
++        }
++
+         // determine the max draft that fits the current slot state
+         // note: slot.prompt is not yet expanded with the `id` token sampled above
+         //       also, need to leave space for 1 extra token to allow context shifts
+@@ -897,6 +907,9 @@ private:
+ 
+     server_batch batch;
+ 
++    // separate batch with embd allocation, used when a slot has raw embedding input
++    llama_batch batch_embd {};
++
+     llama_model   * model_dft = nullptr;
+     llama_context * ctx_dft   = nullptr;
+ 
+@@ -940,6 +953,11 @@ private:
+     int64_t t_last_load_progress_ms = 0;
+ 
+     void destroy() {
++        if (batch_embd.embd != nullptr) {
++            llama_batch_free(batch_embd);
++            batch_embd = {};
++        }
++
+         spec.reset();
+         spec_init.reset();
+ 
+@@ -1341,6 +1359,7 @@ private:
+         {
+             const int32_t n_batch = llama_n_batch(ctx_tgt);
+             batch.init(std::max(n_batch, params_base.n_parallel));
++            batch_embd = llama_batch_init(std::max(n_batch, params_base.n_parallel), llama_model_n_embd(model_tgt), 1);
+         }
+ 
+         if (params_base.cache_ram_mib != 0) {
+@@ -2642,6 +2661,24 @@ private:
+                     res->id = task.id;
+                     queue_results.send(std::move(res));
+                 } break;
++            case SERVER_TASK_TYPE_SET_CVEC:
++                {
++                    // runs on the main loop thread, between decode ticks: no race with the graph
++                    const float * data = task.cvec_data.empty() ? nullptr : task.cvec_data.data();
++                    const int32_t ret  = llama_set_adapter_cvec_ext(ctx_tgt, data, task.cvec_data.size(),
++                                                                    llama_model_n_embd(model_tgt),
++                                                                    task.cvec_il_start, task.cvec_il_end,
++                                                                    task.cvec_relative);
++                    if (ret != 0) {
++                        send_error(task, "failed to apply control vector", ERROR_TYPE_SERVER);
++                        break;
++                    }
++                    SRV_INF("control vector %s (il %d..%d)\n",
++                            data ? "set" : "cleared", task.cvec_il_start, task.cvec_il_end);
++                    auto res = std::make_unique<server_task_result_apply_lora>();
++                    res->id = task.id;
++                    queue_results.send(std::move(res));
++                } break;
+         }
+     }
+ 
+@@ -2708,6 +2745,117 @@ private:
+     };
+ #endif
+ 
++    // process a slot whose task carries raw input embeddings (one slot per tick, dedicated batch_embd)
++    void process_embd_prompt(server_slot & slot) {
++        const int32_t n_embd_inp = llama_model_n_embd(model_tgt);
++        const auto &  embds      = slot.task->input_embd;
++
++        if (slot.state == SLOT_STATE_STARTED) {
++            slot.t_start_process_prompt = ggml_time_us();
++            slot.t_start_generation     = 0;
++            slot.state                  = SLOT_STATE_PROCESSING_PROMPT;
++            slot.n_prompt_tokens_cache  = 0;
++            slot.n_prompt_tokens_processed = 0;
++
++            // raw embeddings cannot be cached or KV-shifted from a previous prompt
++            slot.prompt_clear(true);
++
++            SLT_INF(slot, "new embd prompt, n_ctx_slot = %d, n_rows = %zu\n", slot.n_ctx, embds.size());
++        }
++
++        const int32_t n_batch = llama_n_batch(ctx_tgt);
++
++        common_batch_clear(batch_embd);
++
++        const int32_t n_total = slot.task->n_tokens();
++        while (slot.prompt.n_tokens() < n_total && batch_embd.n_tokens < n_batch) {
++            const int32_t i = slot.prompt.n_tokens();
++            std::memcpy(batch_embd.embd + (size_t) batch_embd.n_tokens * n_embd_inp,
++                        embds[i].data(),
++                        (size_t) n_embd_inp * sizeof(float));
++            batch_embd.pos[batch_embd.n_tokens]       = slot.prompt.tokens.pos_next();
++            batch_embd.n_seq_id[batch_embd.n_tokens]  = 1;
++            batch_embd.seq_id[batch_embd.n_tokens][0] = slot.id;
++            batch_embd.logits[batch_embd.n_tokens]    = false;
++            batch_embd.n_tokens++;
++
++            // push BOS placeholder so slot.prompt counters and pos_next() stay coherent
++            slot.prompt.tokens.push_back(llama_vocab_bos(vocab));
++            slot.n_prompt_tokens_processed++;
++        }
++
++        const bool done = slot.prompt.n_tokens() == n_total;
++        if (done) {
++            slot.state = SLOT_STATE_DONE_PROMPT;
++            batch_embd.logits[batch_embd.n_tokens - 1] = true;
++            slot.n_decoded = 0;
++            slot.i_batch   = batch_embd.n_tokens - 1;
++            slot.init_sampler();
++            SLT_INF(slot, "embd prompt processing done, n_tokens = %d, batch_embd.n_tokens = %d\n",
++                    slot.prompt.n_tokens(), batch_embd.n_tokens);
++        } else {
++            SLT_INF(slot, "embd prompt processing progress, n_tokens = %d, batch_embd.n_tokens = %d\n",
++                    slot.prompt.n_tokens(), batch_embd.n_tokens);
++        }
++
++        common_set_adapter_lora(ctx_tgt, slot.lora);
++        llama_set_embeddings(ctx_tgt, false);
++
++        const int ret = llama_decode(ctx_tgt, batch_embd);
++        metrics.on_decoded(slots);
++
++        if (ret != 0) {
++            std::string err;
++            if (ret == 1)       err = "Context size has been exceeded.";
++            else if (ret == -1) err = "Invalid input batch.";
++            else if (ret < -1)  err = "Compute error.";
++
++            SRV_ERR("embd-batch decode failed, ret = %d\n", ret);
++            send_error(slot, err.empty() ? "embd decode failed" : err);
++            slot.release();
++            slot.prompt_clear(false);
++            return;
++        }
++
++        if (!done) {
++            return;
++        }
++
++        slot.state = SLOT_STATE_GENERATING;
++
++        const int tok_idx = slot.i_batch;
++        llama_token id = common_sampler_sample(slot.smpl.get(), slot.ctx_tgt, tok_idx);
++        slot.i_batch = -1;
++        common_sampler_accept(slot.smpl.get(), id, true);
++
++        const int64_t t_now = ggml_time_us();
++        slot.n_decoded += 1;
++        slot.t_start_generation  = t_now;
++        slot.t_print_last        = t_now;
++        slot.n_decoded_last      = 0;
++        slot.t_prompt_processing = (slot.t_start_generation - slot.t_start_process_prompt) / 1e3;
++        metrics.on_prompt_eval(slot);
++        slot.t_token_generation = std::max<int64_t>(1, t_now - slot.t_start_generation) / 1e3;
++
++        completion_token_output result;
++        result.tok = id;
++        const bool accept_special = params_base.special ||
++            slot.task->params.sampling.preserved_tokens.find(id) != slot.task->params.sampling.preserved_tokens.end();
++        result.text_to_send = common_token_to_piece(slot.ctx_tgt, result.tok, accept_special);
++        result.prob = 1.0f;
++
++        if (slot.task->params.sampling.n_probs > 0) {
++            populate_token_probs(slot, result, slot.task->params.post_sampling_probs, params_base.special, tok_idx);
++        }
++
++        if (!process_token(result, slot)) {
++            slot.print_timings();
++            send_final_response(slot);
++            metrics.on_prediction(slot);
++            slot.release();
++        }
++    }
++
+     void update_slots() {
+ #ifdef DEBUG_TIMINGS
+         static int64_t t_prev = 0;
+@@ -2746,6 +2894,17 @@ private:
+             }
+         }
+ 
++        // handle slots with raw embedding input first; mixing rule: one type per tick
++        for (server_slot & slot : slots) {
++            if (!slot.is_processing())        continue;
++            if (!slot.task->has_input_embd()) continue;
++            if (slot.state != SLOT_STATE_STARTED &&
++                slot.state != SLOT_STATE_PROCESSING_PROMPT) continue;
++
++            process_embd_prompt(slot);
++            return; // serialize: regular slots get their turn on the next tick
++        }
++
+         try {
+             scoped_timer t(t_pre_decode, n_pre_decode);
+             pre_decode();
+@@ -4022,6 +4181,210 @@ void server_context::set_state_callback(server_state_callback_t callback) {
+     });
+ }
+ 
++//
++// helpers used by routes
++//
++
++// public llama.h does not expose model.tok_embd, so re-parse the GGUF file to read selected rows
++static std::vector<std::vector<float>> extract_token_embeddings(
++        const std::string & model_path,
++        const llama_model * model,
++        const llama_vocab * vocab,
++        const std::vector<llama_token> & tokens) {
++    if (model_path.empty()) {
++        throw std::runtime_error("model file path is unavailable");
++    }
++
++    const int32_t n_embd_inp = llama_model_n_embd(model);
++    const int32_t n_vocab    = llama_vocab_n_tokens(vocab);
++
++    gguf_init_params gp { /*no_alloc =*/ true, /*ctx =*/ nullptr };
++    gguf_context * gctx = gguf_init_from_file(model_path.c_str(), gp);
++    if (!gctx) {
++        throw std::runtime_error("failed to open GGUF file: " + model_path);
++    }
++
++    int64_t tid = gguf_find_tensor(gctx, "token_embd.weight");
++    if (tid < 0) {
++        tid = gguf_find_tensor(gctx, "tok_embeddings.weight");
++    }
++    if (tid < 0) {
++        gguf_free(gctx);
++        throw std::runtime_error("token embedding tensor not found in GGUF file");
++    }
++
++    const ggml_type type     = gguf_get_tensor_type(gctx, tid);
++    const size_t base_off    = gguf_get_data_offset(gctx) + gguf_get_tensor_offset(gctx, tid);
++    const size_t row_size    = ggml_row_size(type, n_embd_inp);
++    const size_t expect_size = row_size * (size_t) n_vocab;
++    const size_t actual_size = gguf_get_tensor_size(gctx, tid);
++
++    if (actual_size != expect_size) {
++        gguf_free(gctx);
++        throw std::runtime_error(string_format(
++            "token embedding tensor size mismatch (got %zu, expected %zu = %d rows * %zu bytes)",
++            actual_size, expect_size, n_vocab, row_size));
++    }
++
++    const ggml_type_traits * traits = ggml_get_type_traits(type);
++    if (type != GGML_TYPE_F32 && (!traits || !traits->to_float)) {
++        gguf_free(gctx);
++        throw std::runtime_error(string_format("no dequantizer for tensor type %d", (int) type));
++    }
++
++    FILE * f = fopen(model_path.c_str(), "rb");
++    if (!f) {
++        gguf_free(gctx);
++        throw std::runtime_error("failed to open model file for reading: " + model_path);
++    }
++
++    std::vector<uint8_t> rowbuf(row_size);
++    std::vector<std::vector<float>> result;
++    result.reserve(tokens.size());
++
++    for (llama_token tok : tokens) {
++        if (tok < 0 || tok >= n_vocab) {
++            fclose(f);
++            gguf_free(gctx);
++            throw std::runtime_error(string_format("token id %d out of range [0, %d)", (int) tok, n_vocab));
++        }
++        const size_t off = base_off + (size_t) tok * row_size;
++#ifdef _WIN32
++        if (_fseeki64(f, (int64_t) off, SEEK_SET) != 0) {
++#else
++        if (fseeko(f, (off_t) off, SEEK_SET) != 0) {
++#endif
++            fclose(f);
++            gguf_free(gctx);
++            throw std::runtime_error("fseek failed on model file");
++        }
++        if (fread(rowbuf.data(), 1, row_size, f) != row_size) {
++            fclose(f);
++            gguf_free(gctx);
++            throw std::runtime_error("short read on model file");
++        }
++        std::vector<float> row(n_embd_inp);
++        if (type == GGML_TYPE_F32) {
++            std::memcpy(row.data(), rowbuf.data(), (size_t) n_embd_inp * sizeof(float));
++        } else {
++            traits->to_float(rowbuf.data(), row.data(), n_embd_inp);
++        }
++        result.push_back(std::move(row));
++    }
++
++    fclose(f);
++    gguf_free(gctx);
++    return result;
++}
++
++// dequantize the full token_embd matrix once per process and keep it in memory (row-major: n_vocab * n_embd)
++static const std::vector<float> & load_full_input_embedding_matrix(
++        const std::string & model_path,
++        const llama_model * model,
++        const llama_vocab * vocab,
++        int32_t & out_n_vocab,
++        int32_t & out_n_embd) {
++    static std::mutex         mtx;
++    static std::string        cached_path;
++    static std::vector<float> cached;
++    static int32_t            cached_n_vocab = 0;
++    static int32_t            cached_n_embd  = 0;
++
++    std::lock_guard<std::mutex> lock(mtx);
++
++    if (cached_path == model_path && !cached.empty()) {
++        out_n_vocab = cached_n_vocab;
++        out_n_embd  = cached_n_embd;
++        return cached;
++    }
++
++    if (model_path.empty()) {
++        throw std::runtime_error("model file path is unavailable");
++    }
++
++    const int32_t n_embd_inp = llama_model_n_embd(model);
++    const int32_t n_vocab    = llama_vocab_n_tokens(vocab);
++
++    gguf_init_params gp { /*no_alloc =*/ true, /*ctx =*/ nullptr };
++    gguf_context * gctx = gguf_init_from_file(model_path.c_str(), gp);
++    if (!gctx) {
++        throw std::runtime_error("failed to open GGUF file: " + model_path);
++    }
++
++    int64_t tid = gguf_find_tensor(gctx, "token_embd.weight");
++    if (tid < 0) {
++        tid = gguf_find_tensor(gctx, "tok_embeddings.weight");
++    }
++    if (tid < 0) {
++        gguf_free(gctx);
++        throw std::runtime_error("token embedding tensor not found in GGUF file");
++    }
++
++    const ggml_type type     = gguf_get_tensor_type(gctx, tid);
++    const size_t base_off    = gguf_get_data_offset(gctx) + gguf_get_tensor_offset(gctx, tid);
++    const size_t row_size    = ggml_row_size(type, n_embd_inp);
++    const size_t expect_size = row_size * (size_t) n_vocab;
++    const size_t actual_size = gguf_get_tensor_size(gctx, tid);
++
++    if (actual_size != expect_size) {
++        gguf_free(gctx);
++        throw std::runtime_error(string_format(
++            "token embedding tensor size mismatch (got %zu, expected %zu = %d rows * %zu bytes)",
++            actual_size, expect_size, n_vocab, row_size));
++    }
++
++    const ggml_type_traits * traits = ggml_get_type_traits(type);
++    if (type != GGML_TYPE_F32 && (!traits || !traits->to_float)) {
++        gguf_free(gctx);
++        throw std::runtime_error(string_format("no dequantizer for tensor type %d", (int) type));
++    }
++
++    FILE * f = fopen(model_path.c_str(), "rb");
++    if (!f) {
++        gguf_free(gctx);
++        throw std::runtime_error("failed to open model file for reading: " + model_path);
++    }
++
++#ifdef _WIN32
++    if (_fseeki64(f, (int64_t) base_off, SEEK_SET) != 0) {
++#else
++    if (fseeko(f, (off_t) base_off, SEEK_SET) != 0) {
++#endif
++        fclose(f);
++        gguf_free(gctx);
++        throw std::runtime_error("fseek failed on model file");
++    }
++
++    std::vector<uint8_t> raw(expect_size);
++    if (fread(raw.data(), 1, expect_size, f) != expect_size) {
++        fclose(f);
++        gguf_free(gctx);
++        throw std::runtime_error("short read on model file");
++    }
++    fclose(f);
++    gguf_free(gctx);
++
++    std::vector<float> matrix((size_t) n_vocab * (size_t) n_embd_inp);
++    if (type == GGML_TYPE_F32) {
++        std::memcpy(matrix.data(), raw.data(), expect_size);
++    } else {
++        for (int32_t r = 0; r < n_vocab; ++r) {
++            traits->to_float(raw.data()     + (size_t) r * row_size,
++                             matrix.data()  + (size_t) r * n_embd_inp,
++                             n_embd_inp);
++        }
++    }
++
++    cached         = std::move(matrix);
++    cached_path    = model_path;
++    cached_n_vocab = n_vocab;
++    cached_n_embd  = n_embd_inp;
++
++    out_n_vocab = cached_n_vocab;
++    out_n_embd  = cached_n_embd;
++    return cached;
++}
++
+ //
+ // server_routes
+ //
+@@ -4044,29 +4407,87 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
+     try {
+         std::vector<server_task> tasks;
+ 
+-        const auto & prompt = data.at("prompt");
+-        // TODO: this log can become very long, put it behind a flag or think about a more compact format
+-        //SRV_DBG("Prompt: %s\n", prompt.is_string() ? prompt.get<std::string>().c_str() : prompt.dump(2).c_str());
++        // raw embedding input: bypass tokenization, feed precomputed n_embd-sized vectors directly to the model
++        const bool has_embd_input = data.contains("embeddings_input") && !data.at("embeddings_input").is_null();
++        std::vector<std::vector<float>> embd_input;
+ 
+-        if (!params.path_prompts_log_dir.empty()) {
+-            const auto file_path = std::filesystem::path(params.path_prompts_log_dir) / string_format("%012" PRId64 ".txt", ggml_time_ms());
+-            std::ofstream f(file_path);
+-            if (f) {
+-                f << (prompt.is_string() ? prompt.get<std::string>().c_str() : prompt.dump(2).c_str());
+-            } else {
+-                SRV_ERR("failed to create %s\n", file_path.string().c_str());
++        if (has_embd_input) {
++            if (data.contains("prompt") && !data.at("prompt").is_null()) {
++                throw std::runtime_error("`prompt` and `embeddings_input` are mutually exclusive");
++            }
++            if (type != SERVER_TASK_TYPE_COMPLETION) {
++                throw std::runtime_error("`embeddings_input` is only supported on /completion (not infill)");
++            }
++            if (res_type != TASK_RESPONSE_TYPE_NONE) {
++                throw std::runtime_error("`embeddings_input` is only supported on the legacy /completion endpoint, not OAI/Anthropic variants");
++            }
++            if (ctx_server.mctx != nullptr) {
++                throw std::runtime_error("`embeddings_input` is not supported with multimodal models");
++            }
++            if (json_value(data, "stream", false)) {
++                throw std::runtime_error("streaming is not supported with `embeddings_input` (v1)");
++            }
++            const int n_cmpl_req = json_value(data, "n_cmpl", json_value(data, "n", 1));
++            if (n_cmpl_req > 1) {
++                throw std::runtime_error("`n_cmpl`/`n` > 1 is not supported with `embeddings_input` (v1)");
++            }
++
++            const auto & ein = data.at("embeddings_input");
++            if (!ein.is_array() || ein.empty()) {
++                throw std::runtime_error("`embeddings_input` must be a non-empty array of float arrays");
++            }
++
++            const int32_t n_embd_inp = meta->model_n_embd_inp;
++            embd_input.reserve(ein.size());
++            for (size_t r = 0; r < ein.size(); ++r) {
++                const auto & row = ein[r];
++                if (!row.is_array() || (int32_t) row.size() != n_embd_inp) {
++                    throw std::runtime_error(string_format(
++                        "`embeddings_input[%zu]` has wrong size (%zu, expected %d)",
++                        r, row.is_array() ? row.size() : 0, n_embd_inp));
++                }
++                std::vector<float> v;
++                v.reserve(n_embd_inp);
++                for (const auto & x : row) {
++                    if (!x.is_number()) {
++                        throw std::runtime_error(string_format("`embeddings_input[%zu]` contains a non-numeric value", r));
++                    }
++                    v.push_back(x.get<float>());
++                }
++                embd_input.push_back(std::move(v));
+             }
+         }
+ 
+         // process prompt
+         std::vector<server_tokens> inputs;
+ 
+-        if (res_type != TASK_RESPONSE_TYPE_NONE && ctx_server.mctx != nullptr) {
+-            // This is the case used by OAI compatible chat path with MTMD. TODO It can be moved to the path below.
+-            inputs.push_back(process_mtmd_prompt(ctx_server.mctx, prompt.get<std::string>(), files));
++        if (has_embd_input) {
++            // synthetic BOS-only token vector keeps slot accounting (n_tokens, pos_next) coherent
++            const llama_token bos = llama_vocab_bos(ctx_server.vocab);
++            llama_tokens placeholder(embd_input.size(), bos == LLAMA_TOKEN_NULL ? 0 : bos);
++            inputs.emplace_back(placeholder, /*has_mtmd=*/false);
+         } else {
+-            // Everything else, including multimodal completions.
+-            inputs = tokenize_input_prompts(ctx_server.vocab, ctx_server.mctx, prompt, true, true);
++            const auto & prompt = data.at("prompt");
++            // TODO: this log can become very long, put it behind a flag or think about a more compact format
++            //SRV_DBG("Prompt: %s\n", prompt.is_string() ? prompt.get<std::string>().c_str() : prompt.dump(2).c_str());
++
++            if (!params.path_prompts_log_dir.empty()) {
++                const auto file_path = std::filesystem::path(params.path_prompts_log_dir) / string_format("%012" PRId64 ".txt", ggml_time_ms());
++                std::ofstream f(file_path);
++                if (f) {
++                    f << (prompt.is_string() ? prompt.get<std::string>().c_str() : prompt.dump(2).c_str());
++                } else {
++                    SRV_ERR("failed to create %s\n", file_path.string().c_str());
++                }
++            }
++
++            if (res_type != TASK_RESPONSE_TYPE_NONE && ctx_server.mctx != nullptr) {
++                // This is the case used by OAI compatible chat path with MTMD. TODO It can be moved to the path below.
++                inputs.push_back(process_mtmd_prompt(ctx_server.mctx, prompt.get<std::string>(), files));
++            } else {
++                // Everything else, including multimodal completions.
++                inputs = tokenize_input_prompts(ctx_server.vocab, ctx_server.mctx, prompt, true, true);
++            }
+         }
+ 
+         // tasks.reserve(inputs.size()); // TODO: this is inaccurate due to child tasks
+@@ -4093,6 +4514,11 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
+             task.id_slot = json_value(data, "id_slot", -1);
+             sse_ping_interval = task.params.sse_ping_interval;
+ 
++            if (has_embd_input) {
++                task.input_embd          = embd_input;
++                task.params.cache_prompt = false;
++            }
++
+             // OAI-compat
+             task.params.res_type          = res_type;
+             task.params.oaicompat_cmpl_id = completion_id;
+@@ -4916,6 +5342,129 @@ void server_routes::init_routes() {
+         return handle_embeddings_impl(req, TASK_RESPONSE_TYPE_OAI_EMBD);
+     };
+ 
++    this->post_input_embeddings = [this](const server_http_req & req) {
++        auto res = create_response();
++        const json body = json::parse(req.body);
++
++        if (!body.contains("content")) {
++            res->error(format_error_response("\"content\" must be provided", ERROR_TYPE_INVALID_REQUEST));
++            return res;
++        }
++
++        llama_tokens tokens = tokenize_mixed(ctx_server.vocab, body.at("content"), true, true);
++        if (tokens.empty()) {
++            res->error(format_error_response("Input content cannot be empty", ERROR_TYPE_INVALID_REQUEST));
++            return res;
++        }
++
++        std::vector<std::vector<float>> embeddings;
++        try {
++            embeddings = extract_token_embeddings(params.model.path, ctx_server.model_tgt, ctx_server.vocab, tokens);
++        } catch (const std::exception & e) {
++            res->error(format_error_response(e.what(), ERROR_TYPE_SERVER));
++            return res;
++        }
++
++        json root = json::array();
++        root.push_back(json{
++            {"index",     0},
++            {"embedding", embeddings},
++        });
++        res->ok(root);
++        return res;
++    };
++
++    this->post_project_to_input = [this](const server_http_req & req) {
++        auto res = create_response();
++        const json body = json::parse(req.body);
++
++        if (!body.contains("hidden_states")) {
++            res->error(format_error_response("\"hidden_states\" must be provided", ERROR_TYPE_INVALID_REQUEST));
++            return res;
++        }
++
++        const auto & hs = body.at("hidden_states");
++        if (!hs.is_array() || hs.empty()) {
++            res->error(format_error_response("\"hidden_states\" must be a non-empty array of float arrays", ERROR_TYPE_INVALID_REQUEST));
++            return res;
++        }
++
++        int32_t n_vocab = 0;
++        int32_t n_embd  = 0;
++        const std::vector<float> * E_ptr = nullptr;
++        try {
++            E_ptr = &load_full_input_embedding_matrix(params.model.path, ctx_server.model_tgt, ctx_server.vocab, n_vocab, n_embd);
++        } catch (const std::exception & e) {
++            res->error(format_error_response(e.what(), ERROR_TYPE_SERVER));
++            return res;
++        }
++        const std::vector<float> & E = *E_ptr;
++
++        std::vector<std::vector<float>> projected;
++        projected.reserve(hs.size());
++
++        std::vector<float> logits((size_t) n_vocab);
++
++        for (size_t i = 0; i < hs.size(); ++i) {
++            const auto & row = hs[i];
++            if (!row.is_array() || (int32_t) row.size() != n_embd) {
++                res->error(format_error_response(string_format(
++                    "\"hidden_states[%zu]\" has wrong size (%zu, expected %d)",
++                    i, row.is_array() ? row.size() : 0, n_embd), ERROR_TYPE_INVALID_REQUEST));
++                return res;
++            }
++
++            std::vector<float> h(n_embd);
++            for (int32_t j = 0; j < n_embd; ++j) {
++                const auto & x = row[j];
++                if (!x.is_number()) {
++                    res->error(format_error_response(string_format(
++                        "\"hidden_states[%zu]\" contains a non-numeric value", i), ERROR_TYPE_INVALID_REQUEST));
++                    return res;
++                }
++                h[j] = x.get<float>();
++            }
++
++            float lmax = -std::numeric_limits<float>::infinity();
++            for (int32_t k = 0; k < n_vocab; ++k) {
++                const float * Erow = E.data() + (size_t) k * n_embd;
++                float s = 0.0f;
++                for (int32_t j = 0; j < n_embd; ++j) {
++                    s += h[j] * Erow[j];
++                }
++                logits[k] = s;
++                if (s > lmax) lmax = s;
++            }
++
++            // numerically stable softmax
++            double zsum = 0.0;
++            for (int32_t k = 0; k < n_vocab; ++k) {
++                const float e = std::exp(logits[k] - lmax);
++                logits[k] = e;
++                zsum += (double) e;
++            }
++            const float inv_z = (float) (1.0 / zsum);
++
++            std::vector<float> proj(n_embd, 0.0f);
++            for (int32_t k = 0; k < n_vocab; ++k) {
++                const float w = logits[k] * inv_z;
++                const float * Erow = E.data() + (size_t) k * n_embd;
++                for (int32_t j = 0; j < n_embd; ++j) {
++                    proj[j] += w * Erow[j];
++                }
++            }
++            projected.push_back(std::move(proj));
++        }
++
++        json root = json::array();
++        root.push_back(json{
++            {"index",     0},
++            {"embedding", projected},
++        });
++        res->ok(root);
++        return res;
++    };
++
+     this->post_rerank = [this](const server_http_req & req) {
+         auto res = create_response();
+         if (!params.embedding || params.pooling_type != LLAMA_POOLING_TYPE_RANK) {
+@@ -5024,6 +5573,82 @@ void server_routes::init_routes() {
+         return res;
+     };
+ 
++    this->post_control_vector = [this](const server_http_req & req) {
++        auto res = create_response();
++        const json body = json::parse(req.body);
++
++        const int32_t n_embd  = llama_model_n_embd(ctx_server.model_tgt);
++        const int32_t n_layer = llama_model_n_layer(ctx_server.model_tgt);
++
++        server_task task(SERVER_TASK_TYPE_SET_CVEC);
++
++        task.cvec_relative = json_value(body, "relative", false);
++
++        if (!json_value(body, "clear", false)) {
++            const float scale = json_value(body, "scale", 1.0f);
++
++            // {"layers": {"25": [n_embd floats], "31": [...]}} -> arbitrary per-layer vectors, or
++            // {"vector": [n_embd floats], "il_start": a, "il_end": b} -> same vector on a range
++            // layer indices are llama.cpp 0-based block indices; layer 0 is not injectable
++            std::map<int32_t, std::vector<float>> rows;
++            if (body.contains("layers")) {
++                for (const auto & el : body.at("layers").items()) {
++                    rows[std::stoi(el.key())] = el.value().get<std::vector<float>>();
++                }
++            } else if (body.contains("vector")) {
++                const auto vec = body.at("vector").get<std::vector<float>>();
++                const int32_t a = json_value(body, "il_start", 1);
++                const int32_t b = json_value(body, "il_end", n_layer - 1);
++                for (int32_t il = a; il <= b; il++) {
++                    rows[il] = vec;
++                }
++            }
++
++            if (rows.empty()) {
++                res->error(format_error_response("provide `layers`, `vector` or `clear: true`", ERROR_TYPE_INVALID_REQUEST));
++                return res;
++            }
++            for (const auto & [il, v] : rows) {
++                if (il < 1 || il >= n_layer) {
++                    res->error(format_error_response(string_format(
++                        "layer %d out of range [1, %d)", il, n_layer), ERROR_TYPE_INVALID_REQUEST));
++                    return res;
++                }
++                if ((int32_t) v.size() != n_embd) {
++                    res->error(format_error_response(string_format(
++                        "layer %d vector has wrong size (%zu, expected %d)", il, v.size(), n_embd), ERROR_TYPE_INVALID_REQUEST));
++                    return res;
++                }
++            }
++
++            task.cvec_il_start = rows.begin()->first;
++            task.cvec_il_end   = rows.rbegin()->first;
++            task.cvec_data.assign((size_t) n_embd * task.cvec_il_end, 0.0f);
++            for (const auto & [il, v] : rows) {
++                for (int32_t j = 0; j < n_embd; j++) {
++                    task.cvec_data[(size_t) n_embd * (il - 1) + j] = v[j] * scale;
++                }
++            }
++        }
++
++        auto & rd = res->rd;
++        task.id = rd.get_new_id();
++        rd.post_task(std::move(task));
++
++        auto result = rd.next(req.should_stop);
++        if (!result) {
++            // connection was closed
++            GGML_ASSERT(req.should_stop());
++            return res;
++        }
++        if (result->is_error()) {
++            res->error(result->to_json());
++            return res;
++        }
++        res->ok(result->to_json());
++        return res;
++    };
++
+     this->post_lora_adapters = [this](const server_http_req & req) {
+         auto res = create_response();
+         const json body = json::parse(req.body);
+diff --git a/tools/server/server-context.h b/tools/server/server-context.h
+index f9ab113..0425150 100644
+--- a/tools/server/server-context.h
++++ b/tools/server/server-context.h
+@@ -150,9 +150,12 @@ struct server_routes {
+     server_http_context::handler_t post_detokenize;
+     server_http_context::handler_t post_embeddings;
+     server_http_context::handler_t post_embeddings_oai;
++    server_http_context::handler_t post_input_embeddings;
++    server_http_context::handler_t post_project_to_input;
+     server_http_context::handler_t post_rerank;
+     server_http_context::handler_t get_lora_adapters;
+     server_http_context::handler_t post_lora_adapters;
++    server_http_context::handler_t post_control_vector;
+ 
+     // to be used in router mode
+     json get_model_info() const;
+diff --git a/tools/server/server-task.h b/tools/server/server-task.h
+index dc6b2da..a3eb88c 100644
+--- a/tools/server/server-task.h
++++ b/tools/server/server-task.h
+@@ -27,6 +27,7 @@ enum server_task_type {
+     SERVER_TASK_TYPE_SLOT_ERASE,
+     SERVER_TASK_TYPE_GET_LORA,
+     SERVER_TASK_TYPE_SET_LORA,
++    SERVER_TASK_TYPE_SET_CVEC,
+ };
+ 
+ // TODO: change this to more generic "response_format" to replace the "format_response_*" in server-common
+@@ -153,6 +154,10 @@ struct server_task {
+     task_params   params;
+     server_tokens tokens;
+ 
++    // when set, the prompt phase feeds these raw vectors instead of looking up token embeddings;
++    // `tokens` holds N BOS placeholders so slot counters and pos_next() stay coherent
++    std::vector<std::vector<float>> input_embd;
++
+     // only used by CLI, this allow tokenizing CLI inputs on server side
+     // we need this because mtmd_context and vocab are not accessible outside of server_context
+     bool                    cli = false;
+@@ -175,6 +180,13 @@ struct server_task {
+     // used by SERVER_TASK_TYPE_SET_LORA
+     std::map<int, float> set_lora; // mapping adapter ID -> scale
+ 
++    // used by SERVER_TASK_TYPE_SET_CVEC: control-vector buffer for layers 1..cvec_il_end
++    // (n_embd floats per layer, zero rows = no-op); empty = clear the current vector
++    std::vector<float> cvec_data;
++    int32_t cvec_il_start  = 0;
++    int32_t cvec_il_end    = 0;
++    bool    cvec_relative  = false; // h += rms(h)*dir instead of h += dir
++
+     server_task() = default;
+ 
+     server_task(server_task_type type) : type(type) {}
+@@ -183,6 +195,10 @@ struct server_task {
+         return tokens.size();
+     }
+ 
++    bool has_input_embd() const {
++        return !input_embd.empty();
++    }
++
+     bool need_embd() const {
+         switch (type) {
+             case SERVER_TASK_TYPE_EMBEDDING:
+@@ -228,12 +244,13 @@ struct server_task {
+     void add_child(int id_parent, int id_child) {
+         server_task copy;
+ 
+-        copy.id        = id_child;
+-        copy.id_parent = id_parent;
+-        copy.params    = params;
+-        copy.type      = type;
+-        copy.tokens    = tokens.clone();
+-        copy.id_slot   = -1; // child tasks cannot specify slot
++        copy.id         = id_child;
++        copy.id_parent  = id_parent;
++        copy.params     = params;
++        copy.type       = type;
++        copy.tokens     = tokens.clone();
++        copy.input_embd = input_embd;
++        copy.id_slot    = -1; // child tasks cannot specify slot
+ 
+         // use different sampling seed for each child
+         // note: https://github.com/ggml-org/llama.cpp/pull/18700#discussion_r2675115723
+diff --git a/tools/server/server.cpp b/tools/server/server.cpp
+index c2b2112..b89185a 100644
+--- a/tools/server/server.cpp
++++ b/tools/server/server.cpp
+@@ -200,6 +200,8 @@ int llama_server(common_params & params, int argc, char ** argv) {
+         routes.post_infill                 = models_routes->proxy_post;
+         routes.post_embeddings             = models_routes->proxy_post;
+         routes.post_embeddings_oai         = models_routes->proxy_post;
++        routes.post_input_embeddings       = models_routes->proxy_post;
++        routes.post_project_to_input       = models_routes->proxy_post;
+         routes.post_rerank                 = models_routes->proxy_post;
+         routes.post_tokenize               = models_routes->proxy_post;
+         routes.post_detokenize             = models_routes->proxy_post;
+@@ -208,6 +210,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
+         routes.post_responses_tok_oai      = models_routes->proxy_post;
+         routes.get_lora_adapters           = models_routes->proxy_get;
+         routes.post_lora_adapters          = models_routes->proxy_post;
++        routes.post_control_vector         = models_routes->proxy_post;
+         routes.get_slots                   = models_routes->proxy_get;
+         routes.post_slots                  = models_routes->proxy_post;
+ 
+@@ -244,6 +247,8 @@ int llama_server(common_params & params, int argc, char ** argv) {
+     ctx_http.post("/embedding",                ex_wrapper(routes.post_embeddings)); // legacy
+     ctx_http.post("/embeddings",               ex_wrapper(routes.post_embeddings));
+     ctx_http.post("/v1/embeddings",            ex_wrapper(routes.post_embeddings_oai));
++    ctx_http.post("/input-embeddings",         ex_wrapper(routes.post_input_embeddings));
++    ctx_http.post("/project-to-input",         ex_wrapper(routes.post_project_to_input));
+     ctx_http.post("/rerank",                   ex_wrapper(routes.post_rerank));
+     ctx_http.post("/reranking",                ex_wrapper(routes.post_rerank));
+     ctx_http.post("/v1/rerank",                ex_wrapper(routes.post_rerank));
+@@ -260,6 +265,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
+     // LoRA adapters hotswap
+     ctx_http.get ("/lora-adapters",            ex_wrapper(routes.get_lora_adapters));
+     ctx_http.post("/lora-adapters",            ex_wrapper(routes.post_lora_adapters));
++    ctx_http.post("/control-vector",           ex_wrapper(routes.post_control_vector));
+     // Save & load slots
+     ctx_http.get ("/slots",                    ex_wrapper(routes.get_slots));
+     ctx_http.post("/slots/:id_slot",           ex_wrapper(routes.post_slots));

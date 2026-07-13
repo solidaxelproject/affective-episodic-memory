@@ -1,0 +1,21 @@
+# dati e memoria dell'agente: MAI nel repo
+*.db
+*.pt
+*.npz
+*.npy
+*.gguf
+*.wav
+*.log
+*.jsonl
+episodi-*.json
+esito-*.json
+sonda-esiti.json
+replay-notte.json
+verdetto.json
+.env
+CONSENSO*.md
+veto-list.txt
+adapter/
+griglie/
+__pycache__/
+*.bak*
