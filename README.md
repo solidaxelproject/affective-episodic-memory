@@ -182,6 +182,10 @@ Everything runs locally, on one PC: no external APIs, no data leaving the machin
 - Marsland, Shapiro, Nehmzow, [*A self-organising network that grows when required*](https://doi.org/10.1016/S0893-6080(02)00078-3) (2002)
 - Sergei Korsakoff, the syndrome that bears his name (1887)
 
+## Acknowledgments
+
+This project was built with the help of Claude Code (Opus 4.8 and Fable 5 models), because I'm a total noob at writing code. The vision, the decisions and the stubbornness are mine; most of the code is theirs.
+
 ## License
 
 MIT. See `LICENSE`.

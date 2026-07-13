@@ -182,6 +182,10 @@ Tutto gira in locale, su un solo PC: nessuna API esterna, nessun dato che lascia
 - Marsland, Shapiro, Nehmzow, [*A self-organising network that grows when required*](https://doi.org/10.1016/S0893-6080(02)00078-3) (2002)
 - Sergei Korsakoff, la sindrome che porta il suo nome (1887)
 
+## Ringraziamenti
+
+Questo progetto è stato realizzato con l'ausilio di Claude Code (modelli Opus 4.8 e Fable 5), perché io sono una nabba a scrivere codice. La visione, le decisioni e la testardaggine sono mie; gran parte del codice è loro.
+
 ## Licenza
 
 MIT. Vedi `LICENSE`.
