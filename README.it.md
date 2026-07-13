@@ -4,6 +4,23 @@
 
 *Read it in English: [README.md](README.md)*
 
+![Il grafo della memoria in 3D: ogni sfera è un ricordo, colorata secondo l'emozione che l'ha selezionato; le sfere con l'anello portano una scena visiva distillata](assets/memory-graph-3d.gif)
+
+*Una fotografia reale della memoria del sistema: 284 ricordi disposti per somiglianza semantica (PCA 3D degli stati interni del modello), colorati per emozione dominante, grandi quanto la loro salienza, legati dagli archi hebbiani di co-richiamo.*
+
+## Provala in 60 secondi
+
+Niente GPU, niente modello, niente dati: l'organo che cresce gira ovunque:
+
+```bash
+git clone https://github.com/solidaxelproject/affective-episodic-memory
+cd affective-episodic-memory
+pip install numpy
+python3 demo.py
+```
+
+Una vita sintetica di 48 esperienze fa crescere un organo di quattro neuroni (la novità crea neuroni, la familiarità li rinforza, il sonno fonde i simili), poi richiama i ricordi per emozione e per significato. È lo stesso `lux.py` che gira in produzione.
+
 ## Cos'è
 
 Un LLM, da solo, è un generatore di testo che attraverso l'addestramento ha assorbito e cristallizzato nei propri pesi una vasta quantità di informazioni, nozioni, pattern. Nel proprio funzionamento manifesta comportamenti emergenti prodotti dalla natura delle informazioni in esso cristallizzate, dalla loro forma, dalla loro struttura e dal comportamento non deterministico attraverso cui manipola l'informazione al suo interno.

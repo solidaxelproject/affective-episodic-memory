@@ -4,6 +4,23 @@
 
 *Leggilo in italiano: [README.it.md](README.it.md)*
 
+![The memory graph in 3D: every sphere is a memory, colored by the emotion that selected it; ringed spheres carry a distilled visual scene](assets/memory-graph-3d.gif)
+
+*A real snapshot of the system's memory: 284 memories positioned by semantic similarity (3D PCA of the model's internal states), colored by dominant emotion, sized by salience, linked by Hebbian co-recall edges.*
+
+## Try it in 60 seconds
+
+No GPU, no model, no data needed — the growing organ itself runs anywhere:
+
+```bash
+git clone https://github.com/solidaxelproject/affective-episodic-memory
+cd affective-episodic-memory
+pip install numpy
+python3 demo.py
+```
+
+A synthetic life of 48 experiences grows a four-neuron organ (novelty creates neurons, familiarity reinforces them, sleep fuses the similar ones), then recalls memories by emotion and by meaning. It is the same `lux.py` that runs in production.
+
 ## What is this
 
 An LLM, on its own, is a text generator that through training has absorbed and crystallized into its weights a vast amount of information, notions and patterns. In operation it exhibits emergent behaviors produced by the nature of the information crystallized inside it, by its shape, by its structure, and by the non-deterministic way it manipulates the information within.
