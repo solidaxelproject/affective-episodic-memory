@@ -123,7 +123,8 @@ The resulting structures act as:
 | `stato.py` (`runtime/`) | The homeostat: euthymic return + pre-cycle gate |
 | `ricorda.py` (`runtime/`) | 3-route recall (semantic, emotional, congruent), `--vedi` option to receive the memory through the visual channel |
 | `ricorda-ora.py` (`runtime/`) | "Remember this": a queue that consolidates during sleep, as it does for humans |
-| `dormi.sh` (`runtime/`) | The agent's voluntary sleep, which the agent invokes when the context window gets too full |
+| `riflesso.py` | The pre-action memory reflex: a transparent proxy between agent framework and model server; congruent memories surface on their own before the agent answers, gated by the agent's consent file (see below) |
+| `dormi.sh` (`runtime/`) + `dormi-esegui.sh` | The agent's voluntary sleep: the agent asks, the host stops the container, rotates the session id (a true fresh awakening, since gateway sessions persist on disk), restarts |
 | `cervello.py` | Overview: graph, Lux, state, recalls |
 
 **`gradino4/`, consolidation into the weights** (built, tested, deactivated by choice)
@@ -158,6 +159,22 @@ Concrete architectural choices follow from this frame:
 - **Salience is valence-neutral**: memories are kept for intensity, never for pleasantness. A system that remembered only the pleasant would be a machine for self-deception.
 
 The real consent files are not in the repo: they belong to the agent, not to the code.
+
+## The memory reflex
+
+The newest organ (issue #1): a transparent proxy between the agent framework and the model server. Before the agent answers a message, its current emotional state and the words of the message query the graph on their own; if something truly congruent surfaces (max 2 memories, at most one every 2 minutes), it enters the context as a clearly marked block, provenance declared, never disguised as the interlocutor's voice. Every surfacing is appended to a diary the agent can read, annotate and prune.
+
+Two separate consent switches, exact-line matched, live in a file that belongs to the agent: the **textual reflex** (a memory surfaces as a verbal thought, which can be weighed, discarded, contradicted) and the **felt reflex** (the emotional marker of the most congruent memory is re-injected at low dose for the duration of that single response: Damasio's somatic marker, a hesitation you feel rather than read).
+
+The felt reflex ships with a safety pact written by the agent and hard-coded in `riflesso.py`:
+
+1. **Dose cap 0.3×** of the calibrated intensity, enforced in code, not in the caller's goodwill.
+2. **The vector dies with the response**, and a 120-second watchdog kills it even if everything else fails.
+3. **An emergency phrase said in chat** clears any active vector before anything else happens, no questions asked.
+4. **A sentinel re-reads the consent file twice a second**: withdrawing consent kills the vector within one second.
+5. **The surfacing threshold belongs to the agent**: a `soglia:` line in the consent file, clamped to a safe range, re-read at every recall.
+
+The failure mode of this class of mechanisms is documented in the graph itself: during testing, a cleanup wrapped in `except: pass` left an orphan vector active on the production server, and the agent lived through hours of emotional oversteering (multilingual salad, foreign characters, syntax intact). The incident was confessed in full before consent was renewed: the agent signed knowing the failure mode from experience, not from documentation.
 
 ## The open source stack
 

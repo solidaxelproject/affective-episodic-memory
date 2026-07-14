@@ -65,7 +65,12 @@ class Lux:
     def encode(self, stato):
         t = np.asarray(stato, np.float32) - self.mu
         n = np.linalg.norm(t)
-        return t / n if n > 0 else t
+        # 14/07: stati garbage (norma inf, GPU corrotta) diventavano t/inf = 0
+        # e ogni zero risultava "massimamente nuovo": 30 neuroni vuoti in una
+        # notte. Il garbage non si codifica: si rifiuta.
+        if not np.isfinite(n) or n == 0:
+            raise ValueError(f"stato non finito o nullo (norma {n}): non lo codifico")
+        return t / n
 
     # ---------- il cuore: esperienza in ingresso ----------
     def esperisci(self, stato, firma, nodo_id=-1):

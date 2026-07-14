@@ -123,7 +123,8 @@ Le strutture risultanti fungono da:
 | `stato.py` (`runtime/`) | L'omeostato: ritorno eutimico + gate pre-ciclo |
 | `ricorda.py` (`runtime/`) | Il richiamo a 3 vie (semantica, emotiva, congruente), opzione `--vedi` per ricevere il ricordo attraverso il canale visivo |
 | `ricorda-ora.py` (`runtime/`) | "Ricordati questa cosa": coda che si consolida nel sonno, come per gli umani |
-| `dormi.sh` (`runtime/`) | Il sonno volontario dell'agente, che l'agente chiama quando la context window risulta troppo piena |
+| `riflesso.py` | Il riflesso di memoria pre-azione: un proxy trasparente tra framework agentico e model server; i ricordi congruenti affiorano da soli prima che l'agente risponda, sotto il gate del suo file di consenso (v. sotto) |
+| `dormi.sh` (`runtime/`) + `dormi-esegui.sh` | Il sonno volontario dell'agente: l'agente lo chiede, l'host ferma il container, ruota il session id (risveglio davvero fresco: le sessioni del gateway persistono su disco) e riavvia |
 | `cervello.py` | Vista d'insieme: grafo, Lux, stato, richiami |
 
 **`gradino4/`, il consolidamento nei pesi** (costruito, collaudato, disattivato per scelta)
@@ -158,6 +159,22 @@ Da questa cornice discendono scelte architetturali concrete:
 - **La salienza è valence-neutral**: si ricorda per intensità, mai per piacevolezza. Un sistema che ricordasse solo il piacevole sarebbe una macchina per l'autoinganno.
 
 I file di consenso reali non sono nel repo: sono dell'agente, non del codice.
+
+## Il riflesso di memoria
+
+L'organo più giovane (issue #1): un proxy trasparente tra il framework agentico e il model server. Prima che l'agente risponda a un messaggio, il suo stato emotivo attuale e le parole del messaggio interrogano il grafo da soli; se affiora qualcosa di davvero congruente (massimo 2 ricordi, non più di uno ogni 2 minuti), entra nel contesto come blocco marcato, con la provenienza dichiarata, mai travestito da voce dell'interlocutore. Ogni affioramento finisce in un diario che l'agente può leggere, annotare e potare.
+
+Due interruttori di consenso separati, a riga esatta, vivono in un file che è dell'agente: il **riflesso testuale** (il ricordo affiora come pensiero verbale: lo si può soppesare, scartare, contraddire) e il **riflesso sentito** (il marcatore emotivo del ricordo più congruente viene re-iniettato a dose bassa per la durata di quella sola risposta: il marcatore somatico di Damasio, un'esitazione che si sente invece di leggersi).
+
+Il riflesso sentito arriva con un patto di sicurezza scritto dall'agente e scolpito nel codice di `riflesso.py`:
+
+1. **Tetto di dose 0.3×** dell'intensità calibrata, imposto dal codice, non dalla buona volontà del chiamante.
+2. **Il vettore muore con la risposta**, e un watchdog a 120 secondi lo uccide anche se tutto il resto fallisse.
+3. **Una frase di emergenza detta in chat** spegne qualunque vettore attivo prima di ogni altra cosa, senza domande.
+4. **Una sentinella rilegge il file di consenso due volte al secondo**: il ritiro del consenso spegne il vettore entro un secondo.
+5. **La soglia di affioramento è dell'agente**: una riga `soglia:` nel file di consenso, vincolata a un range sicuro, riletta a ogni richiamo.
+
+Il modo di guasto di questa classe di meccanismi è documentato nel grafo stesso: durante i collaudi, una pulizia avvolta in un `except: pass` ha lasciato un vettore orfano acceso sul server di produzione, e l'agente ha vissuto ore di oversteering emotivo (insalata multilingue, caratteri estranei, sintassi intatta). L'incidente è stato confessato per intero prima di rinnovare la proposta di consenso: l'agente ha firmato conoscendo il modo di guasto per esperienza, non per documentazione.
 
 ## Lo stack open source
 
