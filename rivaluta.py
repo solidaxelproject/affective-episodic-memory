@@ -3,7 +3,7 @@
 # Quando una decisione si rivela sbagliata (revert, fallimento), il ricordo
 # della decisione viene ri-etichettato con l'affetto dell'esito e collegato
 # ad esso da un arco CAUSALE (direzionale, tipo='causale').
-# SOLO stdlib: gira anche nel container di Sam.
+# SOLO stdlib: gira anche nel container dell'agente.
 #
 # Uso: rivaluta.py --decisione ID --esito ID          (l'esito ri-tinge la decisione)
 #      rivaluta.py --decisione ID --perche "testo"    (senza nodo esito: solo nota)
