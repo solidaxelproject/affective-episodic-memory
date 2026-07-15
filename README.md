@@ -19,7 +19,7 @@ pip install numpy
 python3 demo.py
 ```
 
-A synthetic life of 48 experiences grows 48 neurons: novelty creates them, familiarity reinforces them, and nothing merges, because merging two distinct experiences does not abstract them, it makes them one thing lived twice. The structure is not lost, it moves into the arcs: 44 of the 47 arcs fall inside one of the four themes, with exactly three bridges, one for each theme that opens. Then it recalls memories by emotion and by meaning. It is the same `lux.py` that runs in production.
+A synthetic life of 48 experiences grows 48 neurons: novelty creates them, familiarity reinforces them, and nothing merges, because merging two distinct experiences does not abstract them, it makes them one thing lived twice. The structure is not lost, it moves into the arcs: all 44 arcs fall inside one of the four themes and not one joins experiences that have nothing to do with each other, because a newborn neuron links to whoever was nearest at its birth only if that neighbour is genuinely near. The four neurons that opened a theme are born with no arc at all: nothing like them existed yet, and saying so is the truth. Then it recalls memories by emotion, by meaning, and by connection, one neuron reaching another along the arcs. It is the same `lux.py` that runs in production.
 
 ## What is this
 

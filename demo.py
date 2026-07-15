@@ -56,13 +56,21 @@ assert born == 48 and len(organ.tracce) == 48, f"something merged: {len(organ.tr
 print("\n== the themes are still there, in the topology ==")
 inside = sum(1 for k in organ.archi
              if whose_theme[k.split("|")[0]] == whose_theme[k.split("|")[1]])
-bridges = len(organ.archi) - inside
-print(f"{len(organ.archi)} arcs: {inside} inside a theme, {bridges} bridging two")
-print(f"(a bridge is a theme being lived for the first time: {len(EMOTIONS)} themes, "
-      f"{len(EMOTIONS) - 1} bridges)")
-# nothing merged, yet the four themes fall out of the arcs on their own
-assert inside >= 44, f"the topology lost the themes: only {inside} arcs inside one"
-assert bridges <= len(EMOTIONS) - 1, f"too many bridges: {bridges}"
+wrong = len(organ.archi) - inside
+print(f"{len(organ.archi)} arcs: {inside} inside a theme, {wrong} between two")
+print(f"the {len(EMOTIONS)} neurons that opened a theme are born with no arc at all: "
+      f"nothing like them existed yet, and saying so is the truth")
+# nothing merged, yet the four themes fall out of the arcs on their own, and
+# not one arc joins experiences that have nothing to do with each other
+assert inside == 44, f"the topology lost the themes: only {inside} arcs inside one"
+assert wrong == 0, f"{wrong} arcs join unrelated experiences"
+
+print("\n== a neuron recalling another neuron, by connection ==")
+start = next(iter(organ.nodi))
+for h in organ.vicini(start, salti=2)[:4]:
+    print(f"  {h['salti']} hop(s) away, strength {h['forza']}: theme {h['nodo_id']}")
+assert all(h["nodo_id"] == organ.nodo_id[organ.vicini(start)[0]["neurone"]]
+           for h in organ.vicini(start, salti=2)), "association wandered off the theme"
 
 print("\n== recall by emotion ==")
 for k, emo in enumerate(EMOTIONS):

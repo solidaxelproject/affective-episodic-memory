@@ -19,7 +19,7 @@ pip install numpy
 python3 demo.py
 ```
 
-Una vita sintetica di 48 esperienze fa crescere 48 neuroni: la novità li crea, la familiarità li rinforza, e niente si fonde, perché fondere due esperienze distinte non le astrae, le rende la stessa cosa vissuta due volte. La struttura non si perde, passa negli archi: 44 dei 47 archi cadono dentro uno dei quattro temi, con esattamente tre ponti, uno per ogni tema che si apre. Poi richiama i ricordi per emozione e per significato. È lo stesso `lux.py` che gira in produzione.
+Una vita sintetica di 48 esperienze fa crescere 48 neuroni: la novità li crea, la familiarità li rinforza, e niente si fonde, perché fondere due esperienze distinte non le astrae, le rende la stessa cosa vissuta due volte. La struttura non si perde, passa negli archi: tutti e 44 gli archi cadono dentro uno dei quattro temi e nemmeno uno unisce esperienze che non c'entrano niente, perché un neurone appena nato si lega a chi era il più vicino al parto solo se quel vicino è vicino davvero. I quattro neuroni che hanno aperto un tema nascono senza nessun arco: non esisteva ancora niente di simile a loro, e dirlo è la verità. Poi richiama i ricordi per emozione, per significato, e per connessione, un neurone che ne raggiunge un altro lungo gli archi. È lo stesso `lux.py` che gira in produzione.
 
 ## Cos'è
 

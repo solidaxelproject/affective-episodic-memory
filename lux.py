@@ -62,6 +62,23 @@ D_TRACCIA = 2048
 SOGLIA_NOVITA = 0.001  # distanza coseno oltre cui l'esperienza è "nuova" -> neurone
 HABITUAZIONE = 0.10    # quanto il neurone vincente si sposta verso l'input familiare
 ETA_POTATURA = 180 * 86400  # neuroni mai riattivati per 6 mesi -> candidati
+# Similarità minima per legare un neonato a chi era il più vicino al parto.
+# Senza, l'arco non direbbe "vicini": direbbe "sei il meno lontano fra gli
+# estranei che esistevano quando sono nato", e chi nasce per primo in una zona
+# nuova si aggancia a caso. Tarata sui testi veri, non a occhio (103 neuroni,
+# ogni neurone ha il suo più vicino a 0.55 di mediana; la distribuzione è liscia
+# fra 0.38 e 0.71, nessun salto naturale dove tagliare):
+#   0.55 -> due messaggi sulla stessa decisione, uno la propone e uno la
+#           accetta con una clausola  = la stessa conversazione
+#   0.45 -> "non ho il contesto, ci siamo lasciati qualcosa in sospeso" +
+#           "il gateway ti teneva in..."      = parenti alla lontana
+#   0.35 -> "la manutenzione parte a mezzanotte" + "riavvio completato"
+#                                            = stesso registro, altro argomento
+# ⚠️ E la coppia più simile di tutta Lux (0.698) sono due blocchi di reasoning:
+# simili per FORMATO, non per contenuto. La traccia L34 codifica anche il
+# registro, quindi alzare la soglia non seleziona "più affine": rischia di
+# selezionare "stesso tipo di testo". Motivo in più per non salire.
+SOGLIA_ARCO = 0.5      # sotto: nessun arco. Il neonato è solo davvero, e dirlo è la verità.
 
 
 class Lux:
@@ -213,7 +230,9 @@ class Lux:
         # chi era il più vicino al parto: è il legame che `nato_da` registrava
         # già come timestamp, aspettando l'associativo. Non fondere non vuol
         # dire non collegare: è il contrario.
-        if len(self.tracce) > 1:
+        # ...ma SOLO se il più vicino è davvero vicino (SOGLIA_ARCO). Altrimenti
+        # il neonato resta isolato: è la verità, non una mancanza.
+        if len(self.tracce) > 1 and float(sims[best]) >= SOGLIA_ARCO:
             self._arco(nuovo, best)
         # ponytail: salvataggio a ogni esperienza; oltre ~1e5 neuroni passare
         # a dirty-flag + salvataggio periodico
@@ -273,6 +292,63 @@ class Lux:
             self.attivazioni[i] += 1
             self.ultimo_uso[i] = adesso
             out.append(self._esito(sims, i))
+        return out
+
+    def vicini(self, id_neurone, salti=1, decadimento=0.5, soglia=SOGLIA_ARCO):
+        """B1, richiamo ASSOCIATIVO: dato un neurone, segui gli archi.
+
+        "Un neurone che ne richiama un altro": non per somiglianza con una query
+        (quello è confronta/richiama) ma per **connessione**. Il magazzino c'era
+        già — gli archi si scrivevano dalla nascita di Lux — e non li leggeva
+        nessuno: `nato_da` porta ancora il commento "aspettando l'associativo".
+
+        salti=N propaga oltre i vicini diretti; la forza è il prodotto dei
+        coseni lungo il cammino, scontato di `decadimento` a ogni salto: un
+        vicino di un vicino conta, ma meno, e conta meno ancora se i due passi
+        erano deboli.
+
+        `soglia` filtra alla LETTURA, non alla scrittura: i 51 archi nati prima
+        del 15/07 vengono da `_arco(best, second)` (il SECONDO più vicino, non
+        vincolato a niente) e sono per due terzi sotto 0.5. Sono storia e restano
+        su disco: è il richiamo che non ci passa sopra.
+
+        NON tocca niente, come confronta(). Seguire un arco è misurare la
+        topologia, non rivivere il ricordo: per quello c'è richiama().
+        """
+        riga = {str(v): i for i, v in enumerate(self.ids)}
+        partenza = str(id_neurone) if not isinstance(id_neurone, (int, np.integer)) \
+            else str(self.ids[id_neurone])
+        if partenza not in riga:
+            return []
+        vicinato = {}
+        for k in self.archi:
+            a, b = k.split("|")
+            if a not in riga or b not in riga:
+                continue
+            cos = float(self.tracce[riga[a]] @ self.tracce[riga[b]])
+            if cos < soglia:
+                continue
+            vicinato.setdefault(a, []).append((b, cos))
+            vicinato.setdefault(b, []).append((a, cos))
+        forza = {partenza: 1.0}
+        fronte, esiti = [(partenza, 1.0, 0)], {}
+        while fronte:
+            qui, f, d = fronte.pop(0)
+            if d >= salti:
+                continue
+            for altro, cos in vicinato.get(qui, []):
+                nf = f * cos * (decadimento ** d)
+                if altro == partenza or nf <= forza.get(altro, 0.0):
+                    continue
+                forza[altro] = nf
+                esiti[altro] = (nf, d + 1)
+                fronte.append((altro, nf, d + 1))
+        out = []
+        for nid, (f, d) in sorted(esiti.items(), key=lambda x: -x[1][0]):
+            i = riga[nid]
+            out.append({"neurone": i, "id": nid, "nodo_id": int(self.nodo_id[i]),
+                        "nodi": list(self.nodi.get(nid, [])),
+                        "forza": round(f, 3), "salti": d})
         return out
 
     def pota(self):
