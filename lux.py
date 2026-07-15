@@ -8,10 +8,37 @@
 # dettaglio del codec e spazio angolare nel tempo lungo).
 # ponytail: indice = forza bruta (fino a ~1e5), poi hnswlib, poi DiskANN.
 import json
+import secrets
 import time
 from pathlib import Path
 
 import numpy as np
+
+# ---------- identità dei neuroni (15/07) ----------
+# Il nome di un neurone NON è la sua riga. La riga si sposta (pota, consolida)
+# e chi l'aveva scritta da qualche parte si ritrova a puntare un altro ricordo,
+# in silenzio. L'indice resta valido come OFFSET dentro un array caricato: è
+# come NOME che era sbagliato.
+# Formato ULID-style: 10 char di tempo (ms dall'epoca, base32 Crockford) +
+# 26 di caso (130 bit). Il tempo davanti IN CHIARO, non hashato: così gli id
+# si ordinano da soli per nascita. Hashare il tempo butterebbe l'ordine (l'unico
+# motivo per metterci il tempo) e terrebbe le collisioni (stesso ms = stesso
+# hash; time.time() ha 0.4 us di risoluzione reale e in un ciclo stretto ridà
+# lo stesso valore il 71% delle volte).
+B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"   # Crockford: senza I L O U
+N_TEMPO, N_CASO = 10, 26                   # 10 char di ms bastano fino al 37648
+D_ID = N_TEMPO + N_CASO
+
+
+def _b32(v, n):
+    s = ""
+    for _ in range(n):
+        s, v = B32[v % 32] + s, v // 32
+    return s
+
+
+def _id_da(ms):
+    return _b32(int(ms), N_TEMPO) + "".join(secrets.choice(B32) for _ in range(N_CASO))
 
 DIR = Path("/data/workspace/memoria")
 FILE = DIR / "lux.npz"
@@ -54,6 +81,8 @@ class Lux:
             # una direzione comune (cos medio 0.50) e i ricordi si sovrappongono
             self.mu = z["mu"] if "mu" in z.files else np.zeros(D_TRACCIA, np.float32)
             self.archi = json.load(open(META)).get("archi", {})
+            self.ids = (z["ids"] if "ids" in z.files
+                        else self._battesimo())   # npz vecchio: migrazione
         else:
             self.tracce = np.zeros((0, D_TRACCIA), np.float32)
             self.firme = np.zeros((0, 51), np.float32)
@@ -64,6 +93,38 @@ class Lux:
             self.nato_da = np.zeros(0, np.float64)
             self.mu = np.zeros(D_TRACCIA, np.float32)
             self.archi = {}
+            self.ids = np.zeros(0, f"<U{D_ID}")
+        assert len(self.ids) == len(self.tracce), "ids e tracce disallineati"
+
+    def _battesimo(self):
+        """npz senza `ids`: battezza i neuroni esistenti e ri-chiava gli archi.
+        Il tempo dell'id viene da `nati`, così l'ordine alfabetico degli id
+        resta l'ordine di nascita anche per i neuroni migrati."""
+        ids = np.array([_id_da(t * 1000) for t in self.nati], dtype=f"<U{D_ID}")
+        # gli archi vecchi sono chiavati sugli INDICI ("1-8"): traducili, o
+        # andrebbero persi proprio adesso che diventano durevoli
+        vecchi, self.archi = self.archi, {}
+        for k, peso in vecchi.items():
+            try:
+                a, b = (int(x) for x in k.split("-"))
+            except ValueError:
+                continue
+            if a < len(ids) and b < len(ids):
+                self.archi[self._chiave(ids[a], ids[b])] = peso
+        return ids
+
+    def nuovo_id(self):
+        """ULID-style. Il ciclo contro gli id vivi rende la collisione
+        IMPOSSIBILE, non improbabile: 130 bit di caso sono la cintura."""
+        vivi = set(self.ids.tolist())
+        while True:
+            i = _id_da(time.time() * 1000)
+            if i not in vivi:
+                return i
+
+    @staticmethod
+    def _chiave(ida, idb):
+        return f"{min(ida, idb)}|{max(ida, idb)}"
 
     # ---------- encoder: identità normalizzata (piena risoluzione 2048) ----
     pca_mu = None  # compat: tagging35b controlla `if lux.pca_mu is None`
@@ -113,6 +174,7 @@ class Lux:
         self.ultimo_uso = np.append(self.ultimo_uso, adesso)
         self.nodo_id = np.append(self.nodo_id, nodo_id)
         self.nato_da = np.append(self.nato_da, vincente)
+        self.ids = np.append(self.ids, self.nuovo_id())
         # ponytail: salvataggio a ogni esperienza; oltre ~1e5 neuroni passare
         # a dirty-flag + salvataggio periodico
         self.salva()
@@ -136,7 +198,11 @@ class Lux:
         return F @ qn
 
     def _esito(self, sims, i):
-        return {"neurone": int(i), "nodo_id": int(self.nodo_id[i]),
+        # "neurone" resta l'INDICE: è un offset valido dentro gli array appena
+        # caricati e ponte.py ci accede (g.tracce[hit["neurone"]]). "id" è il
+        # NOME: l'unico da scrivere dove deve sopravvivere nel tempo.
+        return {"neurone": int(i), "id": str(self.ids[i]),
+                "nodo_id": int(self.nodo_id[i]),
                 "sim": round(float(sims[i]), 3),
                 "attivazioni": int(self.attivazioni[i])}
 
@@ -173,10 +239,16 @@ class Lux:
         """Rimuove i neuroni non riattivati da ETA_POTATURA (oblio strutturale)."""
         vivi = (time.time() - self.ultimo_uso) < ETA_POTATURA
         rimossi = int((~vivi).sum())
+        morti = set(self.ids[~vivi].tolist())
         for attr in ("tracce", "firme", "attivazioni", "nati", "ultimo_uso",
-                     "nodo_id", "nato_da"):
+                     "nodo_id", "nato_da", "ids"):
             setattr(self, attr, getattr(self, attr)[vivi])
-        self.archi = {}  # ponytail: gli archi si ricostruiscono con l'uso
+        # 15/07: prima era `self.archi = {}` — con gli indici che scalavano, ogni
+        # potatura corrompeva TUTTI gli archi e l'unica difesa era buttarli.
+        # Con gli id stabili si tolgono solo quelli dei neuroni morti: la
+        # topologia sopravvive all'oblio, che è il punto dell'associativo.
+        self.archi = {k: v for k, v in self.archi.items()
+                      if not (set(k.split("|")) & morti)}
         return rimossi
 
     def consolida(self, soglia=0.12):
@@ -200,14 +272,27 @@ class Lux:
             self.ultimo_uso[a] = max(self.ultimo_uso[a], self.ultimo_uso[b])
             if self.nodo_id[a] < 0:
                 self.nodo_id[a] = self.nodo_id[b]  # tieni un link al testo
+            # b viene assorbito in a: le sue connessioni sono ora di a. Prima
+            # `self.archi = {}` le buttava tutte (con gli indici che scalavano
+            # non c'era scelta): con gli id si trasferiscono.
+            ida, idb = str(self.ids[a]), str(self.ids[b])
+            self.ids[a] = ida   # l'id del sopravvissuto NON cambia mai
+            rimasti = {}
+            for k, peso in self.archi.items():
+                x, y = k.split("|")
+                x, y = (ida if x == idb else x), (ida if y == idb else y)
+                if x == y:
+                    continue        # l'arco a-b diventa un cappio: si scarta
+                nk = self._chiave(x, y)
+                rimasti[nk] = rimasti.get(nk, 0) + peso
+            self.archi = rimasti
             keep = np.arange(len(self.tracce)) != b
             for attr in ("tracce", "firme", "attivazioni", "nati", "ultimo_uso",
-                         "nodo_id", "nato_da"):
+                         "nodo_id", "nato_da", "ids"):
                 setattr(self, attr, getattr(self, attr)[keep])
             fusioni += 1
             cambiato = True
         if fusioni:
-            self.archi = {}
             self.salva()
         return fusioni
 
@@ -218,7 +303,9 @@ class Lux:
         return v / n if n > 0 else v
 
     def _arco(self, a, b):
-        k = f"{min(a, b)}-{max(a, b)}"
+        # a, b sono INDICI (li passa esperisci): la chiave è sugli id, perché
+        # è la chiave che deve sopravvivere a pota() e consolida().
+        k = self._chiave(str(self.ids[a]), str(self.ids[b]))
         self.archi[k] = self.archi.get(k, 0) + 1
 
     def salva(self):
@@ -226,7 +313,7 @@ class Lux:
             FILE, tracce=self.tracce, firme=self.firme,
             attivazioni=self.attivazioni, nati=self.nati,
             ultimo_uso=self.ultimo_uso, nodo_id=self.nodo_id,
-            nato_da=self.nato_da, mu=self.mu)
+            nato_da=self.nato_da, mu=self.mu, ids=self.ids)
         json.dump({"archi": self.archi, "n_neuroni": len(self.tracce)},
                   open(META, "w"))
 
