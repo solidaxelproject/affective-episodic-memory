@@ -18,6 +18,15 @@ FILE = DIR / "lux.npz"
 META = DIR / "lux-meta.json"
 
 D_TRACCIA = 2048
+# ⛔ NON ALZARE. Decisione del 15/07, annulla la nota "soglia da ricalibrare a
+# ~0.6-0.7" del 14/07 nel documento di progetto. Alzarla fa contare più
+# esperienze come familiari -> più fusioni -> meno neuroni. Ma la fusione è
+# LOSSY: firme[best] += HABITUAZIONE * (f - firme[best]) è una media mobile e
+# le esperienze originali non tornano più. Il log di esperienze distinte che
+# nasce da questa soglia bassa NON è un difetto: è il training set dello
+# strato distribuito (gradino 2), che vuole 1e3-1e4 esperienze e oggi ne ha
+# 1e2. Tetto pratico del PC: 1e6-1e7 neuroni. Non c'è nessuna ragione di
+# memoria per fondere. Riaprire solo a log cresciuto.
 SOGLIA_NOVITA = 0.35   # distanza coseno oltre cui l'esperienza è "nuova" -> neurone
 HABITUAZIONE = 0.10    # quanto il neurone vincente si sposta verso l'input familiare
 ETA_POTATURA = 180 * 86400  # neuroni mai riattivati per 6 mesi -> candidati
@@ -110,27 +119,54 @@ class Lux:
         return len(self.tracce) - 1, "nato"
 
     # ---------- richiamo a doppia via ----------
-    def richiama(self, query, via="emotiva", k=3):
-        """query: firma 51-dim (via emotiva) o stato 2048 (via semantica)."""
-        if not len(self.tracce):
-            return []
+    # 15/07: due modi, non uno. Un ricordo MISURATO non è un ricordo VISSUTO:
+    # richiama() rinforza, confronta() guarda e basta. Serviva perché gli
+    # automatismi (aggancio degli appunti ai neuroni) passano su Lux di
+    # continuo: con la sola richiama() ogni neurone sfiorato si vedrebbe
+    # riazzerare l'orologio di pota() a ogni passata, l'oblio strutturale
+    # morirebbe e Lux tornerebbe il log che non deve essere.
+    def _sims(self, query, via):
+        """similarità di TUTTI i neuroni con la query. Pura: non tocca nulla."""
         if via == "semantica":
             q = self.encode(query)
-            sims = self.tracce @ q
-        else:
-            q = np.asarray(query, np.float32)
-            qn = q / (np.linalg.norm(q) + 1e-9)
-            F = self.firme / (np.linalg.norm(self.firme, axis=1, keepdims=True) + 1e-9)
-            sims = F @ qn
-        ordine = np.argsort(-sims)[:k]
+            return self.tracce @ q
+        q = np.asarray(query, np.float32)
+        qn = q / (np.linalg.norm(q) + 1e-9)
+        F = self.firme / (np.linalg.norm(self.firme, axis=1, keepdims=True) + 1e-9)
+        return F @ qn
+
+    def _esito(self, sims, i):
+        return {"neurone": int(i), "nodo_id": int(self.nodo_id[i]),
+                "sim": round(float(sims[i]), 3),
+                "attivazioni": int(self.attivazioni[i])}
+
+    def confronta(self, query, via="emotiva", k=3):
+        """GUARDA SENZA TOCCARE: stesso esito di richiama(), zero effetti.
+
+        query: firma 51-dim (via emotiva) o stato 2048 (via semantica).
+        Per chi misura la vicinanza senza star vivendo il ricordo.
+        """
+        if not len(self.tracce):
+            return []
+        sims = self._sims(query, via)
+        return [self._esito(sims, i) for i in np.argsort(-sims)[:k]]
+
+    def richiama(self, query, via="emotiva", k=3):
+        """RICHIAMO VISSUTO: come confronta(), ma il ricordo si rinforza.
+
+        query: firma 51-dim (via emotiva) o stato 2048 (via semantica).
+        Effetti sui k vincitori: attivazioni +1, ultimo_uso = adesso (li
+        protegge da pota()). Per la sola misura usare confronta().
+        """
+        if not len(self.tracce):
+            return []
+        sims = self._sims(query, via)
         adesso = time.time()
         out = []
-        for i in ordine:
+        for i in np.argsort(-sims)[:k]:
             self.attivazioni[i] += 1
             self.ultimo_uso[i] = adesso
-            out.append({"neurone": int(i), "nodo_id": int(self.nodo_id[i]),
-                        "sim": round(float(sims[i]), 3),
-                        "attivazioni": int(self.attivazioni[i])})
+            out.append(self._esito(sims, i))
         return out
 
     def pota(self):
