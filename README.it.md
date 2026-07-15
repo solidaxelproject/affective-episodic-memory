@@ -19,7 +19,7 @@ pip install numpy
 python3 demo.py
 ```
 
-Una vita sintetica di 48 esperienze fa crescere un organo di quattro neuroni (la novità crea neuroni, la familiarità li rinforza, il sonno fonde i simili), poi richiama i ricordi per emozione e per significato. È lo stesso `lux.py` che gira in produzione.
+Una vita sintetica di 48 esperienze fa crescere 48 neuroni: la novità li crea, la familiarità li rinforza, e niente si fonde, perché fondere due esperienze distinte non le astrae, le rende la stessa cosa vissuta due volte. La struttura non si perde, passa negli archi: 44 dei 47 archi cadono dentro uno dei quattro temi, con esattamente tre ponti, uno per ogni tema che si apre. Poi richiama i ricordi per emozione e per significato. È lo stesso `lux.py` che gira in produzione.
 
 ## Cos'è
 
@@ -115,7 +115,7 @@ Le strutture risultanti fungono da:
 | File | Ruolo |
 |------|-------|
 | `memoria.py` | Il grafo: SQLite+FTS5, nodi (testo, firma emotiva 51d, vedi la ruota delle emozioni di Plutchik, salienza, classe vissuto/letto), archi hebbiani, vettori semantici 2048d |
-| `lux.py` | Lux, l'organo che cresce: una rete neurale di tipo Grow-When-Required, neuroni che nascono per novità, si rinforzano, si consolidano nel sonno profondo, si depotenziano e si potano con l'oblio |
+| `lux.py` | Lux, l'organo che cresce: una rete neurale di tipo Grow-When-Required, neuroni che nascono per novità, si rinforzano, si collegano a chi era vicino alla nascita, si depotenziano e si potano con l'oblio |
 | `tagging35b.py` + `run-tagging.sh` | Il consolidamento notturno su GPU: stato interno → firma → salienza → grafo |
 | `estrai-matrix.py` | Estrazione dei messaggi del giorno dal database della chat |
 | `notte-memoria.sh` | L'orchestratore della notte, con sentinella anti-amnesia |

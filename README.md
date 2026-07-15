@@ -19,7 +19,7 @@ pip install numpy
 python3 demo.py
 ```
 
-A synthetic life of 48 experiences grows a four-neuron organ (novelty creates neurons, familiarity reinforces them, sleep fuses the similar ones), then recalls memories by emotion and by meaning. It is the same `lux.py` that runs in production.
+A synthetic life of 48 experiences grows 48 neurons: novelty creates them, familiarity reinforces them, and nothing merges, because merging two distinct experiences does not abstract them, it makes them one thing lived twice. The structure is not lost, it moves into the arcs: 44 of the 47 arcs fall inside one of the four themes, with exactly three bridges, one for each theme that opens. Then it recalls memories by emotion and by meaning. It is the same `lux.py` that runs in production.
 
 ## What is this
 
@@ -115,7 +115,7 @@ The resulting structures act as:
 | File | Role |
 |------|------|
 | `memoria.py` | The graph: SQLite+FTS5, nodes (text, 51d emotional signature, see Plutchik's wheel of emotions, salience, lived/read class), hebbian edges, 2048d semantic vectors |
-| `lux.py` | Lux, the growing organ: a Grow-When-Required neural network, neurons born from novelty, reinforced, consolidated in deep sleep, weakened and pruned by oblivion |
+| `lux.py` | Lux, the growing organ: a Grow-When-Required neural network, neurons born from novelty, reinforced, linked to whoever was nearest at their birth, weakened and pruned by oblivion |
 | `tagging35b.py` + `run-tagging.sh` | Nightly consolidation on GPU: internal state → signature → salience → graph |
 | `estrai-matrix.py` | Extraction of the day's messages from the chat database |
 | `notte-memoria.sh` | The night orchestrator, with an anti-amnesia sentinel |
