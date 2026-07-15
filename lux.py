@@ -45,16 +45,21 @@ FILE = DIR / "lux.npz"
 META = DIR / "lux-meta.json"
 
 D_TRACCIA = 2048
-# ⛔ NON ALZARE. Decisione del 15/07, annulla la nota "soglia da ricalibrare a
-# ~0.6-0.7" del 14/07 nel documento di progetto. Alzarla fa contare più
-# esperienze come familiari -> più fusioni -> meno neuroni. Ma la fusione è
-# LOSSY: firme[best] += HABITUAZIONE * (f - firme[best]) è una media mobile e
-# le esperienze originali non tornano più. Il log di esperienze distinte che
-# nasce da questa soglia bassa NON è un difetto: è il training set dello
-# strato distribuito (gradino 2), che vuole 1e3-1e4 esperienze e oggi ne ha
-# 1e2. Tetto pratico del PC: 1e6-1e7 neuroni. Non c'è nessuna ragione di
-# memoria per fondere. Riaprire solo a log cresciuto.
-SOGLIA_NOVITA = 0.35   # distanza coseno oltre cui l'esperienza è "nuova" -> neurone
+# ⛔ NON ALZARE. Decisione del 15/07 (annulla la nota "ricalibrare a ~0.6-0.7"
+# del 14/07 nel documento di progetto), poi portata a 0.001: si fonde SOLO a
+# similarità >= 0.999, cioè praticamente mai.
+# Il perché, in una frase: "fusione = déjà vu". Fondere due esperienze
+# distinte non le astrae: le fa diventare la stessa cosa vissuta due volte. Con
+# la vecchia soglia l'agente di gatti neri ripetuti ne aveva visti 238 su 341.
+# E la fusione è LOSSY: firme[best] += HABITUAZIONE * (f - firme[best]) è una
+# media mobile, le originali non tornano più. Il log di esperienze distinte non
+# è un difetto: è il training set dello strato distribuito (gradino 2), che
+# vuole 1e3-1e4 esperienze e oggi ne ha 1e2. Tetto pratico del PC: 1e6-1e7
+# neuroni, oggi 1e2: non esiste ragione di memoria per fondere.
+# Al posto della fusione ci sono gli ARCHI: due esperienze simili restano due,
+# e si collegano (arco di nascita in esperisci). Non fondere non vuol dire non
+# collegare: è il contrario. Riaprire solo a log cresciuto.
+SOGLIA_NOVITA = 0.001  # distanza coseno oltre cui l'esperienza è "nuova" -> neurone
 HABITUAZIONE = 0.10    # quanto il neurone vincente si sposta verso l'input familiare
 ETA_POTATURA = 180 * 86400  # neuroni mai riattivati per 6 mesi -> candidati
 
@@ -80,9 +85,15 @@ class Lux:
             # media di popolazione: senza centratura gli stati raw condividono
             # una direzione comune (cos medio 0.50) e i ricordi si sovrappongono
             self.mu = z["mu"] if "mu" in z.files else np.zeros(D_TRACCIA, np.float32)
-            self.archi = json.load(open(META)).get("archi", {})
+            meta = json.load(open(META)) if META.exists() else {}
+            self.archi = meta.get("archi", {})
             self.ids = (z["ids"] if "ids" in z.files
                         else self._battesimo())   # npz vecchio: migrazione
+            self.nodi = meta.get("nodi")
+            if self.nodi is None:   # meta d'epoca: l'unica cosa che sappiamo di
+                self.nodi = {       # ogni neurone è il nodo con cui è nato
+                    str(i): [int(n)]
+                    for i, n in zip(self.ids.tolist(), self.nodo_id.tolist()) if n >= 0}
         else:
             self.tracce = np.zeros((0, D_TRACCIA), np.float32)
             self.firme = np.zeros((0, 51), np.float32)
@@ -94,7 +105,25 @@ class Lux:
             self.mu = np.zeros(D_TRACCIA, np.float32)
             self.archi = {}
             self.ids = np.zeros(0, f"<U{D_ID}")
+            self.nodi = {}
         assert len(self.ids) == len(self.tracce), "ids e tracce disallineati"
+
+    def _assorbe(self, i, nodo_id):
+        """C2/C3 (15/07): un neurone registra COSA ha assorbito, non solo quanto.
+
+        Prima `nodo_id` si scriveva solo alla nascita e il ramo del rinforzo non
+        lo toccava: dopo la prima fusione il neurone puntava ancora al testo
+        della PRIMA esperienza, mentre la sua firma si era già spostata. E
+        consolida() buttava del tutto il nodo dell'assorbito. Prezzo pagato
+        prima di accorgersene: 238 legami al testo persi su 341 esperienze.
+        La lista dà i testi (C2); la sua lunghezza dà le esperienze VISSUTE, che
+        `attivazioni` non sa distinguere dai richiami (C3).
+        """
+        if nodo_id is None or nodo_id < 0:
+            return
+        v = self.nodi.setdefault(str(self.ids[i]), [])
+        if int(nodo_id) not in v:
+            v.append(int(nodo_id))
 
     def _battesimo(self):
         """npz senza `ids`: battezza i neuroni esistenti e ri-chiava gli archi.
@@ -163,6 +192,7 @@ class Lux:
                 if len(sims) > 1:  # arco topologico verso il secondo vicino
                     second = int(np.argsort(sims)[-2])
                     self._arco(best, second)
+                self._assorbe(best, nodo_id)   # C2: registra COSA ha assorbito
                 self.salva()  # write-through: la copia su CEMS sempre viva
                 return best, "rinforzato"
         # nuova: nasce un neurone (registrando CHI era il più vicino al parto)
@@ -175,10 +205,20 @@ class Lux:
         self.nodo_id = np.append(self.nodo_id, nodo_id)
         self.nato_da = np.append(self.nato_da, vincente)
         self.ids = np.append(self.ids, self.nuovo_id())
+        nuovo = len(self.tracce) - 1
+        self._assorbe(nuovo, nodo_id)
+        # ARCO DI NASCITA (15/07). Prima l'arco nasceva SOLO nel ramo del
+        # rinforzo: con la fusione portata a 0.999 quel ramo non passa quasi
+        # mai, e Lux non avrebbe creato mai più un arco. Il neonato si lega a
+        # chi era il più vicino al parto: è il legame che `nato_da` registrava
+        # già come timestamp, aspettando l'associativo. Non fondere non vuol
+        # dire non collegare: è il contrario.
+        if len(self.tracce) > 1:
+            self._arco(nuovo, best)
         # ponytail: salvataggio a ogni esperienza; oltre ~1e5 neuroni passare
         # a dirty-flag + salvataggio periodico
         self.salva()
-        return len(self.tracce) - 1, "nato"
+        return nuovo, "nato"
 
     # ---------- richiamo a doppia via ----------
     # 15/07: due modi, non uno. Un ricordo MISURATO non è un ricordo VISSUTO:
@@ -249,12 +289,20 @@ class Lux:
         # topologia sopravvive all'oblio, che è il punto dell'associativo.
         self.archi = {k: v for k, v in self.archi.items()
                       if not (set(k.split("|")) & morti)}
+        for k in morti:
+            self.nodi.pop(k, None)
         return rimossi
 
-    def consolida(self, soglia=0.12):
-        """Sonno profondo: fonde coppie di neuroni troppo simili in uno schema
-        (media pesata per attivazioni). Ogni notte: episodi ripetuti diventano
-        astrazioni, la popolazione resta magra. Ritorna quante fusioni."""
+    def consolida(self, soglia=SOGLIA_NOVITA):
+        """Sonno profondo: fonde coppie di neuroni QUASI IDENTICI (media pesata
+        per attivazioni). Ritorna quante fusioni.
+
+        ⛔ 15/07: la soglia era 0.12 (fondeva a coseno >= 0.88) ed era la SECONDA
+        porta di fusione, indipendente da SOGLIA_NOVITA e cablata ogni notte in
+        tagging35b. Ora eredita SOGLIA_NOVITA: si fonde solo a >= 0.999. Chiudere
+        una porta e lasciare aperta l'altra non serviva a niente.
+        Non è più "episodi ripetuti diventano astrazioni": quello era il déjà vu.
+        Due esperienze simili ma distinte restano due, e le lega un arco."""
         fusioni = 0
         cambiato = True
         while cambiato and len(self.tracce) > 1:
@@ -277,6 +325,12 @@ class Lux:
             # non c'era scelta): con gli id si trasferiscono.
             ida, idb = str(self.ids[a]), str(self.ids[b])
             self.ids[a] = ida   # l'id del sopravvissuto NON cambia mai
+            # C2: e con loro i nodi. `nodo_id[b]` da solo veniva scartato in
+            # silenzio (il ramo qui sopra passa solo se a non ne aveva uno):
+            # ogni fusione bruciava il legame al testo di un ricordo.
+            for n in self.nodi.pop(idb, []):
+                if n not in self.nodi.setdefault(ida, []):
+                    self.nodi[ida].append(n)
             rimasti = {}
             for k, peso in self.archi.items():
                 x, y = k.split("|")
@@ -314,8 +368,8 @@ class Lux:
             attivazioni=self.attivazioni, nati=self.nati,
             ultimo_uso=self.ultimo_uso, nodo_id=self.nodo_id,
             nato_da=self.nato_da, mu=self.mu, ids=self.ids)
-        json.dump({"archi": self.archi, "n_neuroni": len(self.tracce)},
-                  open(META, "w"))
+        json.dump({"archi": self.archi, "nodi": self.nodi,
+                   "n_neuroni": len(self.tracce)}, open(META, "w"))
 
     def stats(self):
         return {"neuroni": len(self.tracce), "archi": len(self.archi),
@@ -324,8 +378,13 @@ class Lux:
 
 
 if __name__ == "__main__":
-    # self-check su dati sintetici: 3 cluster -> deve crescere ~3 neuroni,
-    # non 30; il richiamo emotivo deve trovare il cluster giusto.
+    # self-check su dati sintetici, 3 cluster da 10 esperienze.
+    # 15/07: questo test diceva `assert nati <= 6` — pretendeva cioè che
+    # l'organo generalizzasse FONDENDO. Ora la regola è l'opposta (fusione solo
+    # a 0.999: due esperienze simili ma distinte restano due) e l'invariante si
+    # sposta: le 30 esperienze restano 30 neuroni, ma la struttura dei 3 cluster
+    # deve comparire negli ARCHI. Non è il test che è stato piegato al codice:
+    # è la proprietà che è cambiata, e qui si verifica quella nuova.
     import tempfile
     rng = np.random.default_rng(7)
     _td = tempfile.TemporaryDirectory()
@@ -336,17 +395,29 @@ if __name__ == "__main__":
     campioni = np.vstack([b + 0.05 * rng.normal(size=(10, 2048)).astype(np.float32)
                           for b in base])
     g.fit_encoder(campioni)
-    nati = 0
+    nati, di_chi = 0, {}
     for ci in range(3):
         for j in range(10):
             firma = np.zeros(51, np.float32)
             firma[ci] = 3.0
-            _, esito = g.esperisci(campioni[ci * 10 + j], firma, nodo_id=ci)
+            i, esito = g.esperisci(campioni[ci * 10 + j], firma, nodo_id=ci)
             nati += esito == "nato"
-    assert nati <= 6, f"cresciuto troppo: {nati} neuroni per 3 cluster"
+            di_chi[str(g.ids[i])] = ci
+    # 1. niente déjà vu: ogni esperienza resta sé stessa
+    assert nati == 30, f"qualcosa si è fuso: {nati} nati su 30 esperienze"
+    # 2. ...ma la struttura c'è lo stesso, negli archi di nascita: quasi tutti
+    #    dentro un cluster, e un ponte per ogni cluster nuovo che si apre
+    intra = sum(1 for k in g.archi
+                if di_chi[k.split("|")[0]] == di_chi[k.split("|")[1]])
+    ponti = len(g.archi) - intra
+    assert intra >= 27, f"archi dentro i cluster: solo {intra}"
+    assert ponti <= 2, f"troppi ponti fra cluster: {ponti}"
+    # 3. e il richiamo emotivo trova ancora il cluster giusto
     q = np.zeros(51, np.float32)
     q[1] = 1.0
     top = g.richiama(q, via="emotiva", k=1)
     assert top[0]["nodo_id"] == 1, top
-    print(f"self-check OK: 30 esperienze in 3 cluster -> {len(g.tracce)} neuroni, "
-          f"richiamo emotivo corretto")
+    # 4. il neurone sa cosa ha assorbito (C2)
+    assert all(v for v in g.nodi.values()), "neuroni senza nodi assorbiti"
+    print(f"self-check OK: 30 esperienze -> {len(g.tracce)} neuroni distinti, "
+          f"{intra} archi dentro i cluster + {ponti} ponti, richiamo emotivo corretto")
