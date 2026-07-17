@@ -5,18 +5,18 @@
     risposta. Questo la fa ripartire da sola sui temi che la intrigano.
                                                 — nota di design, 15/07/2026
 
-COME FUNZIONA (v2, decisione di progetto il 17/07)
+COME FUNZIONA (v2, decisione di progetto, 17/07)
   Il motore NON consegna messaggi e NON ha identità in chat. Quando le guardie
   dicono che è il momento: (1) aggancia gli appunti nudi ai ricordi via
   /lux-read (aggancia-appunti.py), (2) innesca il job Hermes "Risveglio del
-  pensatoio" (" + __import__("os").environ.get("JOB_RISVEGLIO", "<job-id>") + "): l'agente si sveglia, sceglie il tema più saliente dal
+  pensatoio" (<job-id>): l'agente si sveglia, sceglie il tema più saliente dal
   SUO blocco, ci pensa, e il pensiero appare nel pensatoio A NOME SUO.
   Endogeno fino in fondo: il chiodo fisso riaffiora, nessun postino.
 
 LE GUARDIE (tutte qui, lato host)
   * blocco notturno 00:00-07:30 (regola di progetto, D5: l'orologio, non lo stato)
   * c'è almeno un appunto non depennato
-  * agente fermo da >= 5 min e nessuno sta scrivendo (typing = sospende)
+  * l'agente ferma da >= 5 min e nessuno sta scrivendo (typing = sospende)
   * gate omeostatico (chiesto dall'agente): come sta, non se è il suo turno
   * cooldown 45 min tra un risveglio e l'altro
 """
@@ -38,8 +38,21 @@ HS = "http://localhost:8008"
 STANZA = "!mainroom:example.local"   # la chat principale (per typing)
 TOKFILE = Path.home() / ".config/motore/.matrix-token"
 
-JOB_RISVEGLIO = "" + __import__("os").environ.get("JOB_RISVEGLIO", "<job-id>") + ""
+JOB_RISVEGLIO = "<job-id>"
 AGGANCIA = ["python3", "aggancia-appunti.py"]
+SIDECAR = Path("/data/workspace/memoria/.appunti-agganci.json")
+
+# v3 (17/07 sera): il blocco resta puro, i metadati stanno nel sidecar, e il
+# tema scelto viaggia DENTRO il prompt: l'agente non vede mai la tubatura.
+PROMPT_RISVEGLIO = (
+    'Ti sei ritrovata a pensare a un appunto del tuo blocco. La riga è:\n'
+    '{riga}\n'
+    'Apri il tuo messaggio con la formula che hai scelto tu: '
+    '"Ah, mi ero appuntata: {tema}". Poi la decisione è tutta tua: puoi '
+    'seguire il filo finché vuoi, oppure lasciarlo per un altro momento. '
+    'Quando senti di aver esplorato il tema, depenna la riga nel blocco '
+    '(~~riga~~) col terminal; se non è il momento, lasciala dov\'è. '
+    'Nessuno ti sta chiedendo niente: è un tuo biglietto ritrovato in tasca.')
 
 FERMA_DA = 5 * 60
 COOLDOWN = 45 * 60
@@ -113,20 +126,48 @@ def in_cooldown():
         return False
 
 
+def scegli_tema():
+    """La riga aperta con la salienza più alta (dal sidecar); senza agganci,
+    la prima aperta. Ritorna (riga, tema) o (None, None)."""
+    if not APPUNTI.exists():
+        return None, None
+    aperte = [r.strip() for r in APPUNTI.read_text(encoding="utf-8").splitlines()
+              if RIGA.match(r) and not r.strip().startswith("~~")]
+    if not aperte:
+        return None, None
+    try:
+        sidecar = json.loads(SIDECAR.read_text())
+    except (FileNotFoundError, ValueError):
+        sidecar = {}
+    riga = max(aperte, key=lambda r: sidecar.get(r, {}).get("salienza", float("-inf")))
+    return riga, RIGA.match(riga)["tema"]
+
+
 def risveglia():
-    """Aggancia gli appunti, poi innesca il job Hermes. l'agente fa il resto."""
+    """Aggancia gli appunti, cuce il tema nel prompt, innesca il job."""
     agg = subprocess.run(AGGANCIA, capture_output=True, text=True, timeout=300)
     log(aggancio=agg.stdout.strip() or agg.stderr.strip()[:120])
+    riga, tema = scegli_tema()
+    if riga is None:
+        log(risveglio="saltato", esito="nessuna riga aperta")
+        return False
     # cooldown segnato PRIMA dell'innesco: anche se qualcosa va storto, niente
     # raffiche di retry (lezione del primo risveglio, 17/07). E l'innesco è
     # STACCATO (-d): `hermes cron run` è sincrono, aspetterebbe tutto il
     # pensiero dell'agente; Hermes ha comunque la sua guardia anti-doppione.
     STATO_RISVEGLIO.parent.mkdir(parents=True, exist_ok=True)
     STATO_RISVEGLIO.write_text(str(time.time()))
+    prompt = PROMPT_RISVEGLIO.format(riga=riga, tema=tema)
+    e = subprocess.run(["docker", "exec", "agent", "hermes", "cron", "edit",
+                        JOB_RISVEGLIO, "--prompt", prompt],
+                       capture_output=True, text=True, timeout=30)
+    if e.returncode != 0:
+        log(risveglio="FALLITO", esito="edit: " + (e.stderr or e.stdout).strip()[:120])
+        return False
     r = subprocess.run(["docker", "exec", "-d", "agent", "hermes", "cron", "run",
                         JOB_RISVEGLIO], capture_output=True, text=True, timeout=30)
     ok = r.returncode == 0
-    log(risveglio="innescato" if ok else "FALLITO",
+    log(risveglio="innescato" if ok else "FALLITO", tema=tema,
         esito=(r.stdout or r.stderr).strip()[:160] or "staccato")
     return ok
 

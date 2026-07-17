@@ -1,5 +1,5 @@
-# Test di aggancia-appunti (passo 2 del motore): righe nude -> arricchite.
-# Gira senza GPU e senza rete: l'aggancio vero è iniettato come funzione finta.
+# Test di aggancia-appunti v2: blocco PURO, agganci nel sidecar.
+# Gira senza GPU e senza rete: solo la logica pura.
 import importlib.util
 import sys
 
@@ -9,41 +9,32 @@ ag = importlib.util.module_from_spec(spec)
 sys.modules["aggancia"] = ag
 spec.loader.exec_module(ag)
 
-ID = "01K0AFYBGWJ5M2QZ8XN4V7RTCE9DHSPB"     # stile ULID, 32+ char
+TESTO = """# appunti
+[fotoni]{come fa la luce a scegliere il percorso?}
+~~[vecchio]{già esplorato}~~
+[rane]{perché cantano di notte?}
 
+nota qualunque senza formato
+"""
 
-def falso_aggancio(testo):
-    return {"id": ID, "cos": 0.71, "salienza": 2.34}
+aperte = ag.righe_aperte(TESTO)
+# 1. solo le righe-appunto vive, senza le depennate e senza il resto
+assert aperte == ["[fotoni]{come fa la luce a scegliere il percorso?}",
+                  "[rane]{perché cantano di notte?}"], aperte
 
+# 2. righe nuove -> da agganciare; righe già agganciate -> no
+sidecar = {aperte[0]: {"ts": 1000.0, "id": "01ABC", "cos": 0.5, "salienza": 2.0}}
+assert ag.da_agganciare(aperte, sidecar, adesso=2000.0) == [aperte[1]]
 
-def nessun_aggancio(testo):
-    return None                              # sotto soglia / Lux vuota
+# 3. un mancato aggancio vecchio si ritenta, uno fresco no
+sidecar2 = {aperte[0]: {"ts": 1000.0},                       # miss vecchio
+            aperte[1]: {"ts": 2000.0 - 60}}                  # miss fresco
+via = ag.da_agganciare(aperte, sidecar2, adesso=1000.0 + ag.RITENTA_S + 1)
+assert aperte[0] in via and aperte[1] not in via, via
 
+# 4. potatura: le voci di righe depennate/sparite se ne vanno
+sporco = {aperte[0]: {"ts": 1}, "~~[vecchio]{già esplorato}~~": {"ts": 1},
+          "[sparita]{non esiste più}": {"ts": 1}}
+assert set(ag.potatura(sporco, aperte)) == {aperte[0]}
 
-righe = [
-    "# appunti dell'agente",                       # riga qualunque: intoccabile
-    "[fotoni]{come fa la luce a sapere il percorso più breve?}",
-    "[01ABC|0.55|1.20] [rane]{perché cantano di notte?}",   # già arricchita
-    "~~[vecchio]{già indagato}~~",            # depennata: intoccabile
-    "",
-]
-
-fuori = ag.arricchisci(righe, falso_aggancio)
-
-# 1. la riga nuda viene arricchita nel formato del motore
-assert fuori[1] == f"[{ID}|0.71|2.34] [fotoni]{{come fa la luce a sapere il percorso più breve?}}", fuori[1]
-# 2. idempotenza: la riga già arricchita non si tocca
-assert fuori[2] == righe[2]
-# 3. depennate e righe qualunque non si toccano
-assert fuori[0] == righe[0] and fuori[3] == righe[3] and fuori[4] == righe[4]
-# 4. sotto soglia: la riga resta nuda (fallback di il progetto: in fondo alla coda)
-assert ag.arricchisci(righe, nessun_aggancio)[1] == righe[1]
-# 5. il risultato è leggibile dal motore: regex RIGA con meta valorizzato
-import re
-RIGA = re.compile(r"^\s*(?:\[(?P<meta>[^\]]*)\])?\s*\[(?P<tema>[^\]]+)\]\s*\{(?P<query>[^}]*)\}")
-m = RIGA.match(fuori[1])
-assert m and m["meta"] == f"{ID}|0.71|2.34" and m["tema"] == "fotoni"
-# 6. la salienza è nel campo che priorità() legge (terzo, split su |)
-assert float(m["meta"].split("|")[2]) == 2.34
-
-print("test_aggancia: TUTTO VERDE")
+print("test_aggancia v2: TUTTO VERDE")
