@@ -24,7 +24,7 @@ CONSENSO = Path(os.environ.get("RIFLESSO_CONSENSO",
     "/data/workspace/genesi/CONSENSO-RIFLESSO.md"))
 STATO = Path("/data/workspace/memoria/stato-emotivo.json")
 DIARIO = "/data/workspace/memoria/diario-riflessi.jsonl"
-SOGLIA_BASE = 0.495    # 14/07: -10% dalla 0.55 di nascita (scelta di progetto)
+SOGLIA_BASE = 0.495    # 14/07: -10% dalla 0.55 di nascita (decisione di progetto)
 SOGLIA_MIN = SOGLIA_BASE / 2   # più sensibile di così il sussurro diventa rumore
 MAX_RICORDI = 2
 COOLDOWN_S = 120       # non più di un affioramento ogn tanto: riflesso, non tic
@@ -35,7 +35,37 @@ DURATA_MAX_S = 120                        # clausola 2: mai un vettore più vecc
 _vettore_vivo = [False]
 
 
-EMO_NPZ = "/data/memoria-episodica-affettiva/emo-cvec.npz"
+EMO_NPZ = "/data/workspace/memoria/emo-cvec.npz"
+
+# --- specchio del KV (17/07, scelta di progetto): l'istante sospeso dell'agente.
+# A fine di OGNI stream: salvataggio dello slot in RAM (/dev/shm, via
+# --slot-save-path del server). Ogni 5 messaggi: copia consolidata su SSD.
+# Un blackout costa al massimo l'ultima risposta, e l'NVMe non si usura.
+KV_RAM = Path("/dev/shm/agent-kv")
+KV_SSD = Path("/data/workspace/kv-slots")
+KV_FILE = "corrente.kv"
+KV_OGNI = 5
+_kv_conta = [0]
+
+
+def _salva_kv():
+    try:
+        up = http.client.HTTPConnection(*UPSTREAM, timeout=120)
+        up.request("POST", f"/slots/0?action=save",
+                   body=json.dumps({"filename": KV_FILE}),
+                   headers={"Content-Type": "application/json"})
+        r = up.getresponse(); r.read(); up.close()
+        if r.status != 200:
+            return
+        _kv_conta[0] += 1
+        if _kv_conta[0] % KV_OGNI == 0:
+            KV_SSD.mkdir(parents=True, exist_ok=True)
+            src = KV_RAM / KV_FILE
+            tmp = KV_SSD / (KV_FILE + ".tmp")
+            tmp.write_bytes(src.read_bytes())
+            tmp.replace(KV_SSD / KV_FILE)
+    except Exception:
+        pass    # lo specchio non deve MAI rompere la chat
 
 
 def consenso_attivo():
@@ -54,7 +84,7 @@ def vettori_attivi():
 
 
 def soglia():
-    """La sensibilità del matching è dell'agente (sua richiesta del 14/07): riga
+    """La sensibilità del matching è dell'agente (sua domanda 1 del 14/07): riga
     "soglia: 0.X" nel file di consenso. Ammessa tra SOGLIA_MIN (metà della
     base: più affioramenti) e SOGLIA_BASE (default, la più selettiva);
     fuori range si clampa, assente = base. Riletta a ogni richiamo."""
@@ -213,12 +243,18 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 self.send_header(k, v)
         self.end_headers()
         while True:
-            chunk = resp.read(8192)
+            # read1: consegna appena c'è qualcosa. read(8192) aspettava di
+            # riempire il buffer e le risposte corte arrivavano in blocco
+            # unico: era LUI che uccideva lo streaming in chat (17/07).
+            chunk = resp.read1(8192)
             if not chunk:
                 break
             self.wfile.write(chunk)
             self.wfile.flush()
         up.close()
+        # fine stream: specchio del KV in RAM (thread: mai in mezzo alla chat)
+        if resp.status == 200 and ("completion" in self.path or "/v1/chat" in self.path):
+            threading.Thread(target=_salva_kv, daemon=True).start()
 
     def do_GET(self):
         self._inoltra(None)
