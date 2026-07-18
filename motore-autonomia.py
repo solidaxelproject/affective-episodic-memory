@@ -183,7 +183,16 @@ def risveglia():
     return ok
 
 
+TYPING_VISTO = 0.0     # ultima volta che "sta scrivendo" è apparso in chat
+
+
 def giro():
+    # il typing si guarda a OGNI giro, prima di tutto: l'invio di un appunto
+    # nuovo è subordinato all'avviso "sta scrivendo" (18/07): appena appare,
+    # niente consegne finché non è passata una quiete piena.
+    global TYPING_VISTO
+    if sta_scrivendo():
+        TYPING_VISTO = time.time()
     if è_notte():
         return "notte"
     n = appunti_aperti()
@@ -191,12 +200,13 @@ def giro():
         return "niente da riprendere"
     if in_cooldown():
         return "cooldown"
+    da_typing = time.time() - TYPING_VISTO
+    if da_typing < FERMA_DA:
+        return f"scriveva {da_typing:.0f}s fa, aspetto"
     ts, _ = ultimo_messaggio()
     fermo = time.time() - ts
     if fermo < FERMA_DA:
         return f"ferma da {fermo:.0f}s, aspetto"
-    if sta_scrivendo():
-        return "qualcuno sta scrivendo"
     if not gate_ok():
         return "gate: non è il momento"
     return "risveglio innescato" if risveglia() else "innesco fallito"
