@@ -89,12 +89,15 @@ def appunti_aperti():
 
 
 def ultimo_messaggio():
-    """(timestamp, role) dell'ultimo messaggio vero (state.db nel container)."""
+    """(timestamp, role) dell'ultima riga scritta in chat principale O in un
+    risveglio del pensatoio. Così la quiete parte da quando l'agente ha finito
+    di generare OVUNQUE: niente risvegli accavallati a una sessione in corso."""
     py = (
         "import sqlite3,json;"
         "c=sqlite3.connect('/home/agent/.hermes/state.db');"
         "r=c.execute(\"select m.timestamp,m.role from messages m join sessions s\"\n"
-        "  \" on s.id=m.session_id where s.source='matrix' and m.active=1\"\n"
+        "  \" on s.id=m.session_id where (s.source='matrix'\"\n"
+        f"  \" or s.id like 'cron_{JOB_RISVEGLIO}%') and m.active=1\"\n"
         "  \" order by m.id desc limit 1\").fetchone();"
         "print(json.dumps(r))"
     )
