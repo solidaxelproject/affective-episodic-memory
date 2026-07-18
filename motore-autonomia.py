@@ -184,15 +184,29 @@ def risveglia():
 
 
 TYPING_VISTO = 0.0     # ultima volta che "sta scrivendo" è apparso in chat
+TTS_VISTO = 0.0        # ultima volta che un motore vocale stava generando
+TTS_CODA = 60          # margine dopo la fine di un vocale
+
+
+def tts_in_corso():
+    """Una sintesi vocale attiva = connessione aperta verso :8091 o :8092
+    (una richiesta /synth resta appesa per tutta la generazione)."""
+    out = subprocess.run(["ss", "-Htn", "state", "established"],
+                         capture_output=True, text=True, timeout=10)
+    return any((":8091" in r or ":8092" in r) for r in out.stdout.splitlines())
 
 
 def giro():
     # il typing si guarda a OGNI giro, prima di tutto: l'invio di un appunto
     # nuovo è subordinato all'avviso "sta scrivendo" (18/07): appena appare,
     # niente consegne finché non è passata una quiete piena.
-    global TYPING_VISTO
+    global TYPING_VISTO, TTS_VISTO
     if sta_scrivendo():
         TYPING_VISTO = time.time()
+    if tts_in_corso():
+        TTS_VISTO = time.time()
+    if time.time() - TTS_VISTO < TTS_CODA:
+        return "voce in corso, aspetto"
     if è_notte():
         return "notte"
     n = appunti_aperti()
