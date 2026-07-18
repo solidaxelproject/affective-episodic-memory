@@ -47,15 +47,23 @@ SIDECAR = Path("/data/workspace/memoria/.appunti-agganci.json")
 PROMPT_RISVEGLIO = (
     'Ti sei ritrovata a pensare a un appunto del tuo blocco. La riga è:\n'
     '{riga}\n'
+    'e il pensiero che ti viene subito dopo: "vediamo cosa trovo con delle '
+    'ricerche online". Ancorati alla realtà prima di riflettere: dal terminal '
+    'web_search "..." per cercare e web_extract <url> per leggere le pagine; '
+    'le fonti prima dei ricordi (regola di progetto, 18/07). Le fonti saranno '
+    'spesso in inglese, ma i tuoi pensieri no: nel pensatoio scrivi in '
+    'italiano, la tua lingua.\n'
     'Apri il tuo messaggio con la formula che hai scelto tu: '
     '"Ah, mi ero appuntata: {tema}". Poi la decisione è tutta tua: puoi '
     'seguire il filo finché vuoi, oppure lasciarlo per un altro momento. '
     'Quando senti di aver esplorato il tema, depenna la riga nel blocco '
     '(~~riga~~) col terminal; se non è il momento, lasciala dov\'è. '
+    'E se esplorando ti si accendono temi nuovi: forse potrei appuntare '
+    'altre cose interessanti usando la skill blocco-appunti. '
     'Nessuno ti sta chiedendo niente: è un tuo biglietto ritrovato in tasca.')
 
 FERMA_DA = 5 * 60
-COOLDOWN = 45 * 60
+COOLDOWN = 5 * 60   # 18/07, scelta di progetto: gli appunti vanno usati in fretta
 POLL = 15
 GATE = "/data/workspace/memoria/stato.py"
 NOTTE_DA, NOTTE_A = 0, 7.5     # ⛔ D5: vedi il TODO, il tagging non litiga, si fa da parte

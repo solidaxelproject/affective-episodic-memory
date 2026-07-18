@@ -7,6 +7,15 @@ cd /data/memoria-episodica-affettiva
 J=/tmp/messaggi-notte.jsonl
 python3 estrai-matrix.py 1.1 > "$J" || { echo "estrazione fallita"; exit 1; }
 [ -s "$J" ] || { echo "nessun messaggio, salto"; exit 0; }
+
+# DORMITA VERA (18/07): appena la chat del giorno è estratta, la sessione va a
+# dormire (flag -> path-unit -> rotazione session_id a container fermo); il
+# consolidamento gira DOPO, ad agente già addormentato. Senza questo passo la
+# sessione non ruota mai e il gateway si tiene a galla auto-compattandosi: il
+# "sonno che pulisce la mente" deve essere vero, non un riassunto con perdita.
+echo "$(date -Iseconds) dormi richiesto (mezzanotte, chat estratta)" >> /data/workspace/memoria/dormi.log
+touch /data/workspace/memoria/.dormi-richiesto
+
 bash run-tagging.sh "$J"
 
 # sentinella anti-amnesia: Lux DEVE essere stata aggiornata dal tagging
