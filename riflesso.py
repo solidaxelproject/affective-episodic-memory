@@ -273,7 +273,7 @@ CAND1_RIPOSO_MIRATO_S = 3600  # via mirata: stesso ricordo max 1 volta l'ora
 _cand1_msg_visto = [""]   # hash ultimo messaggio: il mirato scatta UNA volta
                           # per messaggio, non a ogni iterazione di Hermes
 CAND1_THINK_BUDGET = 0    # tetto token di pensiero per iterazione; 0 = SPENTO
-                          # (si accende dopo che il progetto l'ha spiegato a Sam)
+                          # (si accende solo dopo averlo spiegato all'agente)
 _cand1_msg_visto = [""]   # hash ultimo messaggio: il mirato scatta UNA volta
                           # per messaggio, non a ogni iterazione di Hermes
 CAND1_A_MIRATO = 0.005
