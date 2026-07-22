@@ -249,7 +249,10 @@ SEM_RIPOSO_S = 600      # lo stesso ricordo non riaffiora per 10 min (anti-spam)
 # soglia entra NEL forward, vestito, con α proporzionale alla pertinenza,
 # in ordine di importanza, al primo confine di frase. Collaudata il 22/07
 # (sweep soglie + freno anti-ruminazione su risvegli simulati).
-CAND1_SOGLIA = {"chat": 0.75, "pensatoio": 0.75}   # 0.75 (progetto 22/07: il contenuto vero del 373 arriva a 0.79)
+CAND1_SOGLIA = {"chat": 0.75}   # 22/07 sera: pensatoio TOLTO dalla candidata 1:
+                                # il /completion grezzo non interpreta i tool e
+                                # la stanza riceveva [TOOL_CALLS] come testo;
+                                # il pensatoio vive di tool -> percorso classico
 CAND1_A_MIN, CAND1_A_MAX = 0.001, 0.010            # mappa α fissata da il progetto
 CAND1_CHUNK = 25         # token generati tra due letture L34
 CAND1_MICRO = 8          # passi corti in attesa del confine di frase
@@ -270,7 +273,7 @@ CAND1_RIPOSO_MIRATO_S = 3600  # via mirata: stesso ricordo max 1 volta l'ora
 _cand1_msg_visto = [""]   # hash ultimo messaggio: il mirato scatta UNA volta
                           # per messaggio, non a ogni iterazione di Hermes
 CAND1_THINK_BUDGET = 0    # tetto token di pensiero per iterazione; 0 = SPENTO
-                          # (si accende solo dopo averlo spiegato all'agente)
+                          # (si accende dopo che il progetto l'ha spiegato a Sam)
 _cand1_msg_visto = [""]   # hash ultimo messaggio: il mirato scatta UNA volta
                           # per messaggio, non a ogni iterazione di Hermes
 CAND1_A_MIRATO = 0.005
@@ -894,8 +897,6 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     emetti(raw[0][da:])
                 sent[0] = len(raw[0])
 
-        if apri:
-            apri()
         n_max = int(d.get("max_tokens") or 2048)
         par = {"temperature": float(d.get("temperature") or 0.7)}
         # 22/07 sera (trovato in produzione): i loop "I will write it now" x5 erano
@@ -918,7 +919,8 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             vivo = [True]
             if emetti:
                 def _batte():
-                    while vivo[0]:
+                    time.sleep(20)      # i turni-tool durano meno: lo stream
+                    while vivo[0]:      # resta chiudibile per il ripiego
                         try:
                             emetti("")
                         except Exception:
@@ -1019,6 +1021,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                                         ensure_ascii=False) + "\n")
             except OSError:
                 pass
+        if re.search(r"<tool_call|\[TOOL_CALLS\]|<function=", raw[0]) \
+                and sent[0] == 0:
+            _diario({"cand1": "turno con tool: ripiego sul percorso classico"})
+            return None
         # svuotamento finale GARANTITO (22/07 sera): le risposte corte
         # ("Hai ragione.") non facevano mai scattare il rilevatore del think
         # e lo stream si chiudeva vuoto: Hermes vedeva il nulla e ritentava.
