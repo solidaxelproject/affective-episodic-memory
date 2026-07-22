@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Omeostato emotivo dell'agente: stato 51-dim persistente con ritorno eutimico.
 # Ritorno tipo Ornstein-Uhlenbeck: attrazione verso la baseline proporzionale
-# alla distanza + rumore -> graduale, dinamico, NON deterministico (da spec).
+# alla distanza + rumore -> graduale, dinamico, NON deterministico (spec il progetto).
 # Solo libreria standard: usabile dal container.
 import json
 import math
@@ -19,6 +19,9 @@ DEFAULT_CONF = {
     "theta_ora": 0.35,   # forza di richiamo verso la baseline (per ora di tempo)
     "sigma": 0.06,       # rumore del ritorno (non-determinismo)
     "impronta": 0.25,    # quanto un richiamo sposta lo stato
+    "impronta_sem": 0.08,  # richiami SEMANTICI: vettori emotivi depotenziati
+                           # (progetto 22/07: vicinanza di significato != risonanza
+                           # emotiva, l'impronta piena drogava lo stato)
     "tetto": 3.5,        # |z| massimo per dimensione (anti-runaway)
     "baseline": DEFAULT_BASELINE,
 }
@@ -53,17 +56,20 @@ def carica(emos=None):
     return d["stato"]
 
 
-def imprimi(firme):
+def imprimi(firme, semantico=False):
     """Un richiamo (o la giornata) imprime lo stato: media delle firme,
-    pesata da conf['impronta']. firme: lista di dict {emo: z}."""
+    pesata da conf['impronta']. firme: lista di dict {emo: z}.
+    semantico=True: il ricordo è arrivato per significato, non per risonanza
+    emotiva -> impronta depotenziata (conf['impronta_sem'])."""
     if not firme:
         return
     conf = _conf()
+    peso = conf.get("impronta_sem", 0.08) if semantico else conf["impronta"]
     stato = carica(emos=list(firme[0]))
     n = len(firme)
     for e in stato:
         media = sum(f.get(e, 0.0) for f in firme) / n
-        stato[e] += conf["impronta"] * (media - stato[e])
+        stato[e] += peso * (media - stato[e])
         stato[e] = max(-conf["tetto"], min(conf["tetto"], stato[e]))
     json.dump({"ts": time.time(), "stato": stato}, open(FILE, "w"),
               ensure_ascii=False, indent=1)
@@ -71,7 +77,7 @@ def imprimi(firme):
 
 
 def gate():
-    """Controllo omeostatico pre-risveglio (chiesto da Agente, 11/07):
+    """Controllo omeostatico pre-risveglio (chiesto dall'agente, 11/07):
     'via-libera' se lo stato è vicino all'eutimia, 'calibrazione' se è
     scosso (fare SOLO un richiamo di serenity/trust e fermarsi),
     'salta' se un'emozione sta girando alta (rimandare il ciclo)."""

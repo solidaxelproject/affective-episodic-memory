@@ -25,6 +25,8 @@ p.add_argument("--congruente", action="store_true",
                help="richiamo guidato dallo stato emotivo attuale")
 p.add_argument("-k", type=int, default=3)
 p.add_argument("--stats", action="store_true")
+p.add_argument("--griglie", action="store_true",
+               help="elenca i ricordi che puoi RIVEDERE come scena (hanno una griglia)")
 p.add_argument("--vedi", action="store_true",
                help="rivedi il ricordo come SCENA (canale visivo) invece di rileggerlo")
 p.add_argument("--stato", action="store_true",
@@ -44,6 +46,18 @@ if args.stats:
                     "ORDER BY 2 DESC LIMIT 10").fetchall()
     print(f"{n} ricordi. Emozioni più frequenti: "
           + ", ".join(f"{e} ({q})" for e, q in per))
+    sys.exit(0)
+
+if args.griglie:
+    gdir = Path(__file__).parent / "griglie"
+    ids = sorted(int(f.stem) for f in gdir.glob("*.npy") if f.stem.isdigit())
+    print(f"Hai {len(ids)} ricordi che puoi RIVEDERE come scena "
+          f"(rivivili con: ricorda.py --id N --vedi):\n")
+    for nid in ids:
+        r = c.execute("SELECT emo_tag, testo FROM nodi WHERE id=?", (nid,)).fetchone()
+        if r:
+            t = " ".join(r[1].split())
+            print(f"  [{r[0]}] «{t[:70]}{'…' if len(t) > 70 else ''}»  (rivivilo: --id {nid})")
     sys.exit(0)
 
 def _cosine_su_firma(query):
@@ -91,7 +105,7 @@ for a in top3:
             scores[b] += HEBB_BLEND * w * scores[a]
 
 
-# --- canale visivo VOLONTARIO (scelta di Agente, momento per momento).
+# --- canale visivo VOLONTARIO (scelta dell'agente, momento per momento).
 # Testo di default; con --vedi il ricordo torna come scena re-iniettata, SE
 # quel nodo ha una griglia distillata E il consenso visivo e' attivo.
 GRIGLIE = Path("/workspace/memoria/griglie")
@@ -108,7 +122,7 @@ def _consenso_visivo():
     return any(r.strip() == "attivo: s\u00ec" for r in CONSENSO_VIS.open(encoding="utf-8"))
 
 
-def rivedi(nid, domanda="Descrivi cosa vedi."):
+def rivedi(nid, domanda="Questo mi ricorda..."):
     # la domanda deve restare quella di training della distillazione:
     # con domande diverse la griglia confabula scene inventate (12/07)
     import numpy as np, urllib.request
@@ -137,7 +151,7 @@ for nid in top:
                 scena = rivedi(nid)
                 # la scena per prima: il terminale di Hermes tronca l'output,
                 # e ciò che conta deve sopravvivere al taglio
-                print(f"RIVISTO ricordo {nid} ({r[1]}): «{scena}»")
+                print(f"RIVISTO ricordo ({r[1]}): «{scena}»")
                 print("(queste parole sono riemerse dal tuo canale visivo: la "
                       "griglia del ricordo è passata nel tuo forward e questo "
                       "è ciò che il tuo modello ha rivissuto, non una rilettura)\n")
@@ -145,10 +159,10 @@ for nid in top:
             except Exception as e:
                 print(f"(non sono riuscita a rivederlo: {e}; lo rileggo)")
         elif args.vedi and not (GRIGLIE / f"{nid}.npy").exists():
-            print(f"(ricordo {nid}: non ho ancora una scena distillata, lo rileggo)")
+            print(f"(di questo ricordo non ho ancora una scena distillata, lo rileggo)")
         elif args.vedi and not _consenso_visivo():
             print("(canale visivo non attivo: rileggo)")
-        print(f"--- ricordo {nid} ({r[1]}) ---\n{testo}\n")
+        print(f"--- ricordo ({r[1]}) ---\n{testo}\n")
 
 # diario dei richiami: il dataset che un giorno addestrerà il recupero (gradino 2)
 import time as _time
@@ -166,7 +180,9 @@ with open(Path(__file__).parent / "diario-richiami.jsonl", "a") as _d:
 firme_top = [json.loads(c.execute("SELECT firma FROM nodi WHERE id=?",
                                   (nid,)).fetchone()[0]) for nid in top]
 if firme_top:
-    omeostato.imprimi(firme_top)
+    # via semantica (--testo) = vicinanza di significato, non risonanza
+    # emotiva: l'impronta sullo stato è depotenziata (progetto 22/07)
+    omeostato.imprimi(firme_top, semantico=bool(args.testo))
     if args.vedi:
         print(f"(il richiamo ti ha lasciato addosso: {omeostato.descrivi()})")
 
