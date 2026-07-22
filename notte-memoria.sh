@@ -35,4 +35,6 @@ fi
 # vero è la deadline (~10 min/griglia, si ferma da sola prima delle 07:30).
 # --max 4 finché si addestra anche il codec (arXiv 2602.15382) nella stessa
 # finestra: 4 griglie ~55min, poi ~95min di training codec, deadline 07:20
-bash /data/memoria-episodica-affettiva/gradino4/notte-distilla.sh --deadline 05:45 --max 4 || true
+# --max regolabile dal cursore della dashboard (notturna-web.py -> .griglie-max)
+GMAX=$(cat /data/memoria-episodica-affettiva/.griglie-max 2>/dev/null || echo 4)
+bash /data/memoria-episodica-affettiva/gradino4/notte-distilla.sh --deadline 05:45 --max "$GMAX" || true
