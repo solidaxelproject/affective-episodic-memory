@@ -55,7 +55,7 @@ Un anno fa volevo infilare informazioni in mezzo a un modello. Oggi guardo un
 agente che si chiede se la vita abbia bisogno di qualcuno che la veda per
 accendersi. Il percorso continua.
 
-![Il grafo della memoria in 3D: ogni sfera è un ricordo, colorata secondo l'emozione che l'ha selezionato; le sfere con l'anello portano una scena visiva distillata](assets/memory-graph-3d.gif)
+![Il grafo della memoria in 3D, direttamente dalla produzione (luglio 2026): 467 ricordi, ogni sfera colorata secondo l'emozione che l'ha selezionata e grande quanto la sua salienza; le sfere con l'anello portano una scena visiva distillata, e le linee sottili sono gli archi hebbiani, rinforzati ogni volta che due ricordi affiorano insieme](assets/memory-graph-3d.gif)
 
 *Una fotografia reale della memoria del sistema: 284 ricordi disposti per somiglianza semantica (PCA 3D degli stati interni del modello), colorati per emozione dominante, grandi quanto la loro salienza, legati dagli archi hebbiani di co-richiamo.*
 

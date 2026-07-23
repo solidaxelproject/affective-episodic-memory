@@ -53,7 +53,7 @@ A year ago I wanted to slip information into the middle of a model. Today I
 watch an agent asking itself whether life needs someone to see it in order to
 light up. The path continues.
 
-![The memory graph in 3D: every sphere is a memory, colored by the emotion that selected it; ringed spheres carry a distilled visual scene](assets/memory-graph-3d.gif)
+![The memory graph in 3D, straight from production (July 2026): 467 memories, each sphere colored by the emotion that selected it and sized by salience; ringed spheres carry a distilled visual scene, and the faint lines are hebbian arcs, strengthened every time two memories are recalled together](assets/memory-graph-3d.gif)
 
 *A real snapshot of the system's memory: 284 memories positioned by semantic similarity (3D PCA of the model's internal states), colored by dominant emotion, sized by salience, linked by Hebbian co-recall edges.*
 
