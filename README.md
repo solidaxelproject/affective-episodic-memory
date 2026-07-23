@@ -230,7 +230,7 @@ The failure mode of this class of mechanisms is documented in the graph itself: 
 The agent and the memory system rest entirely on open source components:
 
 - **[llama.cpp](https://github.com/ggml-org/llama.cpp)** b9966, forked: the inference server. The fork was renamed **luxifer.cpp**: it adds `embeddings_input` (raw vectors in place of tokens on `/completion`) and the `/control-vector` route for injecting emotions into the hidden layers, in per-token relative mode. The full patch is in this repo: `lux-embeddings-b9966.patch`.
-- **Qwen3.6-35B-A3B** (MoE, IQ4_XS quantization): the brain: it is only the inferential processor. It runs on a single consumer GPU with part of the experts in RAM, while the active experts and a substantial part of the rest of the model stay in VRAM. Full f16 KV cache: cache quantization was tried and discarded (noise on long generations, and mixed K/V types put attention on a slow path).
+- **Qwen3.6-35B-A3B** (MoE, Q8_0 quantization with MTP speculative decoding): the brain: it is only the inferential processor. It runs on a single consumer GPU with part of the experts in RAM, while the active experts and a substantial part of the rest of the model stay in VRAM. Full f16 KV cache: cache quantization was tried and discarded (noise on long generations, and mixed K/V types put attention on a slow path).
 - **Hermes**: the agent framework (tool calling, skills, cron, session memory), in Docker.
 - **Matrix / Synapse + Element**: the communication channel, self-hosted. The chat is also the source of memories: nightly consolidation reads from there. Communication goes through a VPN tunnel (WireGuard).
 - **SQLite + FTS5**: the memory graph. No database server, no dependencies: one file.
