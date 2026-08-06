@@ -4,6 +4,20 @@
 
 *Leggilo in italiano: [README.it.md](README.it.md)*
 
+## TL;DR
+
+The research has several goals:
+
+1. To establish whether memory retrieval can work through mechanisms structured
+   as closely as possible to human memory, and within the operating logic of
+   LLMs
+2. To observe what happens at the functional level once this mechanism is
+   implemented
+3. What emergent behaviors arise from this system when memories become
+   considerably numerous, and when the model can receive mnemonic data on demand
+   without even having to retrieve it intentionally
+4. To refute or confirm my functionalist intuitions
+
 ## Considerations, at a certain point along the way
 
 This path began when I learned about the J-space, the global workspace that

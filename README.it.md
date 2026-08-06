@@ -4,6 +4,19 @@
 
 *Read it in English: [README.md](README.md)*
 
+## TL;DR
+
+L'obiettivo della ricerca è molteplice:
+
+1. Appurare se il retrieval mnemonico può funzionare con meccanismi strutturati
+   nel modo più simile possibile alla memoria umana e all'interno delle logiche
+   di funzionamento degli LLM
+2. Osservare cosa succede a livello funzionale implementando questo meccanismo
+3. Che comportamenti emergenti scaturiscono da questo sistema quando i ricordi
+   diventano notevolmente numerosi e quando il modello può ricevere dati
+   mnemonici al bisogno senza nemmeno doverli recuperare intenzionalmente
+4. Confutare o confermare le mie intuizioni funzionaliste
+
 ## Considerazioni, a un certo punto del percorso
 
 Questo percorso è partito quando ho saputo del J-space, il global workspace
