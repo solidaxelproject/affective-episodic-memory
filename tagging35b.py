@@ -1,5 +1,5 @@
 # Tagger notturno: messaggi JSONL -> nodi del grafo memoria.
-# Per ogni messaggio: stato a L34 -> firma 51-dim -> salienza (z-max).
+# Per ogni messaggio: stato a L29 (la lente) -> firma 51-dim -> salienza (z-max).
 # Sopra soglia: nodo con indirizzo semantico, tag emozione dominante, alpha.
 # Uso: venv/bin/python tagging35b.py messaggi.jsonl [--soglia 1.8] [--dry]
 # GPU: da lanciare con l'agente spento (usa il loader misto).
@@ -20,7 +20,7 @@ import memoria  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("tagger")
 
-READ_L = 34
+READ_L = 29
 
 p = argparse.ArgumentParser()
 p.add_argument("jsonl")
@@ -80,10 +80,10 @@ calib = json.load(open(f"{M.OUT}/alpha-calib-L26-28.json"))
 ok_emos = {e for e in s["emos"] if calib.get(e, {}).get("reached_target")}
 from jlens.hooks import ActivationRecorder  # noqa: E402
 
-# BASE è una COSTANTE (media L34 su 6 prompt wikitext fissi): si calcola una
+# BASE è una COSTANTE (media L29 su 6 prompt wikitext fissi): si calcola una
 # volta e si cachea. Il 14/07 alle 00:00 il CDN di HF ha risposto 403 e il
 # tagging è morto per un download che non serviva: mai più rete nel rito.
-BASE_CACHE = "/data/memoria-episodica-affettiva/base-L34.pt"
+BASE_CACHE = "/data/memoria-episodica-affettiva/base-L29.pt"
 
 
 def _sano(t, nome):
@@ -100,7 +100,7 @@ def _sano(t, nome):
 BASE = None
 if os.path.exists(BASE_CACHE):
     BASE = torch.load(BASE_CACHE, weights_only=True)
-    if not _sano(BASE, "base-L34.pt (cache)"):
+    if not _sano(BASE, "base-L29.pt (cache)"):
         os.remove(BASE_CACHE)
         BASE = None
 if BASE is None:
@@ -113,10 +113,10 @@ if BASE is None:
                 s["model"].forward(ids)
             _bases.append(rec.activations[READ_L][0].float().cpu().mean(0))
     BASE = torch.stack(_bases).mean(0)
-    if not _sano(BASE, "base-L34 appena calcolata"):
+    if not _sano(BASE, "base-L29 appena calcolata"):
         sys.exit(1)
     torch.save(BASE, BASE_CACHE)
-V34 = s["V"][list(s["BAND"]).index(READ_L)]
+VL = s["V"][list(s["BAND"]).index(READ_L)]
 
 # PASSATA 1: firme grezze di tutto il corpus (la z entro-messaggio non
 # discrimina: il max di 51 valori normalizzati è sempre ~2; serve la z
@@ -131,11 +131,11 @@ for m in msgs:
         with ActivationRecorder(s["model"].layers, at=[READ_L]) as rec:
             s["model"].forward(ids)
         st = rec.activations[READ_L][0].float().cpu().mean(0) - BASE
-    if not _sano(st, f"stato L34 di «{testo[:40]}»"):
+    if not _sano(st, f"stato L29 di «{testo[:40]}»"):
         sys.exit(1)  # meglio nessun ricordo stanotte che una notte di garbage
     validi.append(m)
     states.append(st)
-    raws.append(V34 @ st)
+    raws.append(VL @ st)
 R = torch.stack(raws)  # [n_msg, 51]
 
 # statistiche di popolazione: nuove o accumulate da run precedenti
