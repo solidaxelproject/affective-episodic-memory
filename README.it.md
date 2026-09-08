@@ -262,6 +262,27 @@ Tutto gira in locale, su un solo PC: nessuna API esterna, nessun dato che lascia
 - Storage: NVMe Samsung 990 PRO 1TB per modelli e dati
 - OS: Linux Mint 22.3
 
+## Sviluppi futuri
+
+Due sviluppi sul tavolo, entrambi costruiti sullo stesso canale visivo che il
+codec usa già (lo span dei token immagine del VLM, 81x2048):
+
+1. **Un codec audio, stessa fessura.** Oggi il codec trasforma il *testo* di
+   un ricordo in una griglia e la inietta nel canale visivo. Il codec
+   successivo prenderebbe *audio* (voce, suoni d'ambiente) e produrrebbe una
+   griglia per la stessa fessura: un orecchio esterno, così che un ricordo
+   possa essere rivissuto da ciò che si è sentito, non solo da ciò che si è
+   scritto. Stesso wormhole, senso diverso.
+
+2. **Un loop nel workspace, innescato dal richiamo.** Quando un ricordo viene
+   richiamato dalla lente (una lettura al layer 29) e iniettato nel canale
+   visivo, l'idea è chiudere un loop dentro il modello: prendere lo stato al
+   layer 32, rientrare come prefill e rileggere al layer 15, così che il
+   ricordo iniettato non sia solo *visto* dal turno in corso ma *pensato*
+   prima della risposta. Innesco = un richiamo fresco; un loop per ricordo
+   richiamato, più ricordi ammessi. Progetto ancora su carta; i parametri li
+   decide l'autrice, non gli strumenti.
+
 ## Riferimenti
 
 **Paper fondanti:**

@@ -261,6 +261,26 @@ Everything runs locally, on one PC: no external APIs, no data leaving the machin
 - Storage: Samsung 990 PRO 1TB NVMe for models and data
 - OS: Linux Mint 22.3
 
+## Future directions
+
+Two developments are on the table, both building on the same visual channel
+the codec already uses (the image-token span of the VLM, 81x2048):
+
+1. **An audio codec, same slot.** Today the codec turns the *text* of a
+   memory into a grid and injects it into the visual channel. The next codec
+   would take *audio* (voice, ambient sound) and produce a grid for the same
+   slot: an external ear, so that a memory can be re-lived from what was
+   heard, not only from what was written. Same wormhole, different sense.
+
+2. **A workspace loop, triggered by recall.** When a memory is recalled by
+   the lens (a read at layer 29) and injected into the visual channel, the
+   idea is to close a loop inside the model: take the state at layer 32,
+   re-enter it as a prefill, and read again at layer 15, so that the injected
+   memory is not only *seen* by the current turn but *thought about* before
+   the reply. Trigger = a fresh recall; one loop per recalled memory, several
+   memories allowed. Design still on paper; parameters to be decided by the
+   author, not by the tooling.
+
 ## References
 
 **Founding papers:**
