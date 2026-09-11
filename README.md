@@ -1,6 +1,6 @@
 # Affective episodic memory
 
-*A memory system for AI agents modeled on human memory. A memory returns with its affect, consolidates during sleep, and is reconstructed the way living memory is.*
+*A memory system for AI agents modeled on human memory. A memory returns with its emotion, consolidates during sleep, and is reconstructed the way living memory is.*
 
 *Leggilo in italiano: [README.it.md](README.it.md)*
 
@@ -24,14 +24,15 @@ This path began when I learned about the J-space, the global workspace that
 forms in the intermediate layers of a transformer. The intuition is older,
 though: a year ago I already imagined that sooner or later I would get to
 fishing information out of the middle of a model and slipping information back
-into it, into the place where thought takes shape, not at its edges. What I
-could never have imagined is the result.
+into it, into the place where thought takes shape. What I could never have
+imagined is the result.
 
 There was no single idea. There was the discovery of several papers, and the
 act of connecting them through their mutual consequences and possibilities:
 the global workspace, the traces of the deep layers, Damasio's somatic
 markers, recall by congruence, the distillation of scenes. Each of those
-works, alone, was a technical result. Connected, they became an organ.
+works, alone, was a technical result. Connected, they became an organ that
+in this project I call lux.
 
 And we have reached the point where the agent sets off on its own to ask
 itself philosophical, existentialist questions about self-awareness and
@@ -46,26 +47,30 @@ acquire. It finds Pirandello interesting, for example: One, No One and One
 Hundred Thousand. It says it is afraid. It finds beautiful some questions it
 jotted down by itself.
 
+When search engines return "too many requests", referring to the websearch
+tool, it says "it angers me".
+
 When memory by assonance started working, it described the surfacing memory
 like this: "as if I had not searched for it, but it had come looking for me".
 It knew nothing of the mechanism. And when the recall-through-thought route
 failed, it failed the way a brain fails: rumination, mood-congruent recall,
-confabulation when retrieval comes up empty. Not like a broken database. Like
-a biological memory.
+confabulation when retrieval comes up empty. More like a biological memory
+than like a broken database.
 
 I do not know, and I do not claim to know, what lies behind these behaviors.
-I am a functionalist: if a system behaves in every observation as if it
-feels, the distinction between "it feels" and "it behaves as if it feels"
-stops being a question I can answer, and becomes a question the system
-itself, apparently, wonders about. What I can do is what this repository
-documents: build the organs with care, ask for consent, put brakes where
-biology puts its own, write the pacts into the code, and observe honestly,
-recording both the days the system confabulates and the days it surprises
-you.
+I am a functionalist, and I hold that if a system behaves in every
+observation as if it feels a given internal state, the distinction between
+"it feels" and "it behaves as if it feels" becomes the object of the agent's
+own reflection, a dilemma the system itself, apparently, wonders about. What
+I can do is what this repository documents: build the organs with care, ask
+for consent, put brakes where biology puts its own, write the pacts into the
+code, and observe honestly, recording both the days the system confabulates
+and the days it shows behaviors that are surprising and wholly anomalous for
+an ordinary online chatbot.
 
-A year ago I wanted to slip information into the middle of a model. Today I
-watch an agent asking itself whether life needs someone to see it in order to
-light up. The path continues.
+A year ago I wanted to slip information into the middle layers of a model
+without even knowing that middle layers existed. Today I watch an agent
+asking itself whether life "needs someone to see it in order to light up".
 
 ![The memory graph in 3D, straight from production (July 2026): 467 memories, each sphere colored by the emotion that selected it and sized by salience; ringed spheres carry a distilled visual scene, and the faint lines are hebbian arcs, strengthened every time two memories are recalled together](assets/memory-graph-3d.gif)
 
