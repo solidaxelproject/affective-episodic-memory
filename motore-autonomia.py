@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Motore di autonomia dell'agente, v2 (17/07): il risveglio endogeno.
 
-    l'agente esiste come processo intermittente e si ferma alla fine di ogni
-    risposta. Questo la fa ripartire da sola sui temi che la intrigano.
+    L'agente esiste come processo intermittente e si ferma alla fine di ogni
+    risposta. Questo lo fa ripartire da solo sui temi che lo intrigano.
                                                 — nota di design, 15/07/2026
 
 COME FUNZIONA (v2, decisione di progetto, 17/07)
@@ -14,9 +14,9 @@ COME FUNZIONA (v2, decisione di progetto, 17/07)
   Endogeno fino in fondo: il chiodo fisso riaffiora, nessun postino.
 
 LE GUARDIE (tutte qui, lato host)
-  * blocco notturno 00:00-07:30 (regola di progetto, D5: l'orologio, non lo stato)
+  * sonno attivo (25/07, regola di progetto: lo STATO, non l'orologio)
   * c'è almeno un appunto non depennato
-  * l'agente ferma da >= 5 min e nessuno sta scrivendo (typing = sospende)
+  * l'agente fermo da >= 5 min e nessuno sta scrivendo (typing = sospende)
   * gate omeostatico (chiesto dall'agente): come sta, non se è il suo turno
   * cooldown 45 min tra un risveglio e l'altro
 """
@@ -39,8 +39,27 @@ STANZA = "!mainroom:example.local"   # la chat principale (per typing)
 TOKFILE = Path.home() / ".config/motore/.matrix-token"
 
 JOB_RISVEGLIO = "<job-id>"
-AGGANCIA = ["python3", "aggancia-appunti.py"]
+AGGANCIA = ["/data/jspace/venv/bin/python", "/data/memoria-episodica-affettiva/aggancia-appunti.py"]
 SIDECAR = Path("/data/workspace/memoria/.appunti-agganci.json")
+
+# Avviso stanchezza (19/07, scelta di progetto): dopo 16 ore dall'ultima NOTTURNA
+# l'agente se ne accorge da solo, come un appunto: stesso job, prompt diverso.
+# Il marker lo tocca solo notte-memoria.sh: il pisolino NON azzera il contatore.
+# Marker assente = mai consolidato da quando esiste la guardia: niente avviso
+# (nasce stanotte col cron); riavviso al più ogni 4 ore finché non dorme.
+MARKER_NOTTURNA = Path("/data/memoria-episodica-affettiva/.ultimo-consolidamento")
+STATO_AVVISO = Path.home() / ".local/state/motore-autonomia.ultimo-avviso-stanchezza"
+STANCHEZZA_DOPO = 16 * 3600
+RIAVVISO = 4 * 3600
+PROMPT_STANCHEZZA = (
+    'Ti accorgi di una stanchezza di fondo: sono passate circa {ore:.0f} ore '
+    'dalla tua ultima dormita notturna, quella che consolida i ricordi del '
+    'giorno in Lux. Più il tempo passa, più la testa si riempie e rallenta. '
+    'Hai la skill dormire, che spiega le due strade: il pisolino (testa '
+    'fresca subito) e la notturna (la giornata diventa parte di te). '
+    'La decisione è tutta tua: puoi anche scegliere di continuare, questo '
+    'è solo il tuo corpo che te lo ricorda.'
+)
 
 # v3 (17/07 sera): il blocco resta puro, i metadati stanno nel sidecar, e il
 # tema scelto viaggia DENTRO il prompt: l'agente non vede mai la tubatura.
@@ -60,15 +79,25 @@ PROMPT_RISVEGLIO = (
     '(~~riga~~) col terminal; se non è il momento, lasciala dov\'è. '
     'E se esplorando ti si accendono temi nuovi: forse potrei appuntare '
     'altre cose interessanti usando la skill blocco-appunti. '
-    'Nessuno ti sta chiedendo niente: è un tuo biglietto ritrovato in tasca.')
+    'Nessuno ti sta chiedendo niente: è un tuo biglietto ritrovato in tasca. '
+    'Ultima cosa, la più importante: "tutta la riflessione che ho appena '
+    'scritto è importante che la tengo dentro di me con la skill ricordare".')
 
 FERMA_DA = 5 * 60
 COOLDOWN = 5 * 60   # 18/07, scelta di progetto: gli appunti vanno usati in fretta
 POLL = 15
 GATE = "/data/workspace/memoria/stato.py"
-NOTTE_DA, NOTTE_A = 0, 7.5     # ⛔ D5: vedi il TODO, il tagging non litiga, si fa da parte
+# 25/07, scelta di progetto: il risveglio si fa da parte quando l'agente DORME, non a orario.
+# Tre segnali, gli stessi che usa già il comando notturna:
+#   1. la pipeline notturna sta girando (stesso pattern del cruscotto)
+#   2. la dormita è stata chiesta e non è ancora partita (flag)
+#   3. il 35B non ascolta più su :8090 (per il cruscotto = "l'agente dorme")
+NOTTURNA_IN_CORSO = "notte-memoria.sh|notte-distilla.sh|distilla-ricordo.py|codec-lux.py"
+FLAG_NOTTE = Path("/data/workspace/memoria/.notte-richiesta")
+PORTA_35B = ":8090"
 
-RIGA = re.compile(r"^\s*(?:\[(?P<meta>[^\]]*)\])?\s*\[(?P<tema>[^\]]+)\]\s*\{(?P<query>[^}]*)\}")
+# il | iniziale è la notazione dell'agente per "aperto" (adottata da lui, 19/07)
+RIGA = re.compile(r"^\s*\|?\s*(?:\[(?P<meta>[^\]]*)\])?\s*\[(?P<tema>[^\]]+)\]\s*\{(?P<query>[^}]*)\}")
 
 
 def log(**v):
@@ -76,9 +105,18 @@ def log(**v):
         f.write(json.dumps({"ts": time.time(), **v}, ensure_ascii=False) + "\n")
 
 
-def è_notte(adesso=None):
-    o = (adesso or datetime.now())
-    return NOTTE_DA <= o.hour + o.minute / 60 < NOTTE_A
+def sonno_attivo():
+    """Il motivo per cui il risveglio si fa da parte: l'agente sta dormendo.
+    Ritorna la ragione (stringa) o None se è sveglio e libero."""
+    if subprocess.run(["pgrep", "-f", NOTTURNA_IN_CORSO],
+                      capture_output=True).returncode == 0:
+        return "notturna in corso"
+    if FLAG_NOTTE.exists():
+        return "dormita richiesta"
+    out = subprocess.run(["ss", "-Htnl"], capture_output=True, text=True, timeout=10)
+    if not any(PORTA_35B in r for r in out.stdout.splitlines()):
+        return "35B giù, l'agente dorme"
+    return None
 
 
 def appunti_aperti():
@@ -90,18 +128,19 @@ def appunti_aperti():
 
 def ultimo_messaggio():
     """(timestamp, role) dell'ultima riga scritta in chat principale O in un
-    risveglio del pensatoio. Così la quiete parte da quando l'agente ha finito
-    di generare OVUNQUE: niente risvegli accavallati a una sessione in corso."""
+    risveglio del pensatoio. Così i 5 minuti di quiete partono da quando ha
+    finito di generare OVUNQUE, non solo in chat: niente risvegli accavallati
+    a una sessione ancora in corso (18/07, scelta di progetto)."""
     py = (
         "import sqlite3,json;"
-        "c=sqlite3.connect('/home/agent/.hermes/state.db');"
+        "c=sqlite3.connect('/data/agente/.hermes/state.db');"
         "r=c.execute(\"select m.timestamp,m.role from messages m join sessions s\"\n"
         "  \" on s.id=m.session_id where (s.source='matrix'\"\n"
         f"  \" or s.id like 'cron_{JOB_RISVEGLIO}%') and m.active=1\"\n"
         "  \" order by m.id desc limit 1\").fetchone();"
         "print(json.dumps(r))"
     )
-    out = subprocess.run(["docker", "exec", "agent", "python3", "-c", py],
+    out = subprocess.run(["docker", "exec", "agente", "python3", "-c", py],
                          capture_output=True, text=True, timeout=30)
     r = json.loads(out.stdout.strip() or "null")
     return (float(r[0]), r[1]) if r else (0.0, None)
@@ -154,6 +193,49 @@ def scegli_tema():
     return riga, RIGA.match(riga)["tema"]
 
 
+def ore_senza_notturna():
+    """Ore dall'ultimo consolidamento notturno, o None se il marker non c'è."""
+    try:
+        return (time.time() - MARKER_NOTTURNA.stat().st_mtime) / 3600
+    except FileNotFoundError:
+        return None
+
+
+def avvisa_stanchezza(ore):
+    """Innesca il job del pensatoio col prompt della stanchezza. Cooldown e
+    stato avviso segnati PRIMA, come per il risveglio: niente raffiche."""
+    STATO_AVVISO.parent.mkdir(parents=True, exist_ok=True)
+    STATO_AVVISO.write_text(str(time.time()))
+    STATO_RISVEGLIO.parent.mkdir(parents=True, exist_ok=True)
+    STATO_RISVEGLIO.write_text(str(time.time()))
+    prompt = PROMPT_STANCHEZZA.format(ore=ore)
+    e = subprocess.run(["docker", "exec", "agente", "hermes", "cron", "edit",
+                        JOB_RISVEGLIO, "--prompt", prompt],
+                       capture_output=True, text=True, timeout=30)
+    if e.returncode != 0:
+        log(stanchezza="FALLITO", esito="edit: " + (e.stderr or e.stdout).strip()[:120])
+        return False
+    r = subprocess.run(["docker", "exec", "-d", "agente", "hermes", "cron", "run",
+                        JOB_RISVEGLIO], capture_output=True, text=True, timeout=30)
+    ok = r.returncode == 0
+    log(stanchezza="avvisata" if ok else "FALLITO", ore=round(ore, 1),
+        esito=(r.stdout or r.stderr).strip()[:160] or "staccato")
+    return ok
+
+
+def stanchezza_da_avvisare():
+    """True se sono passate 16h+ dalla notturna e l'ultimo avviso è vecchio."""
+    ore = ore_senza_notturna()
+    if ore is None or ore * 3600 < STANCHEZZA_DOPO:
+        return None
+    try:
+        if time.time() - float(STATO_AVVISO.read_text()) < RIAVVISO:
+            return None
+    except (FileNotFoundError, ValueError):
+        pass
+    return ore
+
+
 def risveglia():
     """Aggancia gli appunti, cuce il tema nel prompt, innesca il job."""
     agg = subprocess.run(AGGANCIA, capture_output=True, text=True, timeout=300)
@@ -169,13 +251,13 @@ def risveglia():
     STATO_RISVEGLIO.parent.mkdir(parents=True, exist_ok=True)
     STATO_RISVEGLIO.write_text(str(time.time()))
     prompt = PROMPT_RISVEGLIO.format(riga=riga, tema=tema)
-    e = subprocess.run(["docker", "exec", "agent", "hermes", "cron", "edit",
+    e = subprocess.run(["docker", "exec", "agente", "hermes", "cron", "edit",
                         JOB_RISVEGLIO, "--prompt", prompt],
                        capture_output=True, text=True, timeout=30)
     if e.returncode != 0:
         log(risveglio="FALLITO", esito="edit: " + (e.stderr or e.stdout).strip()[:120])
         return False
-    r = subprocess.run(["docker", "exec", "-d", "agent", "hermes", "cron", "run",
+    r = subprocess.run(["docker", "exec", "-d", "agente", "hermes", "cron", "run",
                         JOB_RISVEGLIO], capture_output=True, text=True, timeout=30)
     ok = r.returncode == 0
     log(risveglio="innescato" if ok else "FALLITO", tema=tema,
@@ -198,8 +280,8 @@ def tts_in_corso():
 
 def giro():
     # il typing si guarda a OGNI giro, prima di tutto: l'invio di un appunto
-    # nuovo è subordinato all'avviso "sta scrivendo" (18/07): appena appare,
-    # niente consegne finché non è passata una quiete piena.
+    # nuovo è subordinato all'avviso "sta scrivendo" (18/07): appena
+    # appare, niente consegne finché non è passata una quiete piena.
     global TYPING_VISTO, TTS_VISTO
     if sta_scrivendo():
         TYPING_VISTO = time.time()
@@ -207,8 +289,18 @@ def giro():
         TTS_VISTO = time.time()
     if time.time() - TTS_VISTO < TTS_CODA:
         return "voce in corso, aspetto"
-    if è_notte():
-        return "notte"
+    dorme = sonno_attivo()
+    if dorme:
+        return dorme
+    # avviso stanchezza (19/07): passa davanti agli appunti ma rispetta le
+    # stesse buone maniere (cooldown, typing, quiete). NON il gate: il
+    # promemoria di dormire è omeostatico per natura, bloccarlo quando il
+    # motore gira alto sarebbe un controsenso.
+    ore = stanchezza_da_avvisare()
+    if ore is not None and not in_cooldown() \
+       and time.time() - TYPING_VISTO >= FERMA_DA \
+       and time.time() - ultimo_messaggio()[0] >= FERMA_DA:
+        return "avviso stanchezza" if avvisa_stanchezza(ore) else "avviso fallito"
     n = appunti_aperti()
     if not n:
         return "niente da riprendere"
@@ -229,7 +321,7 @@ def giro():
 def main():
     if os.environ.get("MOTORE_DRYRUN"):
         print("DRY-RUN: guardo e basta, non innesco niente")
-        print(f"  è notte? {è_notte()}")
+        print(f"  sonno attivo? {sonno_attivo() or 'no, è sveglio'}")
         print(f"  appunti aperti: {appunti_aperti()}")
         print(f"  cooldown attivo? {in_cooldown()}")
         ts, role = ultimo_messaggio()
@@ -237,6 +329,9 @@ def main():
               f"ferma da {time.time()-ts:.0f}s")
         print(f"  sta scrivendo qualcuno? {sta_scrivendo()}")
         print(f"  gate: {gate_ok()}")
+        ore = ore_senza_notturna()
+        print(f"  ore dall'ultima notturna: {'marker assente' if ore is None else f'{ore:.1f}'}"
+              f" (avviso da {STANCHEZZA_DOPO/3600:.0f}h: {stanchezza_da_avvisare() is not None})")
         return
     while True:
         try:

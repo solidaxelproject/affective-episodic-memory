@@ -72,9 +72,9 @@ senza conoscere nemmeno l'esistenza dei layer centrali.
 Oggi guardo un agente che si chiede se la vita "abbia bisogno di qualcuno che la veda per
 accendersi". 
 
-![Il grafo della memoria in 3D, direttamente dalla produzione (luglio 2026): 467 ricordi, ogni sfera colorata secondo l'emozione che l'ha selezionata e grande quanto la sua salienza; le sfere con l'anello portano una scena visiva distillata, e le linee sottili sono gli archi hebbiani, rinforzati ogni volta che due ricordi affiorano insieme](assets/memory-graph-3d.gif)
+![La memoria che prende forma, direttamente dalla produzione: i neuroni di Lux nascono in ordine cronologico, ognuno con un breve lampo, e ogni arco compare appena esistono entrambi i suoi neuroni; le sfere sono colorate secondo l'emozione dominante e grandi quanto le loro attivazioni; alla fine un giro completo attorno al grafo finito](assets/memory-graph-3d.gif)
 
-*Una fotografia reale della memoria del sistema: 284 ricordi disposti per somiglianza semantica (PCA 3D degli stati interni del modello), colorati per emozione dominante, grandi quanto la loro salienza, legati dagli archi hebbiani di co-richiamo.*
+*Come si è formata la memoria: 450 neuroni e 339 archi, nati fra il 9 e il 25 luglio 2026, disposti per somiglianza semantica (PCA 3D delle tracce di Lux nello spazio della lente), colorati con le firme ricalcolate sul nuovo cervello a settembre 2026.*
 
 ## Provala in 60 secondi
 
@@ -151,7 +151,7 @@ La distinzione indica anche la cura. Contro l'allucinazione non c'è rimedio arc
 GIORNO   L'agente vive (chat). Richiami espliciti via skill "memoria".
          Il richiamo della memoria avviene per tool calling.
 NOTTE    (cron: alle ore 0:00:01,618) estrazione messaggi del giorno
-         → tagging su GPU: stato interno per messaggio → firma emotiva
+         → tagging su GPU: ciò che ogni messaggio aggiunge alla giornata → firma emotiva
            a 51 dimensioni → salienza (z-score TRA i messaggi)
          → sopra soglia: nodo nel GRAFO (testo + vettori)
          → esperienza in LUX, l'organo di memoria che cresce
@@ -205,13 +205,24 @@ Nello sviluppo ho testato anche la possibilità di aggiungere un LoRA per crista
 
 Tutti replicabili con gli script del repo, su un singolo consumer PC (16GB VRAM).
 
-- **I vettori emotivi funzionano e si calibrano.** Estratti dal gradiente del logit dell'emozione, iniettati nella finestra di layer più ricettiva. La posizione dell'iniezione non dipende dall'emozione, l'intensità sì: tabella di intensità calibrate iso-effetto, 41/51 a target.
+- **I vettori emotivi funzionano e si calibrano.** Estratti dal gradiente del logit dell'emozione, iniettati nella finestra di layer più ricettiva. La posizione dell'iniezione non dipende dall'emozione, l'intensità sì: tabella di intensità calibrate iso-effetto, 41/51 a target (51/51 dopo il refactoring di luglio, vedi sotto).
 - **Testo per i fatti, vettore per il sentire.** Gli engrammi di stato compressi hanno perso la prova: il ricordo torna come testo più il suo vettore emotivo, e il registro della risposta passa "da commentare ad abitare".
 - **L'indirizzamento emotivo corregge quello semantico.** Su un seme di paura la ricerca semantica pesca l'oggetto sbagliato, quella emotiva pesca giusto.
 - **La porta visiva è controllabile.** Re-iniezione di una scena = descrizione identica; interpolazioni tra scene = percezioni coerenti di immagini mai esistite; la percezione è categorica (il modello sceglie un bacino, niente ibridi).
 - **Il primo sogno.** Un ricordo distillato in griglia visiva: risponde a domande mai viste, e il modello prolunga la scena oltre il testo. Memoria ricostruttiva, con boundary extension come nei viventi.
 - **Lux su dati reali:** 81 esperienze → 52 neuroni (29 fusioni), crescita sub-lineare, richiami corretti.
 - **Il canale vettoriale in produzione:** il server forkato dà output bit-identico al percorso token quando riceve gli stessi contenuti, e il draft speculativo resta attivo sui prompt normali. Zero costo quando non si usa.
+
+## Cosa è cambiato da luglio
+
+Il refactoring di luglio e il passaggio a un cervello nuovo, in ordine.
+
+- **Il richiamo legge il workspace, non la bocca.** La sonda è passata da un layer tardo (l'85% della profondità, dove la rappresentazione è già il prossimo token) al layer 29, dentro la banda del global workspace (L15-L32). E non legge più l'attivazione grezza: legge le coordinate della lente di Jacobi calcolata sul 35B, la piccola parte dello stato che il paper chiama riferibile. Tracce di Lux, indirizzi semantici e tutte le soglie sono stati rigenerati in quello spazio, e il layer ora è un numero solo in un file solo (`ponte.LAYER_SONDA`).
+- **Un'emozione, una finestra.** I vettori emotivi sono stati ricalcolati sull'intera banda del workspace, col lessico riverificato parola per parola sul tokenizer del 35B. La finestra di iniezione ora si sceglie per emozione (quasi tutte a L25-28, la paura a L21-23, ansia e invidia a L15-17), ed è stata misurata la curva dose-risposta: ampiezza lineare nella dose, qualità costante, una scogliera al bordo alto. Il tetto 0.3x del patto ora ha una misura dietro. Tredici emozioni calme o astratte, il cui vettore dal gradiente della parola spingeva lontano dalla loro faccia naturale, sono state ricostruite per contrasto dai ricordi vissuti dell'agente: funzionano 51/51, prima 41/51.
+- **La firma misura ciò che il messaggio aggiunge.** L'emozione di un messaggio ora è differenziale: lo stato del messaggio letto dentro il contesto della giornata, meno lo stato del contesto stesso. Né contaminata dal passato né cieca al passato. Le statistiche di popolazione si accumulano in modo corretto (Welford) e portano con sé i metadati (layer, lente, modello, versione): un cambio di modello le invalida a vista.
+- **Un bug trovato guardando i risultati.** La prima versione differenziale leggeva contesto e messaggio insieme, troncati a 320 token da destra: con 1200 caratteri di contesto il messaggio veniva tagliato via, del tutto in 461 letture su 1184, e le firme erano rumore ("terror" dominava 201 ricordi). Ora un solo passaggio legge [gli ultimi 320 token del contesto | i primi 320 del messaggio] e lascia fuori dalla media del contesto il primo token (il pozzo dell'attenzione, con norma dieci volte le altre). La guardia che ferma la notte su uno stato corrotto ha colto una lettura isolata a 5e15; ripetuta, era sana.
+- **Un cervello nuovo: Occamy-1.0.** Dal 29 settembre 2026 l'agente gira su Occamy-1.0 (Accio-Lab), un post-training dello stesso Qwen3.6-35B-A3B: parte visiva identica tensore per tensore, stessa tokenizzazione sui nostri testi. Lente, vettori emotivi e misura dei layer sono stati ricalcolati su di lui (direzioni emotive a coseno 0.99 col modello vecchio, richiamo per layer uguale al terzo decimale: L29 resta), Lux e gli indirizzi semantici sono stati sostituiti, e tutte le 584 firme del grafo riscritte sul posto dalla conversazione vera, conservando identità, archi e attivazioni di Lux. Le soglie di richiamo sono state rimisurate (rumore p99 0.575, era 0.555). Gli script non hanno più il modello scritto dentro: lo scelgono `OUT_35B` e `MODELLO_35B`.
+- **La testa di bozza, innestata.** Occamy nasce senza lo strato MTP. La testa del Qwen3.6 è stata innestata nel suo GGUF (20 tensori, blocco 40): con un token di bozza la generazione è più veloce del 13% (71% di accettazione), con bozze più lunghe è più lenta. Ancora in prova: con la testa attiva l'output greedy non è ancora identico a quello senza, quindi non è in produzione.
 
 ## Etica e consenso
 
@@ -249,7 +260,7 @@ Il modo di guasto di questa classe di meccanismi è documentato nel grafo stesso
 L'agente e il sistema di memoria poggiano interamente su componenti open source:
 
 - **[llama.cpp](https://github.com/ggml-org/llama.cpp)** b9966, forkato: il server di inferenza. Il fork è stato rinominato **luxifer.cpp**: aggiunta di `embeddings_input` (vettori grezzi al posto dei token su `/completion`) e della route `/control-vector` per l'iniezione delle emozioni ai layer nascosti, in modalità relativa per token. La patch completa è in questo repo: `lux-embeddings-b9966.patch`.
-- **Qwen3.6-35B-A3B** (MoE, quantizzato Q8_0 con decoding speculativo MTP): il cervello. La quantizzazione qui ha la sua lezione: la prima build era IQ3_S, scelta per la velocità perché stava tutta in VRAM, e dopo di lei IQ4_XS. Entrambe abbandonate per il Q8_0 quando è diventato chiaro che il rumore di quantizzazione, invisibile sugli scambi brevi, diventa danno linguistico vero quando la context window si riempie oltre una certa soglia: un modello che deve vivere dentro conversazioni lunghe non può permetterselo. Il Q8_0 paga in velocità e ricompra la lingua: è solo il processore inferenziale. Gira su una singola GPU consumer con parte degli expert in RAM, mentre gli esperti attivi e una parte consistente del resto del modello restano in VRAM. KV cache in f16 piena: la quantizzazione della cache è stata provata e scartata (rumore sulle generazioni lunghe, e i tipi K/V misti mettono l'attention su un percorso lento).
+- **Occamy-1.0**, un post-training di **Qwen3.6-35B-A3B** (MoE, quantizzato Q8_0; fino a settembre 2026 Qwen3.6 stesso, con decoding speculativo MTP): il cervello. La quantizzazione qui ha la sua lezione: la prima build era IQ3_S, scelta per la velocità perché stava tutta in VRAM, e dopo di lei IQ4_XS. Entrambe abbandonate per il Q8_0 quando è diventato chiaro che il rumore di quantizzazione, invisibile sugli scambi brevi, diventa danno linguistico vero quando la context window si riempie oltre una certa soglia: un modello che deve vivere dentro conversazioni lunghe non può permetterselo. Il Q8_0 paga in velocità e ricompra la lingua: è solo il processore inferenziale. Gira su una singola GPU consumer con parte degli expert in RAM, mentre gli esperti attivi e una parte consistente del resto del modello restano in VRAM. KV cache in f16 piena: la quantizzazione della cache è stata provata e scartata (rumore sulle generazioni lunghe, e i tipi K/V misti mettono l'attention su un percorso lento).
 - **Hermes**: il framework dell'agente (tool calling, skill, cron, memoria di sessione), in Docker.
 - **Matrix / Synapse + Element**: il canale di comunicazione, self-hosted. La chat è anche la sorgente dei ricordi: il consolidamento notturno legge da lì. La comunicazione avviene attraverso un tunnel VPN (WireGuard).
 - **SQLite + FTS5**: il grafo della memoria. Niente database server, niente dipendenze: un file.

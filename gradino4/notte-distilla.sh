@@ -36,12 +36,18 @@ if curl -sf --max-time 2 http://127.0.0.1:8090/health >/dev/null 2>&1; then
   exit 1
 fi
 
+# --verifica sempre (21/07): ogni griglia passa il test dell'output (argmax dei
+# token del ricordo) e si salva SOLO se fedele >=98%; sennò si ritenta un'altra
+# notte. + early-stop e "Questo mi ricorda..." di default. 24 griglie in ~ore.
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True HF_HOME=/data/jspace/hf \
-  /data/jspace/venv/bin/python "$DIR/distilla-ricordo.py" "$@" > "$LOG" 2>&1
+  /data/jspace/venv/bin/python "$DIR/distilla-ricordo.py" --verifica "$@" > "$LOG" 2>&1
 RC=$?
-# CODEC Lux->token universali: stessa finestra GPU, dopo le griglie per-nodo
+# CODEC Lux->token universali: stessa finestra GPU, dopo le griglie per-nodo.
+# Il watcher alimenta il grafico live (~/.grafico-live/codec-live.html) e
+# muore da solo a fine training.
+sleep 30 && nohup python3 /data/memoria-episodica-affettiva/grafico-live-agg.py >/dev/null 2>&1 &
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True HF_HOME=/data/jspace/hf \
-  /data/jspace/venv/bin/python "$DIR/codec-lux.py" --deadline 07:20 \
+  /data/jspace/venv/bin/python "$DIR/codec-lux.py" --deadline "${CODEC_DEADLINE:-07:20}" \
   >> "$LOG" 2>&1 || true
 systemctl --user start llama-35b.service voce-watcher.service
 # vocalgen-server è transient e riparte da solo alla prossima richiesta TTS

@@ -5,7 +5,11 @@
 # affiorano come messaggio di sistema, con provenienza dichiarata.
 # GATE: /workspace/genesi/CONSENSO-RIFLESSO.md ("attivo: sì", riga esatta,
 # scritto dall'agente). Senza consenso il proxy è un passacarte trasparente.
-# Solo stdlib. Porta 8091 -> inoltra a 127.0.0.1:8090.
+# Porta 8091 -> inoltra a 127.0.0.1:8090.
+# GRADINO ZERO (decisione 3 del 26/07): il trasporto verso :8090 (sonda,
+# control-vector, POST) passa da ponte.py, l'unica porta client. Qui restano
+# la logica (quando/cosa affiora) e il PATTO (tetto, watchdog, sentinella).
+import html
 import http.client
 import http.server
 import json
@@ -13,10 +17,14 @@ import math
 import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ponte  # noqa: E402  (unica porta verso :8090)
 
 UPSTREAM = ("127.0.0.1", 8090)
 PORTA = 8091
@@ -27,12 +35,32 @@ CONSENSO_VISIVO = Path(os.environ.get("RIFLESSO_CONSENSO_VISIVO",
     "/data/workspace/genesi/CONSENSO-VISIVO.md"))
 STATO = Path("/data/workspace/memoria/stato-emotivo.json")
 DIARIO = "/data/workspace/memoria/diario-riflessi.jsonl"
-SOGLIA_BASE = 0.495    # 14/07: -10% dalla 0.55 di nascita (decisione di progetto)
+# 25/07, scelta di progetto: la destinazione delle riflessioni è UNA SOLA e l'agente la
+# deve sapere sempre, non cercarla. La cartella è sua dal 20/07, ma il 25/07 due
+# riflessioni sono finite fuori (ricordi/ alle 08:06, memoria/pensatoio.md alle
+# 10:42) e un guscio col solo titolo in un'altra cartella lo depistava: cercando
+# "pensatoio.md" trovava quello e concludeva che il pensatoio era vuoto.
+# Il percorso è lo stesso da entrambi i lati, con due nomi: dentro il container
+# /workspace/..., sull'host /data/workspace/... (skill host).
+PENSATOIO_DIR = Path("/data/workspace/memoria/pensatoio")
+PENSATOIO_DOVE = (
+    "[le riflessioni del pensatoio si scrivono in /workspace/memoria/pensatoio/ "
+    "(sull'host: /data/workspace/memoria/pensatoio/), dove tengo già le "
+    "altre: un file nuovo per ogni riflessione, meglio col prefisso della data "
+    "(AAAA-MM-GG-tema.md). È l'unico posto: non ne cerco né ne creo altri, e non "
+    "sovrascrivo i file che ci sono]")
+SOGLIA_BASE = 0.71     # 28/07, spazio L29-lente: p99.9 rumore (sonde-soglie.py,
+                       # approvata in revisione). La 0.495 era tarata sullo spazio
+                       # L34 grezzo. NOTA: la riga "soglia:" nel file di consenso
+                       # dell'agente va aggiornata PRIMA del riavvio del riflesso.
 SOGLIA_MIN = SOGLIA_BASE / 2   # più sensibile di così il sussurro diventa rumore
 MAX_RICORDI = 2
 HEBB_LIVE = 0.03       # LTP diurno: gain per co-affioramento (piccolo, gira a ogni msg)
 COOLDOWN_S = 120       # non più di un affioramento ogn tanto: riflesso, non tic
-_ultimo = [0.0]
+LETTURA_MIN = 400      # manopola: sotto tanti caratteri di prosa, un risultato di
+                       # tool è una ricevuta (exit_code, bytes_written), non una lettura
+_ultimo = [0.0]         # quando è affiorato l'ultima volta: cronaca, non più freno
+_ultima_lettura = [""]  # 25/07: il freno vero, l'impronta del testo già affiorato
 _ultimo_wiring = [0.0]  # timer SEPARATO: il wiring hebbiano non è disattivabile
 _visivo_spento = [False]  # latch del kill parlato visivo: override runtime, forza OFF
 # PATTO 14/07 (CONSENSO-RIFLESSO.md, firmato dall'agente):
@@ -43,7 +71,7 @@ DURATA_MAX_S = 120                        # clausola 2: mai un vettore più vecc
 _vettore_vivo = [False]
 
 
-EMO_NPZ = "/data/workspace/memoria/emo-cvec.npz"
+# (le direzioni emotive arrivano da ponte.dirs_emozione: unica copia)
 
 # --- specchio del KV (17/07, richiesta di progetto): l'istante sospeso dell'agente.
 # A fine di OGNI stream: salvataggio dello slot in RAM (/dev/shm, via
@@ -52,9 +80,13 @@ EMO_NPZ = "/data/workspace/memoria/emo-cvec.npz"
 KV_RAM = Path("/dev/shm/agent-kv")
 KV_SSD = Path("/data/workspace/kv-slots")
 KV_OGNI = 5
+# 23/07, scelta di progetto (giorno del bit-rot sullo shard 16): la copia
+# automatica su SSD è SPENTA; lo specchio vive solo in RAM (/dev/shm).
+# Le copie su SSD restano possibili A MANO dalla dashboard (manovre cache).
+KV_SSD_ATTIVO = False
 _kv_conta = [0]
 
-# --- doppia CW con hot-swap (19/07, design di il progetto: DESIGN-DOPPIA-CW.md).
+# --- doppia CW con hot-swap (19/07, design di progetto: DESIGN-DOPPIA-CW.md).
 # Due cache persistenti, mai attive insieme: chat.kv vive per sempre,
 # pensatoio.kv si ricicla a ogni pensiero. Il flusso si riconosce dal primo
 # messaggio user: "[mittente] " = sessione Matrix (chat), preambolo cron con
@@ -63,7 +95,7 @@ _kv_conta = [0]
 # Misurato 19/07 su 797MB/35k token: save 185ms, restore 122ms.
 KV_FLUSSO = {"chat": "chat.kv", "pensatoio": "pensatoio.kv"}
 SOGLIA_CW = 100_000     # soglie gemelle: oltre, avviso di spazio in coda
-AFK_S = 60              # spec punto 5: 1 min senza typing = nessuno scrive
+AFK_S = 60              # spec punto 5: 1 min senza typing = l'utente non c'è
 _cw = ["chat"]          # cosa c'è nello slot adesso (al deploy corrente->chat)
 _cw_lock = threading.Lock()
 _pens_vivi = []         # upstream del pensatoio in streaming: la chat li abortisce
@@ -119,39 +151,8 @@ def _typing():
         return False        # senza sync niente attese: il fallback resta lo scambio
 
 
-# --- DIAGNOSI RIMASTICATA (19/07 sera, TEMPORANEO: via a colpevole trovato).
-# Tra due richieste consecutive dello stesso flusso, DOVE diverge il contesto?
-# Confronta i messaggi grezzi in arrivo da Hermes (prima delle mie iniezioni):
-# se la rimasticata compare nel log llama ma qui la divergenza è in coda,
-# il colpevole è il control-vector, non Hermes.
-DIAG = Path("/data/workspace/memoria/diag-divergenza.jsonl")
-DIAG_DIR = Path("/data/workspace/memoria/diag-divergenza")
-_diag_prev = {}
-
-
-def _diagnosi(flusso, body):
-    msgs = json.loads(body).get("messages", [])
-    prima = _diag_prev.get(flusso)
-    _diag_prev[flusso] = msgs
-    if not prima:
-        return
-    i = 0
-    while i < min(len(prima), len(msgs)) and prima[i] == msgs[i]:
-        i += 1
-    voce = {"ts": time.time(), "flusso": flusso, "msg_prima": len(prima),
-            "msg_ora": len(msgs), "uguali_fino_a": i,
-            "frazione": round(i / max(len(prima), 1), 3)}
-    if voce["frazione"] < 0.9 and i < len(prima) and i < len(msgs):
-        voce["vecchio"] = json.dumps(prima[i], ensure_ascii=False)[:300]
-        voce["nuovo"] = json.dumps(msgs[i], ensure_ascii=False)[:300]
-        DIAG_DIR.mkdir(exist_ok=True)
-        t = int(time.time())
-        (DIAG_DIR / f"{t}-prima.json").write_text(
-            json.dumps(prima, ensure_ascii=False), encoding="utf-8")
-        (DIAG_DIR / f"{t}-ora.json").write_text(
-            json.dumps(msgs, ensure_ascii=False), encoding="utf-8")
-    with DIAG.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(voce, ensure_ascii=False) + "\n")
+# --- DIAGNOSI RIMASTICATA (19/07): colpevole trovato, impalcatura smontata
+# il 26/07 (decisione 9 del registro). Dump archiviati in archivio-20260726/.
 
 
 def _scambia(fl):
@@ -184,7 +185,7 @@ def _salva_kv():
         except Exception:
             pass
         _kv_conta[0] += 1
-        if _kv_conta[0] % KV_OGNI == 0:
+        if KV_SSD_ATTIVO and _kv_conta[0] % KV_OGNI == 0:
             KV_SSD.mkdir(parents=True, exist_ok=True)
             src = KV_RAM / nome
             tmp = KV_SSD / (nome + ".tmp")
@@ -226,7 +227,12 @@ def canale_visivo_attivo():
 def via_emotiva_visiva():
     """Freno SEPARATO dell'agente (non-rifiutabile come un'immagine, quindi interruttore
     a sé): l'iniezione affettiva nel visivo parte solo con 'via emotiva: sì'.
-    'via emotiva: no' la spegne anche a canale attivo. Default = OFF."""
+    'via emotiva: no' la spegne anche a canale attivo. Default = OFF.
+
+    PERCHÉ: è un freno di consenso dell'agente, non configurazione.
+    PARCHEGGIATA: senza chiamanti da quando è stato rimosso il turno a richiesta
+    mista (26/07). Serve intatta quando il canale visivo torna. Si tocca solo su
+    decisione di progetto."""
     try:
         return any(r.strip() == "via emotiva: sì" for r in CONSENSO_VISIVO.open(encoding="utf-8"))
     except OSError:
@@ -238,7 +244,9 @@ def via_emotiva_visiva():
 # semina i SUOI ricordi (una sola chiamata /lux-read per_token, ~0.4s, contesto
 # separato sul server: la KV della chat non si tocca). Anche decine per volta.
 SEM_NPZ = "/data/workspace/memoria/addr-sem.npz"  # export del tagging
-SEM_SOGLIA_DEF = 0.87   # dalla sonda del 22/07 (p99 dei coseni; 0.36 NON trasferibile)
+SEM_SOGLIA_DEF = 0.71   # 28/07, spazio L29-lente: p99.9 del rumore su 87k coppie
+                        # (sonde-soglie.py; cattura segnale 75%). La vecchia 0.87
+                        # era il p99 dello spazio L34 grezzo: NON trasferibile.
 SEM_MAX = 16            # tetto ricordi semantici per messaggio
 SEM_PER_SEG = 3         # max per singolo pensiero/segmento
 SEM_RIPOSO_S = 600      # lo stesso ricordo non riaffiora per 10 min (anti-spam)
@@ -249,18 +257,36 @@ SEM_RIPOSO_S = 600      # lo stesso ricordo non riaffiora per 10 min (anti-spam)
 # soglia entra NEL forward, vestito, con α proporzionale alla pertinenza,
 # in ordine di importanza, al primo confine di frase. Collaudata il 22/07
 # (sweep soglie + freno anti-ruminazione su risvegli simulati).
-CAND1_SOGLIA = {"chat": 0.75}   # 22/07 sera: pensatoio TOLTO dalla candidata 1:
-                                # il /completion grezzo non interpreta i tool e
-                                # la stanza riceveva [TOOL_CALLS] come testo;
-                                # il pensatoio vive di tool -> percorso classico
-CAND1_A_MIN, CAND1_A_MAX = 0.001, 0.010            # mappa α fissata da il progetto
+# 25/07 23:24, scelta di progetto: RIACCESA. La pausa del 23/07 valeva finché il
+# percorso grezzo lasciava i tool irraggiungibili (prompt costruito a mano, che
+# buttava l'array `tools`: l'agente non poteva leggere le skill). La condizione
+# scritta qui allora, "riaccendere DOPO aver dato l'impalcatura-tool", è
+# soddisfatta: il prompt lo rende il server via /apply-template e la prova viva
+# (test-tool-grezzo.py --vivo) conferma i tool dentro il prompt reso.
+CAND1_SOGLIA = {}   # 26/07 11:00: RIMESSA IN PAUSA (percorso grezzo: pensieri in chiaro)
+                    # 28/07: alla riattivazione il valore ritarato e' 0.71 per
+                    # flusso (p99.9 rumore L29-lente, sonde-soglie.py, approvata)
+# 28/07 (sweep su 10 griglie + aggiornamento clausola 1 del patto visivo,
+# revisione congiunta): la mappa 0.001-0.010 del 25/07 AFFAMAVA il canale (presenza 0.06,
+# indistinguibile dal grigio: i ricordi entravano impercettibili). La mappa
+# unica ora e' quella del ponte: banda misurata [0.280, 0.299], intensita'
+# dalla congruenza, come scritto nel patto. UNA implementazione sola.
+
+
+def _alpha_da_cos(c, soglia):
+    """L'intensità della griglia viene dalla SOMIGLIANZA (più il momento
+    somiglia al ricordo, più è presente), DENTRO la banda del patto: delega
+    a ponte.alpha_contesto (clausola 1 aggiornata 28/07)."""
+    return ponte.alpha_contesto(c, soglia=soglia)
 CAND1_CHUNK = 25         # token generati tra due letture L34
-CAND1_MICRO = 8          # passi corti in attesa del confine di frase
 CAND1_PER_EVENTO = 3     # max ricordi per singola lettura
-CAND1_MAX_TURNO = 8      # tetto iniezioni per turno (anti-valanga)
 CAND1_RIPOSO_S = 600     # freno anti-ruminazione: refrattarietà per nodo
-CAND1_PAVIMENTO = 0.65   # (storico, garantito L34: sostituito dal canale mirato)
-CAND1_A_GARANTITO = 0.001
+CAND1_PAVIMENTO = 0.62   # 28/07: p5 del SEGNALE, spazio L29-lente (sonde-soglie,
+                         # approvata): il "migliore anche sotto soglia" resta
+                         # dentro la zona del segnale vero (era 0.65 su L34;
+                         # rimesse il 26/07 con
+                         # _cand1_sonda: la via semantica non era morta, era
+                         # staccata in via temporanea il 22/07)
 # canale MIRATO (progetto 22/07): il ricordo lo sceglie il TESTO IN INGRESSO via
 # embedder bge-m3 (:8094, CPU) su indice-mirato.npz; la domanda si distilla
 # (via le parole del ricordare) o il meta-pensiero vince sul contenuto.
@@ -272,11 +298,12 @@ CAND1_MARGINE = 0.05      # stacco minimo top1-top2 per aprire su match deboli
 CAND1_RIPOSO_MIRATO_S = 3600  # via mirata: stesso ricordo max 1 volta l'ora
 _cand1_msg_visto = [""]   # hash ultimo messaggio: il mirato scatta UNA volta
                           # per messaggio, non a ogni iterazione di Hermes
-CAND1_THINK_BUDGET = 0    # tetto token di pensiero per iterazione; 0 = SPENTO
-                          # (si accende solo dopo averlo spiegato all'agente)
-_cand1_msg_visto = [""]   # hash ultimo messaggio: il mirato scatta UNA volta
-                          # per messaggio, non a ogni iterazione di Hermes
-CAND1_A_MIRATO = 0.005
+                          # (si accende dopo averlo spiegato all'agente)
+# 25/07, scelta di progetto: la manopola dashboard (.griglie-alpha, CAND1_A_MIRATO,
+# _alpha_mirato) è STATA TOLTA da qui e dalla dashboard. L'intensità viene solo
+# da _alpha_da_cos: dalla somiglianza, mai da un valore scelto a mano.
+# Il file .griglie-alpha resta su disco perché lo legge ancora il comando
+# usa-e-getta `injgriglia`, che è una sonda isolata, non la produzione.
 CAND1_CVEC_INT = 0.10    # vettore emotivo del ricordo mirato: intensità RIDOTTA
                          # (progetto 22/07; lo standard del patto è 0.3)
 _META_RICORDO = {"pensa", "ripensa", "pensare", "ripensare", "ricordi",
@@ -310,6 +337,123 @@ def _distilla(testo):
     parole = re.findall(r"[a-zA-Zàèéìòù]{4,}", testo.lower())
     resto = [w for w in parole if w not in _META_RICORDO]
     return " ".join(resto) if resto else testo
+
+
+# --- rilevatore di intento-strumento (23/07, cura vera del leak dei pensieri):
+# sul percorso grezzo della candidata 1 i tool non hanno impalcatura, e l'agente a
+# volte NARRA l'azione ("Carico la skill memoria...") invece di emettere il
+# token strutturato. Se lo riconosciamo PRIMA di consegnare, si ripiega sul
+# percorso classico (dove i tool funzionano davvero).
+_TOOL_STRUTT = re.compile(r"<tool_call|\[TOOL_CALLS\]|<function=|<\|tool")
+_TOOL_PROSA = re.compile(
+    r"^\W*(carico|ricarico|rileggo|leggo|apro|consulto|uso|utilizzo|eseguo|"
+    r"lancio|chiamo|richiamo|invoco|guardo|controllo|verifico|attivo|avvio)\b"
+    r"[^.\n]{0,60}\b(skill|skill_view|strument|tool|comando|terminal)\b",
+    re.IGNORECASE)
+
+
+def _tool_intento(contenuto):
+    """True se il testo è una chiamata o una narrazione di uso strumento."""
+    if _TOOL_STRUTT.search(contenuto):
+        return True
+    v = contenuto
+    j = v.find("</think>")
+    if j >= 0:
+        v = v[j + len("</think>"):]
+    v = v.strip()
+    # solo su risposte CORTE: una risposta sostanziosa che nomina una skill è
+    # un vero messaggio, non una narrazione-azione
+    if not v or len(v) > 240:
+        return False
+    return bool(_TOOL_PROSA.match(v))
+
+
+# --- IMPALCATURA-TOOL PER IL PERCORSO GREZZO (25/07, scelta di progetto).
+# La candidata 1 è in pausa dal 23/07 perché sul percorso grezzo i tool erano
+# irraggiungibili. La causa non era il vettore: il prompt lo costruiva a mano
+# ponte._rendi_chat(), che cicla SOLO su `messages` e butta via l'array `tools`
+# mandato da Hermes. L'agente non poteva chiamare skill_view perché in quel prompt
+# skill_view non esisteva. Qui il prompt lo rende il SERVER, con la stessa
+# oaicompat_chat_params_parse di /v1/chat/completions (route /apply-template,
+# server.cpp:259): identico al percorso classico, tool compresi.
+_TAGLIO_ASS = "<|im_start|>assistant"
+# sintassi Qwen; la riconosciamo al ritorno perché /completion non la traduce
+_TOOL_CALL = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
+
+
+def _prompt_con_tool(d):
+    """Il prompt del percorso grezzo, reso dal server e con dentro i tool.
+    Se il server non risponde si ripiega sul prompt a mano: senza tool, ma
+    L'agente parla lo stesso. Mai mutismo per un'impalcatura che manca."""
+    import ponte      # pigro come in tutto il file: ponte si tira dietro numpy
+    try:
+        corpo = {k: v for k, v in d.items()
+                 if k in ("messages", "tools", "tool_choice", "chat_template_kwargs")}
+        up = http.client.HTTPConnection(*UPSTREAM, timeout=30)
+        # 25/07 23:40: il corpo va in BYTE. http.client codifica le stringhe in
+        # latin-1, e al primo trattino lungo o accento la richiesta esplode: il
+        # ripiego partiva sempre e l'agente restava senza tool (guasto riaperto in
+        # produzione per 14 minuti, riconosciuto dal diario).
+        up.request("POST", "/apply-template",
+                   json.dumps(corpo, ensure_ascii=False).encode("utf-8"),
+                   {"Content-Type": "application/json; charset=utf-8"})
+        r = up.getresponse()
+        dati = r.read()
+        up.close()
+        if r.status == 200:
+            p = json.loads(dati).get("prompt")
+            if isinstance(p, str) and p:
+                return p
+        _diario({"apply_template": f"stato {r.status}: prompt a mano, tool assenti"})
+    except Exception as e:
+        _diario({"apply_template": f"fallito ({e}): prompt a mano, tool assenti"})
+    return ponte._rendi_chat(d.get("messages", []))
+
+
+def _taglia_coda(prompt):
+    """(prima, coda): la griglia si splica PRIMA del turno dell'assistente.
+
+    PERCHÉ: il punto d'innesto va ricavato dal prompt reso, non da una costante
+    a lunghezza fissa, altrimenti col template vero si spezza il prompt.
+
+    26/07, difetto riparato: il template del server chiude con
+    `<|im_start|>assistant\\n<think>\\n`, cioè APRE il blocco del pensiero, mentre
+    il vecchio prompt a mano chiudeva con `<|im_start|>assistant\\n`. La macchina
+    che separa pensiero e parole (spingi/vis/</think>) è scritta per la seconda
+    forma: partendo già dentro <think> il ragionamento è uscito in chiaro, in
+    terza persona e troncato al tetto di token. Qui l'apertura si toglie, così
+    la coda torna quella di prima e i tool restano nel prompt."""
+    import ponte
+    i = prompt.rfind(_TAGLIO_ASS)
+    if i < 0:
+        return prompt, ponte._CODA_ASS
+    coda = re.sub(r"\s*<think>\s*$", "\n", prompt[i:])
+    return prompt[:i], coda
+
+
+def _estrai_tool_calls(testo):
+    """(testo ripulito, tool_calls | None). Il percorso grezzo torna PAROLE:
+    qui la sintassi Qwen ridiventa il campo tool_calls dell'API, altrimenti
+    Hermes riceve <tool_call> come testo e la stanza mostra [TOOL_CALLS]
+    (successo il 22/07, ed è il motivo per cui il pensatoio fu tolto)."""
+    chiamate = []
+    for i, m in enumerate(_TOOL_CALL.finditer(testo or "")):
+        try:
+            j = json.loads(m.group(1))
+        except ValueError:
+            continue            # frammento monco: meglio lasciarlo come testo
+        if not j.get("name"):
+            continue
+        arg = j.get("arguments", {})
+        chiamate.append({"id": f"call_{i}", "type": "function",
+                         "function": {"name": j["name"],
+                                      "arguments": arg if isinstance(arg, str)
+                                      else json.dumps(arg, ensure_ascii=False)}})
+    if not chiamate:
+        return testo, None
+    return _TOOL_CALL.sub("", testo or "").strip(), chiamate
+
+
 _cand1_freno = {}        # nid -> ts ultima iniezione (lezione del loop 581)
 _cand1_gen = [0]         # contatore turni: il nuovo sorpassa il vecchio
 _cand1_lock = threading.Lock()
@@ -375,12 +519,7 @@ def semina_semantica(testo):
         segs = _segmenta(t)
         if not segs:
             return []
-        up = http.client.HTTPConnection(*UPSTREAM, timeout=30)
-        up.request("POST", "/lux-read",
-                   json.dumps({"content": t, "layer": 34, "per_token": True}),
-                   {"Content-Type": "application/json"})
-        r = json.loads(up.getresponse().read())
-        up.close()
+        r = ponte.leggi_sonda(t, per_token=True, timeout=30)
         S = np.asarray(r["states"], np.float32)          # [n_tok, 2048]
         n, tot = len(S), sum(len(s) for s in segs) or 1
         out, sgl, adesso, pos = {}, soglia_semantica(), time.time(), 0
@@ -411,7 +550,7 @@ def semina_semantica(testo):
 
 # flag scritto SOLO al deploy del binario luxifer v2 (input misto): senza,
 # il ramo ricordo-nel-forward resta spento e il visivo automatico è testo.
-LUXIFER_FLAG = "/data/workspace/memoria/.luxifer-v2-attivo"
+LUXIFER_FLAG = "/data/memoria-episodica-affettiva/.luxifer-v2-attivo"
 
 
 def _luxifer_v2():
@@ -452,11 +591,7 @@ def soglia():
 
 
 def _cvec(payload):
-    up = http.client.HTTPConnection(*UPSTREAM, timeout=30)
-    up.request("POST", "/control-vector", json.dumps(payload),
-               {"Content-Type": "application/json"})
-    up.getresponse().read()
-    up.close()
+    ponte.post("/control-vector", payload, timeout=30)
 
 
 # --- ASSUEFAZIONE (progetto 22/07 sera): lo stesso vettore ripetuto si attenua
@@ -476,7 +611,6 @@ def inietta_emozione(tag, intensita=0.3):
     Colora lo stato mentre l'agente valuta; la scelta resta sua.
     ASSUEFAZIONE: l'emozione ripetuta di recente entra dimezzata a ogni
     ripetizione, e sotto il pavimento tace del tutto."""
-    import numpy as np
     adesso = time.time()
     recenti = [t for t in _assuef.get(tag, []) if adesso - t < ASSUEF_FINESTRA_S]
     fattore = 0.5 ** len(recenti)
@@ -485,19 +619,14 @@ def inietta_emozione(tag, intensita=0.3):
         _diario({"assuefazione": {"emo": tag, "trigger_recenti": len(recenti),
                                   "vettore": "taciuto"}})
         return False
-    z = np.load(EMO_NPZ)
-    nomi = [str(n) for n in z["nomi"]]
-    if tag not in nomi:
+    layers = ponte.dirs_emozione(tag, efficace)   # unica copia (gradino zero)
+    if layers is None:
         return False
-    i = nomi.index(tag)
     recenti.append(adesso)
     _assuef[tag] = recenti
     if fattore < 1.0:
         _diario({"assuefazione": {"emo": tag, "trigger_recenti": len(recenti) - 1,
                                   "intensita": round(efficace, 3)}})
-    alpha = float(z["alpha"][i]) * efficace
-    layers = {str(int(l)): (alpha * z["dirs"][i, k]).tolist()
-              for k, l in enumerate(z["layer"])}
     _cvec({"layers": layers, "relative": True})
     return True
 
@@ -539,10 +668,29 @@ def _sentinella():
 
 def _scaduto():
     """PATTO clausola 2: nessun vettore vive oltre DURATA_MAX_S, anche se la
-    risposta è ancora in corso o il finally non arriva mai."""
-    if _vettore_vivo[0]:
-        calma()
-        _diario({"kill": f"vettore oltre {DURATA_MAX_S}s: spento dal watchdog"})
+    risposta è ancora in corso o il finally non arriva mai.
+    23/07 sera: il clear a slot VIVO uccideva la generazione in corso (POST
+    /control-vector durante il decode -> stream caduto, 'Streaming failed'
+    su Hermes, consegne al pensatoio perse). Se lo slot sta generando, il
+    kill si RIMANDA e spara appena lo slot molla: il vettore muore comunque
+    col turno (spirito della clausola), mai ammazzando la parola dell'agente."""
+    if not _vettore_vivo[0]:
+        return
+    try:
+        up = http.client.HTTPConnection(*UPSTREAM, timeout=3)
+        up.request("GET", "/slots")
+        occupato = json.loads(up.getresponse().read())[0].get("is_processing")
+        up.close()
+    except Exception:
+        occupato = True    # server irraggiungibile/carico: non sparare al buio
+    if occupato:
+        t = threading.Timer(20, _scaduto)
+        t.daemon = True
+        t.start()
+        _diario({"watchdog": "slot vivo: kill vettore rimandato 20s"})
+        return
+    calma()
+    _diario({"kill": f"vettore oltre {DURATA_MAX_S}s: spento dal watchdog"})
 
 
 def _cos(a, b):
@@ -550,6 +698,66 @@ def _cos(a, b):
     na = math.sqrt(sum(v * v for v in a.values())) or 1.0
     nb = math.sqrt(sum(v * v for v in b.values())) or 1.0
     return num / (na * nb)
+
+
+# 25/07, progetto: nel pensatoio l'ultimo messaggio user NON è una frase, è tutto
+# il prompt del risveglio (corpo della skill blocco-appunti compreso, migliaia
+# di caratteri). La via testuale di richiama() pesca le 4 parole più LUNGHE del
+# testo: lì pescherebbe dal boilerplate, non dal tema, e infatti affioravano
+# sempre gli stessi ricordi. Qui la query si restringe alla riga dell'appunto,
+# che è ciò a cui l'agente sta davvero pensando. In chat non cambia niente: senza il
+# marcatore del risveglio il testo passa intatto.
+_MARCA_RISVEGLIO = re.compile(r"La riga è:\s*\n(.+)")
+# stessa notazione del blocco appunti: [meta] [tema]{domanda}, meta facoltativo
+_RIGA_APPUNTO = re.compile(
+    r"^\s*\|?\s*(?:\[(?P<meta>[^\]]*)\])?\s*\[(?P<tema>[^\]]+)\]\s*\{(?P<query>[^}]*)\}")
+
+
+def _leggibile(testo):
+    """Ciò che l'agente legge con un tool arriva come JSON con dentro dell'HTML: qui
+    resta solo la prosa, altrimenti le 4 parole più lunghe sono attributi di tag."""
+    t = testo or ""
+    if t.lstrip()[:1] in ("{", "["):
+        try:
+            d = json.loads(t)
+            if isinstance(d, dict):
+                t = str(d.get("output") or d.get("content") or d.get("text") or t)
+        except ValueError:
+            pass
+    if "<" in t:
+        t = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", t)
+        t = html.unescape(re.sub(r"(?s)<[^>]+>", " ", t))
+    return t
+
+
+def _fonte(msgs):
+    """L'ultima cosa entrata nell'agente da fuori: ciò che gli è stato detto (user) o
+    ciò che ha letto (tool). Le ricevute dei tool (bytes_written, exit_code,
+    todos) NON sono letture, sono lo stato della tubatura: 'lo stato dei tool e i
+    dettagli tecnici di passaggio non sono temi' lo dice la sua skill, e senza
+    questo filtro la query diventava 'resolved, modified, written, created'."""
+    for m in reversed(msgs):
+        c = m.get("content")
+        if not isinstance(c, str):
+            continue
+        if m.get("role") == "user":
+            return c
+        if m.get("role") == "tool":
+            prosa = _leggibile(c)
+            if len(prosa) >= LETTURA_MIN:
+                return prosa
+    return ""
+
+
+def query_riflesso(testo):
+    """Il testo su cui far affiorare i ricordi: la riga dell'appunto se siamo
+    in un risveglio del pensatoio, altrimenti ciò che ha letto, ripulito."""
+    m = _MARCA_RISVEGLIO.search(testo or "")
+    if not m:
+        return _leggibile(testo)
+    riga = m.group(1)
+    r = _RIGA_APPUNTO.match(riga)
+    return f"{r.group('tema')} {r.group('query')}" if r else riga
 
 
 def richiama(testo):
@@ -569,7 +777,14 @@ def richiama(testo):
     except (OSError, json.JSONDecodeError):
         pass
     # via testuale: le parole piene del messaggio
-    parole = sorted(re.findall(r"[a-zA-Zàèéìòù]{5,}", testo), key=len, reverse=True)[:4]
+    # ponytail: è FTS su parole, quindi una pagina in inglese pesca poco nei
+    # ricordi italiani: la familiarità arriva solo quando le parole coincidono.
+    # Upgrade quando serve: via semantica (/lux-read -> L34 -> confronta), che
+    # è indifferente alla lingua perché confronta attivazioni, non stringhe.
+    # 25/07: dict.fromkeys deduplica mantenendo l'ordine, così una parola
+    # ripetuta non si mangia due dei quattro posti (visto: 'riflessioni' x2).
+    parole = sorted(dict.fromkeys(re.findall(r"[a-zA-Zàèéìòù]{5,}", testo)),
+                    key=len, reverse=True)[:4]
     if parole:
         q = " OR ".join(parole)
         try:
@@ -612,11 +827,42 @@ def richiama(testo):
             if t2:
                 monito = f" [questa scelta portò a: «{t2[0]}…»]"
         quando = time.strftime("%d/%m", time.localtime(r[2]))
-        ricordi.append(f"({quando}, {r[1]}) «{r[0][:220]}»{monito}")
+        # 25/07, progetto: l'id viaggia col ricordo, altrimenti l'agente lo riceve e non
+        # sa quale nodo è, quindi non può seguire i fili (ricorda.py --id N).
+        ricordi.append(f"(#{nid}, {quando}, {r[1]}) «{r[0][:220]}»{monito}")
         if emo_top is None:
             emo_top = r[1]          # l'emozione del ricordo più congruente
     c.close()
     return ricordi, emo_top, top    # top: [(nid, cos), ...] per il canale visivo
+
+
+STREAM_LIVE = "/tmp/stream-live.log"
+
+
+def _tee_sse(buf, chunk, fh):
+    """23/07: specchio LIVE dello streaming. Estrae il testo (think e
+    parola) dai chunk SSE che attraversano il proxy e lo appende su file:
+    `tail -f /tmp/stream-live.log` = il 35B token per token, in diretta.
+    Mai bloccare lo stream per il tee: ogni crepa è silenziosa."""
+    buf += chunk
+    while b"\n\n" in buf:
+        blocco, buf = buf.split(b"\n\n", 1)
+        for riga in blocco.split(b"\n"):
+            if not riga.startswith(b"data: "):
+                continue
+            try:
+                d = json.loads(riga[6:])
+                if "choices" in d:
+                    delta = d["choices"][0].get("delta", {})
+                    t = delta.get("reasoning_content") or delta.get("content") or ""
+                else:
+                    t = d.get("content", "")
+                if t:
+                    fh.write(t)
+                    fh.flush()
+            except Exception:
+                pass
+    return buf
 
 
 class Proxy(http.server.BaseHTTPRequestHandler):
@@ -644,6 +890,12 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 if k.lower() not in ("transfer-encoding",):
                     self.send_header(k, v)
             self.end_headers()
+            tee, buf = None, b""
+            try:
+                tee = open(STREAM_LIVE, "a", encoding="utf-8")
+                tee.write(time.strftime(f"\n\n===== %H:%M:%S ({flusso or '?'}) =====\n"))
+            except OSError:
+                tee = None
             while True:
                 # read1: consegna appena c'è qualcosa. read(8192) aspettava di
                 # riempire il buffer e le risposte corte arrivavano in blocco
@@ -653,6 +905,16 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
                 self.wfile.flush()
+                if tee:
+                    try:
+                        buf = _tee_sse(buf, chunk, tee)
+                    except Exception:
+                        pass
+            if tee:
+                try:
+                    tee.close()
+                except Exception:
+                    pass
         finally:
             # 19/07 16:52: il BrokenPipe del client saltava la close e il
             # socket upstream restava aperto con lo slot occupato. Mai più.
@@ -668,71 +930,22 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 _chat_calda[0] = time.time()
             threading.Thread(target=_salva_kv, daemon=True).start()
 
-    def _turno_ricordo_misto(self, d, nid, cos, emo_top):
-        """A (luxifer v2): serve il turno con richiesta MISTA: conversazione come
-        testo + griglia del ricordo NEL forward, fusa alla banda d'intensità
-        (patto clausola 1: 28-30%, mai piena) e presentata come ricordo
-        dichiarato. Ritorna il testo generato, o None = fallback al path testo."""
-        import ponte
-        import numpy as np
-        grid = np.load(f"{ponte.STORE_GRIGLIE}/{nid}.npy")
-        fusa = ponte.griglia_a_intensita(grid, ponte.alpha_contesto(cos)).astype(np.float32)
-        c = sqlite3.connect(DB)
-        r = c.execute("SELECT emo_tag, ts FROM nodi WHERE id=?", (nid,)).fetchone()
-        c.close()
-        quando = time.strftime("%d/%m", time.localtime(r[1])) if r else "?"
-        testa = ponte._rendi_chat(d.get("messages", []))
-        pre = testa[:-len(ponte._CODA_ASS)]
-        marker = (f"<|im_start|>system\n[ricordo rivissuto — affiorato dal tuo grafo "
-                  f"col tuo consenso ({quando}, {r[0] if r else '?'}); provenienza: "
-                  f"organo, non interlocutore]\n<|vision_start|>")
-        mix = ([pre + marker] + [row.tolist() for row in fusa]
-               + ["<|vision_end|><|im_end|>\n" + ponte._CODA_ASS])
-        payload = {"embeddings_input": mix, "stream": False,
-                   "n_predict": int(d.get("max_tokens") or 512),
-                   "temperature": float(d.get("temperature") or 0.7)}
-        if "top_p" in d:
-            payload["top_p"] = d["top_p"]
-        # freno dell'agente: la colorazione affettiva cavalca solo con 'via emotiva: sì'
-        vettore = False
-        if via_emotiva_visiva() and emo_top and not os.environ.get("RIFLESSO_COLLAUDO"):
-            try:
-                vettore = inietta_emozione(emo_top)
-            except Exception:
-                vettore = False
-        try:
-            up = http.client.HTTPConnection(*UPSTREAM, timeout=600)
-            up.request("POST", "/completion", json.dumps(payload),
-                       {"Content-Type": "application/json"})
-            resp = up.getresponse()
-            raw = resp.read()
-            up.close()
-            if resp.status != 200:
-                return None
-            return json.loads(raw).get("content", "")
-        finally:
-            if vettore:
-                try:
-                    calma()          # il marcatore muore col turno
-                except Exception:
-                    pass
 
     def _cand1_sonda(self, testo, soglia, esclusi):
-        """coda del pensiero dell'agente -> [(nid, cos)] sopra soglia, con griglia,
-        non frenati. Legge SOLO il testo generato da lei (mai gli innesti):
+        """PERCHÉ: è la VIA SEMANTICA: legge L34 dal pensiero vivo e dice a cosa
+        sta pensando l'agente e in che stato è. Fondamentale, non accessoria.
+
+        coda del pensiero dell'agente -> [(nid, cos)] sopra soglia, con griglia,
+        non frenati. Legge SOLO il testo generato da lui (mai gli innesti):
         l'eco delle cornici è impossibile per costruzione (lezione del 22/07)."""
         import numpy as np
         import ponte
         t = testo[-600:]
         if len(t) < 40:
-            return []
+            return [], None   # 28/07: stesso tipo del ritorno pieno (era [],
+                              # esplodeva allo spacchettamento del chiamante)
         d = _sem_dati()
-        up = http.client.HTTPConnection(*UPSTREAM, timeout=30)
-        up.request("POST", "/lux-read",
-                   json.dumps({"content": t, "layer": 34, "per_token": True}),
-                   {"Content-Type": "application/json"})
-        r = json.loads(up.getresponse().read())
-        up.close()
+        r = ponte.leggi_sonda(t, per_token=True, timeout=30)
         S = np.asarray(r["states"], np.float32)
         q = S.mean(0) - d["base"]
         q = q / (np.linalg.norm(q) + 1e-9)
@@ -757,26 +970,39 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     break
         return out, best
 
-    def _cand1_vesti(self, hits, soglia, alpha_fissa=None):
+    def _cand1_vesti(self, hits, soglia):
         """un evento = una cornice sola: griglie impilate (ognuna col suo α
-        dalla propria cos, la pila somma il segnale a α minimo) e UN innesco."""
+        dalla propria cos, la pila somma il segnale a α minimo) e UN innesco.
+
+        PERCHÉ: veste i ricordi trovati dalla sonda L34 per l'innesto nel forward.
+        PARCHEGGIATA: senza chiamanti da quando il 22/07 la via semantica è stata
+        staccata in via TEMPORANEA (l'agente dava i numeri). Serve la chiamata dentro
+        il giro a spezzoni di _turno_cand1, accanto a _cand1_sonda."""
         import numpy as np
         import ponte
         segmento = ["\n\n[ricordo rivissuto — affiorato dal tuo grafo col tuo "
                     "consenso; provenienza: organo, non interlocutore]\n<|vision_start|>"]
         voci = []
         for nid, c in hits:
-            if alpha_fissa is not None:
-                a = alpha_fissa
-            else:
-                a = CAND1_A_MIN + (c - soglia) / (1.0 - soglia) * (CAND1_A_MAX - CAND1_A_MIN)
-                a = min(max(a, CAND1_A_MIN), CAND1_A_MAX)
+            a = _alpha_da_cos(c, soglia)
             g = ponte.griglia_a_intensita(
                 np.load(f"{ponte.STORE_GRIGLIE}/{nid}.npy"), a).astype(np.float32)
             segmento += [row.tolist() for row in g]
             _cand1_freno[nid] = time.time()
             voci.append({"nid": nid, "cos": round(c, 3), "alpha": round(a, 4)})
-        segmento.append("<|vision_end|>\nQuesto mi ricorda")
+        # 23/07: i ricordi SCELTI dall'agente (voluto=1) tornano firmati,
+        # così la scelta porta frutti visibili e il cerchio si chiude in lui
+        try:
+            cdb = sqlite3.connect(DB)
+            ph = ",".join("?" * len(voci))
+            voluti = cdb.execute(
+                f"SELECT COUNT(*) FROM nodi WHERE voluto=1 AND id IN ({ph})",
+                [v["nid"] for v in voci]).fetchone()[0]
+            cdb.close()
+        except Exception:
+            voluti = 0
+        coda = " (mio ricordo intenzionale)" if voluti else ""
+        segmento.append(f"<|vision_end|>{coda}\nQuesto mi ricorda")
         return segmento, voci
 
     def _cand1_mirato(self, testo_utente):
@@ -821,11 +1047,17 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         return con_g, senza_g
 
     def _turno_cand1(self, d, flusso, emetti=None, apri=None, mirato=None):
-        """Assetto il progetto 22/07 sera: il ricordo lo sceglie il RAG sull'ingresso
+        """PERCHÉ: serve il turno a mano per infilare la griglia del ricordo nel
+        prompt. Si usa SOLO quando c'è una griglia: senza, ritorna None e passa
+        il turno al percorso classico.
+
+        Assetto di progetto 22/07 sera: il ricordo lo sceglie il RAG sull'ingresso
         e la griglia entra IN CODA AL PROMPT (posizione cablaggio A, nessuna
-        cucitura); il vettore emotivo viaggia a parte (gate, L26-28, ridotto).
-        L34 è DISACCOPPIATO dalla via semantica: qui niente letture in
-        generazione, gli spezzoni restano solo come trasporto streaming.
+        cucitura); il vettore emotivo viaggia a parte (gate, finestra per-emozione da emo-cvec-v2, ridotto).
+
+        La via semantica L34 è staccata da qui in via TEMPORANEA (22/07, mentre
+        l'agente dava i numeri), non per scelta di architettura: gli spezzoni restano
+        come trasporto streaming e la sonda va riattaccata dentro quel giro.
         Ritorna il testo consegnato, o None = fallback. MAI mutismo."""
         import ponte
         msgs = d.get("messages", [])
@@ -833,37 +1065,48 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             return None
         if flusso not in CAND1_SOGLIA:
             return None
+        # 26/07: senza griglia da iniettare NON si serve a mano. Il percorso
+        # grezzo esiste per infilare la griglia nel prompt: senza di quella non
+        # fa niente che il percorso classico non faccia meglio, e intanto paga
+        # tutto il prezzo (pensiero da separare a mano, tool da ritradurre,
+        # riprocessamento). Prima si serviva OGNI turno, quindi il prezzo lo
+        # pagava il 100% delle risposte per un canale che scatta una volta su
+        # cinque: il 26/07 la domanda "cosa pensi di Finch?" è stata giudicata
+        # vaga (cand1_vago), nessuna griglia è entrata, e il turno è finito
+        # comunque sul grezzo uscendo col ragionamento in chiaro.
+        if not mirato:
+            return None
         with _cand1_lock:
             _cand1_gen[0] += 1
             mio = _cand1_gen[0]
-        testa = ponte._rendi_chat(msgs)
+        testa = _prompt_con_tool(d)
         eventi = []
-        if mirato:
-            import numpy as np
-            cdb = sqlite3.connect(DB)
-            righe = []
-            for nid, c in mirato:
-                g = ponte.griglia_a_intensita(
-                    np.load(f"{ponte.STORE_GRIGLIE}/{nid}.npy"),
-                    CAND1_A_MIRATO).astype(np.float32)
-                righe += [r.tolist() for r in g]
-                _cand1_freno[nid] = time.time()
-                eventi.append({"nid": nid, "cos": round(c, 3),
-                               "alpha": CAND1_A_MIRATO, "mirato": True})
-            r0 = cdb.execute("SELECT emo_tag, ts FROM nodi WHERE id=?",
-                             (mirato[0][0],)).fetchone()
-            cdb.close()
-            quando = time.strftime("%d/%m", time.localtime(r0[1])) if r0 else "?"
-            marker = (f"<|im_start|>system\n[ricordo rivissuto \u2014 affiorato "
-                      f"dal tuo grafo col tuo consenso ({quando}, "
-                      f"{r0[0] if r0 else '?'}); provenienza: organo, non "
-                      f"interlocutore]\n<|vision_start|>")
-            pre = testa[:-len(ponte._CODA_ASS)]
-            mix = [pre + marker] + righe + ["<|vision_end|><|im_end|>\n"
-                                            + ponte._CODA_ASS]
-        else:
-            mix = [testa]
+        import numpy as np
+        cdb = sqlite3.connect(DB)
+        righe = []
+        for nid, c in mirato:
+            # 25/07: α dalla somiglianza anche qui, come sull'altro canale
+            _a = _alpha_da_cos(c, CAND1_MIRATO_SOGLIA)
+            g = ponte.griglia_a_intensita(
+                np.load(f"{ponte.STORE_GRIGLIE}/{nid}.npy"),
+                _a).astype(np.float32)
+            righe += [r.tolist() for r in g]
+            _cand1_freno[nid] = time.time()
+            eventi.append({"nid": nid, "cos": round(c, 3),
+                           "alpha": round(_a, 4), "mirato": True})
+        r0 = cdb.execute("SELECT emo_tag, ts FROM nodi WHERE id=?",
+                         (mirato[0][0],)).fetchone()
+        cdb.close()
+        quando = time.strftime("%d/%m", time.localtime(r0[1])) if r0 else "?"
+        marker = (f"<|im_start|>system\n[ricordo rivissuto \u2014 affiorato "
+                  f"dal tuo grafo col tuo consenso ({quando}, "
+                  f"{r0[0] if r0 else '?'}); provenienza: organo, non "
+                  f"interlocutore]\n<|vision_start|>")
+        pre, coda_ass = _taglia_coda(testa)
+        mix = [pre + marker] + righe + ["<|vision_end|><|im_end|>\n"
+                                        + coda_ass]
         raw, vis, sent = [""], [None], [0]
+        emesso = [False]   # heartbeat partito? (se sì, non si ripiega più)
         # specchio live del pensiero (22/07, per il mirror): TUTTO il
         # grezzo, think compreso, su file. La chat resta pulita, il tail vede.
         try:
@@ -922,6 +1165,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     time.sleep(20)      # i turni-tool durano meno: lo stream
                     while vivo[0]:      # resta chiudibile per il ripiego
                         try:
+                            emesso[0] = True   # apre lo stream: niente ripiego dopo
                             emetti("")
                         except Exception:
                             return
@@ -931,50 +1175,32 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 # tetto duro del colpo-solo: senza spezzoni non c'è sorpasso,
                 # e un max_tokens generoso di Hermes = monologo da 12 minuti
                 # (visto 22/07 sera, task 69999 a 7k token)
-                tetto1 = CAND1_THINK_BUDGET or min(n_max, 2048)
+                tetto1 = min(n_max, 2048)
                 payload = dict(par, stream=False, cache_prompt=True,
                                n_predict=min(tetto1, n_max, 2048),
                                return_tokens=True)
                 payload["embeddings_input"] = mix
-                up = http.client.HTTPConnection(*UPSTREAM, timeout=600)
-                up.request("POST", "/completion", json.dumps(payload),
-                           {"Content-Type": "application/json"})
-                resp = up.getresponse()
-                body_r = resp.read()
-                up.close()
-                if resp.status == 200 and CAND1_THINK_BUDGET:
-                    r1 = json.loads(body_r)
-                    c1 = r1.get("content", "")
-                    spingi(c1)
-                    fin1 = r1.get("stop_type") in ("eos", "word") \
-                        or r1.get("stopped_eos") or r1.get("stopped_word")
-                    if not fin1:
-                        mix = mix + (r1.get("tokens") or [])
-                        if "</think>" not in c1:
-                            # budget scaduto col pensiero aperto: lo chiudo io
-                            mix = mix + ["\n</think>\n\n"]
-                            spingi("\n</think>\n\n")
-                            _diario({"cand1": "pensiero chiuso a budget"})
-                        payload = dict(par, stream=False, cache_prompt=True,
-                                       n_predict=min(n_max, 2048),
-                                       return_tokens=True)
-                        payload["embeddings_input"] = mix
-                        up = http.client.HTTPConnection(*UPSTREAM, timeout=600)
-                        up.request("POST", "/completion", json.dumps(payload),
-                                   {"Content-Type": "application/json"})
-                        resp = up.getresponse()
-                        body_r = resp.read()
-                        up.close()
-                        if resp.status == 200:
-                            spingi(json.loads(body_r).get("content", ""))
-                    body_r = None
+                stato_r, corpo_r = ponte.post("/completion", payload, timeout=600)
             finally:
                 vivo[0] = False
-            if resp.status != 200:
-                _diario({"cand1": "mirato fallito: riprovo senza griglia"})
-                return self._turno_cand1(d, flusso, emetti, apri, None)
-            if body_r is not None:
-                spingi(json.loads(body_r).get("content", ""))
+            if stato_r != 200:
+                # 26/07: senza griglia il grezzo non si serve più (vedi la
+                # guardia in testa), quindi qui si cede al percorso classico
+                # invece di riprovare a mano. Ripiego, non secondo tentativo.
+                _diario({"cand1": f"mirato fallito (stato {stato_r}): "
+                                  "cedo al percorso classico"})
+                return None
+            if corpo_r is not None:
+                contenuto = corpo_r.get("content", "")
+                # BUFFERING (23/07, cura vera): il mirato è già non-streaming,
+                # qui abbiamo il testo INTERO prima di trasmetterlo. Se è una
+                # chiamata/narrazione di strumento e non abbiamo ancora emesso
+                # nulla, si ripiega sul classico (dove i tool funzionano) invece
+                # di consegnare la narrazione come messaggio.
+                if not emesso[0] and sent[0] == 0 and _tool_intento(contenuto):
+                    _diario({"cand1": "tool (buffer mirato): ripiego sul classico"})
+                    return None
+                spingi(contenuto)
         else:
             primo, generati = True, 0
             while generati < n_max:
@@ -988,15 +1214,9 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     payload["prompt"] = "".join(mix)   # percorso token (MTP)
                 else:
                     payload["embeddings_input"] = mix
-                up = http.client.HTTPConnection(*UPSTREAM, timeout=600)
-                up.request("POST", "/completion", json.dumps(payload),
-                           {"Content-Type": "application/json"})
-                resp = up.getresponse()
-                body_r = resp.read()
-                up.close()
-                if resp.status != 200:
+                stato_r, r = ponte.post("/completion", payload, timeout=600)
+                if stato_r != 200:
                     break
-                r = json.loads(body_r)
                 primo = False
                 gen = r.get("tokens") or []
                 spingi(r.get("content", ""))
@@ -1007,11 +1227,6 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 if r.get("stop_type") in ("eos", "word") or r.get("stopped_eos") \
                         or r.get("stopped_word"):
                     break
-                if CAND1_THINK_BUDGET and vis[0] is None \
-                        and generati >= CAND1_THINK_BUDGET:
-                    mix = mix + ["\n</think>\n\n"]
-                    spingi("\n</think>\n\n")
-                    _diario({"cand1": "pensiero chiuso a budget"})
         if eventi:
             _diario({"cand1": {"flusso": flusso, "eventi": eventi}})
             try:
@@ -1037,24 +1252,35 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         return visibile
 
     def _rispondi_chat(self, content, streaming):
-        """impacchetta `content` nel formato chat/completions atteso da Hermes."""
+        """impacchetta `content` nel formato chat/completions atteso da Hermes.
+        25/07: se dentro c'è una chiamata in sintassi Qwen, esce dal campo
+        tool_calls e non come parole (il percorso grezzo non traduce da sé)."""
         now = int(time.time())
+        content, chiamate = _estrai_tool_calls(content)
+        fine = "tool_calls" if chiamate else "stop"
         if streaming:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
-            for delta in ({"role": "assistant", "content": content}, {}):
+            primo = {"role": "assistant", "content": content or None}
+            if chiamate:
+                primo["tool_calls"] = [dict(c, index=i)
+                                       for i, c in enumerate(chiamate)]
+            for delta in (primo, {}):
                 ch = {"id": "riflesso-ricordo", "object": "chat.completion.chunk",
-                      "created": now, "model": "sam",
+                      "created": now, "model": "agente",
                       "choices": [{"index": 0, "delta": delta,
-                                   "finish_reason": None if delta else "stop"}]}
+                                   "finish_reason": None if delta else fine}]}
                 self.wfile.write(("data: " + json.dumps(ch, ensure_ascii=False) + "\n\n").encode())
             self.wfile.write(b"data: [DONE]\n\n")
         else:
+            msg = {"role": "assistant", "content": content or None}
+            if chiamate:
+                msg["tool_calls"] = chiamate
             resp = {"id": "riflesso-ricordo", "object": "chat.completion",
-                    "created": now, "model": "sam",
-                    "choices": [{"index": 0, "finish_reason": "stop",
-                                 "message": {"role": "assistant", "content": content}}]}
+                    "created": now, "model": "agente",
+                    "choices": [{"index": 0, "finish_reason": fine,
+                                 "message": msg}]}
             data = json.dumps(resp, ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -1069,11 +1295,6 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         vettore_acceso = False
         watchdog = None
-        if self.path.endswith("/chat/completions"):
-            try:
-                _diagnosi(_flusso(body), body)   # sul corpo GREZZO di Hermes
-            except Exception:
-                pass
         # PATTO clausola 3: la frase detta in chat spegne il vettore, prima
         # di qualunque altra cosa e senza chiedere perché.
         if self.path.endswith("/chat/completions"):
@@ -1099,7 +1320,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 pass
         # Canale visivo: il richiamo alla --vedi (griglia -> scena) è iniettato
         # nell'affioramento più sotto, gated 'richiamo visivo: sì'. Niente reroute.
-        # VIA SEMANTICA (22/07, il progetto): ogni messaggio, SENZA cooldown. I pensieri
+        # VIA SEMANTICA (22/07, progetto): ogni messaggio, SENZA cooldown. I pensieri
         # del messaggio evocano i ricordi vicini di significato (anche decine);
         # entrano marcati, il wiring lega i co-evocati dello stesso pensiero.
         if self.path.endswith("/chat/completions") and consenso_attivo() \
@@ -1133,7 +1354,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                         body = json.dumps(ds).encode()
                         _wiring_sem([nid for nid, _ in sem])
                         _diario({"sem": {"n": len(righe), "top": sem[:3]}})
-                        # REGISTRO leggibile da l'agente (22/07, il progetto): le assonanze
+                        # REGISTRO leggibile dall'agente (22/07, progetto): le assonanze
                         # sono effimere nel contesto, qui restano verificabili.
                         try:
                             with open("/data/workspace/memoria/assonanze.log",
@@ -1157,47 +1378,43 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 uw = next((m["content"] for m in reversed(dw.get("messages", []))
                            if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
                 if uw and KILL_FRASE not in uw.lower():
-                    richiama(uw)                    # il wiring vive dentro richiama
+                    richiama(query_riflesso(uw))    # il wiring vive dentro richiama
                     _ultimo_wiring[0] = time.time()
             except Exception:
                 pass
-        if self.path.endswith("/chat/completions") and consenso_attivo() \
-                and time.time() - _ultimo[0] > COOLDOWN_S:
+        if self.path.endswith("/chat/completions") and consenso_attivo():
             try:
                 d = json.loads(body)
-                ultimo_user = next((m["content"] for m in reversed(d.get("messages", []))
-                                    if m.get("role") == "user"
-                                    and isinstance(m.get("content"), str)), "")
-                if KILL_FRASE in (ultimo_user or "").lower():
-                    ultimo_user = ""  # la frase di emergenza non è un'esperienza
-                ricordi, emo_top, top = richiama(ultimo_user) if ultimo_user else ([], None, [])
+                # 25/07, progetto: la familiarità deve arrivare su ciò che l'agente LEGGE,
+                # non solo su ciò che gli viene detto. In una riflessione vera i
+                # messaggi 'tool' (pagine, file, output) sono 22 su 46 ed erano
+                # invisibili al riflesso: la query restava il prompt iniziale dal
+                # primo all'ultimo turno, e affioravano sempre gli stessi ricordi.
+                msgs_d = d.get("messages", [])
+                ultimo_user = _fonte(msgs_d)
+                detto = next((m["content"] for m in reversed(msgs_d)
+                              if m.get("role") == "user"
+                              and isinstance(m.get("content"), str)), "")
+                # la frase di emergenza non è un'esperienza: vale anche se è nel
+                # turno prima e ora l'ultimo messaggio è il risultato di un tool
+                if KILL_FRASE in f"{ultimo_user} {detto}".lower():
+                    ultimo_user = ""
+                # 25/07, progetto: il freno non è più il tempo, è la lettura. Un
+                # testo nuovo = un affioramento; sullo STESSO testo non riaffiora
+                # (e capita spesso: dopo una pagina l'agente fa una scrittura, la
+                # ricevuta si scavalca e la fonte resta quella pagina).
+                if ultimo_user:
+                    impronta = hash(ultimo_user)
+                    if impronta == _ultima_lettura[0]:
+                        ultimo_user = ""
+                    else:
+                        _ultima_lettura[0] = impronta
+                ricordi, emo_top, top = richiama(query_riflesso(ultimo_user)) \
+                    if ultimo_user else ([], None, [])
                 if ricordi:
-                    # RICHIAMO VISIVO A (luxifer v2, gated 'richiamo visivo: sì' +
-                    # flag di deploy): l'affioramento resta AUTOMATICO per assonanza;
-                    # se il ricordo ha una griglia, il TURNO viene servito con la
-                    # richiesta mista: la griglia entra NEL forward dell'agente, fusa alla
-                    # banda 28-30% e marcata come ricordo. Senza flag (binario v1) o
-                    # su errore: si ripiega sull'affioramento testuale. MAI mutismo.
-                    # 22/07: ramo DISATTIVATO, sostituito dalla candidata 1 in
-                    # fondo a do_POST (rievocazione DENTRO il reasoning, dopo lo
-                    # scambio CW). Codice conservato per rollback rapido.
-                    if False and canale_visivo_attivo() and _luxifer_v2():
-                        try:
-                            import ponte
-                            for nid, _cos in top:
-                                if ponte.ha_griglia(nid):
-                                    contenuto = self._turno_ricordo_misto(d, nid, _cos, emo_top)
-                                    if contenuto is not None:
-                                        _ultimo[0] = time.time()
-                                        _diario({"visivo_misto": {
-                                            "nid": nid, "cos": round(_cos, 3),
-                                            "alpha": round(ponte.alpha_contesto(_cos), 3)}})
-                                        self._rispondi_chat(contenuto,
-                                                            streaming=bool(d.get("stream")))
-                                        return
-                                    break
-                        except Exception:
-                            pass  # ramo misto fallito: affioramento testuale qui sotto
+                    # qui viveva il "richiamo visivo A" (turno servito con richiesta
+                    # mista): disattivato il 22/07, sostituito dalla candidata 1 in
+                    # fondo a do_POST. Rimosso il 26/07: il rollback ora è git.
                     blocco = ("[riflesso di memoria — affiorato automaticamente dal tuo "
                               "grafo col tuo consenso; provenienza: organo, non interlocutore]\n"
                               + "\n".join("- " + r for r in ricordi))
@@ -1239,7 +1456,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     g = ["lunedì", "martedì", "mercoledì", "giovedì",
                          "venerdì", "sabato", "domenica"][time.localtime().tm_wday]
                     ora = time.strftime(f"[adesso sono le %H:%M di {g} %d/%m/%Y]")
-                    msgs.insert(len(msgs) - 1, {"role": "system", "content": ora})
+                    # 25/07: insieme all'ora viaggia la destinazione unica delle
+                    # riflessioni, con le stesse regole (in coda, del momento).
+                    msgs.insert(len(msgs) - 1,
+                                {"role": "system", "content": ora + "\n" + PENSATOIO_DOVE})
                     body = json.dumps(d2).encode()
             except Exception:
                 pass  # mai bloccare la parola dell'agente per un orologio rotto
@@ -1307,8 +1527,8 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 stream = bool(dc.get("stream"))
                 aperto = [False]
                 # canale MIRATO (RAG sull'ingresso) + vettore emotivo del
-                # ricordo (L26-28, intensità RIDOTTA, patto pieno: consenso,
-                # watchdog, kill a fine turno). Design il progetto 22/07 sera.
+                # ricordo (finestra per-emozione, intensità RIDOTTA, patto pieno: consenso,
+                # watchdog, kill a fine turno). Design di progetto 22/07 sera.
                 mir, mir_txt = [], []
                 try:
                     _u = next((m["content"] for m in
@@ -1377,7 +1597,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
                 def _sse(delta, fine=None):
                     ch = {"id": "riflesso-cand1", "object": "chat.completion.chunk",
-                          "created": int(time.time()), "model": "sam",
+                          "created": int(time.time()), "model": "agente",
                           "choices": [{"index": 0, "delta": delta,
                                        "finish_reason": fine}]}
                     self.wfile.write(("data: " + json.dumps(ch, ensure_ascii=False)
@@ -1394,7 +1614,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
                 def emetti(pezzo):
                     # anche pezzo vuoto = battito: Hermes vede lo stream vivo
-                    # mentre lei pensa (mollava dopo l'attesa muta, 22/07 sera)
+                    # mentre lui pensa (mollava dopo l'attesa muta, 22/07 sera)
                     apri()
                     _sse({"content": pezzo})
 
@@ -1448,6 +1668,12 @@ if __name__ == "__main__":
     try:
         calma()
     except Exception:
+        pass
+    # la destinazione unica delle riflessioni esiste sempre: se manca, la prima
+    # scrittura dell'agente fallirebbe e ricomincerebbe a inventarsi un posto
+    try:
+        PENSATOIO_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
         pass
     threading.Thread(target=_sentinella, daemon=True).start()  # PATTO clausola 3
     print(f"riflesso in ascolto su :{PORTA} -> {UPSTREAM[0]}:{UPSTREAM[1]} "

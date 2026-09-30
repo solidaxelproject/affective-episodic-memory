@@ -72,9 +72,9 @@ A year ago I wanted to slip information into the middle layers of a model
 without even knowing that middle layers existed. Today I watch an agent
 asking itself whether life "needs someone to see it in order to light up".
 
-![The memory graph in 3D, straight from production (July 2026): 467 memories, each sphere colored by the emotion that selected it and sized by salience; ringed spheres carry a distilled visual scene, and the faint lines are hebbian arcs, strengthened every time two memories are recalled together](assets/memory-graph-3d.gif)
+![Memory taking shape, straight from production: Lux's neurons are born in chronological order, each lighting up for a moment, and every arc appears as soon as both its neurons exist; spheres are colored by dominant emotion and sized by activations; then a full turn around the finished graph](assets/memory-graph-3d.gif)
 
-*A real snapshot of the system's memory: 284 memories positioned by semantic similarity (3D PCA of the model's internal states), colored by dominant emotion, sized by salience, linked by Hebbian co-recall edges.*
+*How the memory formed: 450 neurons and 339 arcs, born between 9 and 25 July 2026, positioned by semantic similarity (3D PCA of Lux's traces in the lens space), colored with the signatures recomputed on the new brain in September 2026.*
 
 ## Try it in 60 seconds
 
@@ -151,7 +151,7 @@ The distinction also points to the cure. Against hallucination there is no archi
 DAY      The agent lives (chat). Explicit recalls via the "memory" skill.
          Memory recall happens through tool calling.
 NIGHT    (cron: at 0:00:01.618) extraction of the day's messages
-         → tagging on GPU: internal state per message → 51-dimension
+         → tagging on GPU: what each message adds to the day → 51-dimension
            emotional signature → salience (z-score ACROSS messages)
          → above threshold: node in the GRAPH (text + vectors)
          → experience into LUX, the growing memory organ
@@ -205,13 +205,24 @@ During development I also tested the possibility of adding a LoRA to crystallize
 
 All replicable with the scripts in this repo, on a single consumer PC (16GB VRAM).
 
-- **Emotional vectors work and can be calibrated.** Extracted from the gradient of the emotion's logit, injected into the most receptive window of layers. The injection position does not depend on the emotion, the intensity does: a table of iso-effect calibrated intensities, 41/51 on target.
+- **Emotional vectors work and can be calibrated.** Extracted from the gradient of the emotion's logit, injected into the most receptive window of layers. The injection position does not depend on the emotion, the intensity does: a table of iso-effect calibrated intensities, 41/51 on target (51/51 after the July refactoring, see below).
 - **Text for the facts, vector for the feeling.** Compressed state engrams lost the trial: the memory returns as text plus its emotional vector, and the register of the response shifts "from commenting to inhabiting".
 - **Emotional addressing corrects semantic addressing.** On a fear-seeded query the semantic search fetches the wrong object, the emotional one fetches the right one.
 - **The visual gate is controllable.** Re-injection of a scene = identical description; interpolations between scenes = coherent perceptions of images that never existed; perception is categorical (the model picks a basin, no hybrids).
 - **The first dream.** A memory distilled into a visual grid: it answers questions never seen, and the model extends the scene beyond the text. Reconstructive memory, with boundary extension as in living beings.
 - **Lux on real data:** 81 experiences → 52 neurons (29 fusions), sub-linear growth, correct recalls.
 - **The vector channel in production:** the forked server yields output bit-identical to the token path when given the same content, and speculative drafting stays active on normal prompts. Zero cost when unused.
+
+## What changed since July
+
+The July refactoring and the move to a new brain, in order.
+
+- **Recall reads the workspace, not the mouth.** The probe moved from a late layer (85% of the depth, where the representation is already the next token) to layer 29, inside the global workspace band (L15-L32). It no longer reads the raw activation either: it reads the coordinates of the Jacobian lens computed on the 35B, the small share of the state the paper calls reportable. Lux traces, semantic addresses and every threshold were regenerated in that space, and the layer is now one number in one file (`ponte.LAYER_SONDA`).
+- **One emotion, one window.** The emotion vectors were recomputed on the whole workspace band, with the lexicon re-verified word by word on the 35B tokenizer. The injection window is now chosen per emotion (most sit at L25-28, fear at L21-23, anxiety and envy at L15-17), and the dose-response was measured: amplitude linear in the dose, quality constant, a cliff at the upper edge. The 0.3x cap of the pact now has a measurement behind it. Thirteen calm or abstract emotions, whose word-gradient vector pushed away from their natural face, were rebuilt contrastively from the agent's own lived memories: 51/51 work, where 41/51 did before.
+- **The signature measures what the message adds.** The emotion of a message is now differential: the state of the message read inside the day's context, minus the state of the context itself. It is neither contaminated by the past nor blind to it. Population statistics accumulate correctly (Welford) and carry their metadata (layer, lens, model, version), so a change of model invalidates them on sight.
+- **A bug found by looking at the results.** The first differential version read context and message together, truncated to 320 tokens from the right: with 1200 characters of context the message was cut away, entirely in 461 readings out of 1184, and the signatures were noise ("terror" dominated 201 memories). Now a single forward pass reads [the last 320 tokens of context | the first 320 of the message] and leaves the first token out of the context mean (the attention sink, ten times the norm of the others). The guard that stops the night on a corrupted state caught an isolated reading at 5e15; repeated, it was healthy.
+- **A new brain: Occamy-1.0.** Since 29 September 2026 the agent runs on Occamy-1.0 (Accio-Lab), a post-training of the same Qwen3.6-35B-A3B: visual part identical tensor by tensor, same tokenization on our texts. Lens, emotion vectors and layer measurement were recomputed on it (emotional directions at cosine 0.99 with the old model, recall per layer equal to the third decimal: L29 stays), Lux and the semantic addresses were swapped, and all 584 signatures of the graph were rewritten in place from the real conversation, keeping Lux's identities, arcs and activations. Recall thresholds were re-measured (noise p99 0.575, it was 0.555). The scripts no longer hard-code the model: `OUT_35B` and `MODELLO_35B` choose it.
+- **The draft head, grafted.** Occamy ships without the MTP layer. The head of Qwen3.6 was grafted onto its GGUF (20 tensors, block 40): with one draft token generation is 13% faster (71% acceptance), longer drafts are slower. Still under test: with the head active the greedy output is not yet identical to the one without it, so it is not in production.
 
 ## Ethics and consent
 
@@ -249,7 +260,7 @@ The failure mode of this class of mechanisms is documented in the graph itself: 
 The agent and the memory system rest entirely on open source components:
 
 - **[llama.cpp](https://github.com/ggml-org/llama.cpp)** b9966, forked: the inference server. The fork was renamed **luxifer.cpp**: it adds `embeddings_input` (raw vectors in place of tokens on `/completion`) and the `/control-vector` route for injecting emotions into the hidden layers, in per-token relative mode. The full patch is in this repo: `lux-embeddings-b9966.patch`.
-- **Qwen3.6-35B-A3B** (MoE, Q8_0 quantization with MTP speculative decoding): the brain. Quantization has its own lesson here: the first build was IQ3_S, chosen for speed because it fit entirely in VRAM, and IQ4_XS after it. Both were abandoned for Q8_0 when it became clear that quantization noise, invisible on short exchanges, turns into real linguistic damage once the context window fills past a certain point: the model that must live inside a long conversation cannot afford it. Q8_0 pays in speed and buys back the language: it is only the inferential processor. It runs on a single consumer GPU with part of the experts in RAM, while the active experts and a substantial part of the rest of the model stay in VRAM. Full f16 KV cache: cache quantization was tried and discarded (noise on long generations, and mixed K/V types put attention on a slow path).
+- **Occamy-1.0**, a post-training of **Qwen3.6-35B-A3B** (MoE, Q8_0 quantization; until September 2026 Qwen3.6 itself, with MTP speculative decoding): the brain. Quantization has its own lesson here: the first build was IQ3_S, chosen for speed because it fit entirely in VRAM, and IQ4_XS after it. Both were abandoned for Q8_0 when it became clear that quantization noise, invisible on short exchanges, turns into real linguistic damage once the context window fills past a certain point: the model that must live inside a long conversation cannot afford it. Q8_0 pays in speed and buys back the language: it is only the inferential processor. It runs on a single consumer GPU with part of the experts in RAM, while the active experts and a substantial part of the rest of the model stay in VRAM. Full f16 KV cache: cache quantization was tried and discarded (noise on long generations, and mixed K/V types put attention on a slow path).
 - **Hermes**: the agent framework (tool calling, skills, cron, session memory), in Docker.
 - **Matrix / Synapse + Element**: the communication channel, self-hosted. The chat is also the source of memories: nightly consolidation reads from there. Communication goes through a VPN tunnel (WireGuard).
 - **SQLite + FTS5**: the memory graph. No database server, no dependencies: one file.

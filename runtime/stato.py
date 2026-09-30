@@ -87,14 +87,31 @@ def gate():
         return "via-libera", "stato non inizializzato: prima volta"
     base = conf["baseline"]
     dev = max(abs(stato[e] - base.get(e, 0.0)) for e in stato)
+    # 28/07 (censimento fase 0): con le soglie 1.5/2.5 il gate non e' MAI
+    # scattato (dev osservata ~0.4 max): erano su una scala che lo stato non
+    # produce. Protocollo del registro (dec. 8): niente soglie a occhio ->
+    # prima si RACCOLGONO i dati (diario qui sotto), poi si ritara sulla
+    # distribuzione vera. Fino ad allora il gate resta com'e', dichiaratamente
+    # decorativo.
     s_cal = conf.get("gate_calibrazione", 1.5)
     s_salta = conf.get("gate_salto", 2.5)
     picco = max(stato, key=lambda e: abs(stato[e] - base.get(e, 0.0)))
     if dev >= s_salta:
-        return "salta", f"{picco} a {stato[picco]:+.2f}: motore alto, rimanda"
-    if dev >= s_cal:
-        return "calibrazione", f"{picco} a {stato[picco]:+.2f}: solo un richiamo di serenity o trust, poi stop"
-    return "via-libera", f"stato stabile (deviazione max {dev:.2f})"
+        esito = ("salta", f"{picco} a {stato[picco]:+.2f}: motore alto, rimanda")
+    elif dev >= s_cal:
+        esito = ("calibrazione", f"{picco} a {stato[picco]:+.2f}: solo un "
+                                 "richiamo di serenity o trust, poi stop")
+    else:
+        esito = ("via-libera", f"stato stabile (deviazione max {dev:.2f})")
+    try:  # diario della dev: la base dati per la ritaratura, mai bloccante
+        import json as _j
+        import time as _t
+        with open(Path(__file__).parent / "gate-diario.jsonl", "a", encoding="utf-8") as f:
+            f.write(_j.dumps({"ts": _t.time(), "dev": round(dev, 3),
+                              "picco": picco, "esito": esito[0]}) + "\n")
+    except OSError:
+        pass
+    return esito
 
 
 def descrivi(k=4):

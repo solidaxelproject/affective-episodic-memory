@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # Dashboard web di `notturna -status` (22/07): niente
 # sfarfallio, la pagina resta ferma e il JS aggiorna solo i valori.
-# Pulsanti: ferma/riavvia pensatoio (il riavvio è un gesto umano, mai di
-# automatismi) + manovre cache KV tra VRAM (slot 0),
+# Pulsanti: ferma pensatoio (MAI un pulsante di riattivazione: regola di
+# progetto, la riattivazione è un gesto umano a mano) + manovre cache KV tra VRAM (slot 0),
 # RAM (/dev/shm/agente-kv) e SSD (kv-slots). Guardie: nessuna operazione sullo
 # slot con un turno in volo; conferma esplicita lato pagina per la VRAM.
 # Solo stdlib. Uso: notturna -web [porta]   (default 8095, solo 127.0.0.1)
@@ -33,8 +33,12 @@ NOTTURNA = "/usr/local/bin/notturna"
 DORMI_FLAG = "/data/workspace/memoria/.dormi-richiesto"
 AZLOG = "/data/memoria-episodica-affettiva/notturna-web-azioni.log"
 MEMDB = "/data/workspace/memoria/memoria.db"
-STATO_AVVISO = "~/.local/state/motore-autonomia.ultimo-avviso-stanchezza"
+STATO_AVVISO = "/data/state/motore-autonomia.ultimo-avviso-stanchezza"
 GRIGLIE_MAX_FILE = "/data/memoria-episodica-affettiva/.griglie-max"
+# 25/07, scelta di progetto: il cursore dell'intensità griglie è stato TOLTO.
+# L'intensità viene dalla somiglianza (riflesso._alpha_da_cos), non da una
+# manopola: dare lo stesso α a un ricordo lontano e a uno vicino annullava
+# la modulazione, e il cursore stava a 0.05, cinque volte sopra il tetto.
 ARMATA_FILE = "/data/memoria-episodica-affettiva/.notturna-armata"
 CE_STORIA = "/data/memoria-episodica-affettiva/.ce-storia.json"
 PENS_KV = "/dev/shm/agente-kv/pensatoio.kv"
@@ -260,7 +264,7 @@ def _guardia_slot():
     """None se lo slot è libero, altrimenti il motivo del rifiuto."""
     slots = _slots()
     if slots is None:
-        return "35B giù: agente dorme, la VRAM non c'è"
+        return "35B giù: l'agente dorme, la VRAM non c'è"
     if slots and slots[0].get("is_processing"):
         return "slot occupato: turno in volo, riprova a slot libero"
     return None
@@ -309,7 +313,9 @@ def azione(op, nome):
         return (r.returncode == 0,
                 "pensatoio congelato ❄" if r.returncode == 0 else r.stderr.strip() or "pensatoio-freeze fallito")
     if op == "pensatoio_start":
-        # scatta SOLO dal click umano sulla dashboard, mai da automatismi.
+        # scatta SOLO dal click umano sulla dashboard: è l'interruttore
+        # manuale (regola di progetto, mai da automatismi); autorizzato
+        # esplicitamente il 22/07 sera.
         r = subprocess.run([FREEZE, "-off"], capture_output=True, text=True)
         return (r.returncode == 0,
                 "pensatoio riavviato ▶" if r.returncode == 0
@@ -320,7 +326,7 @@ def azione(op, nome):
         os.utime(DORMI_FLAG)
         return True, "pisolino richiesto 😴 (sveglia rapida, giorno non consolidato)"
     if op == "notturna_avvia":
-        # 22/07: il click NON parte subito, ARMA la notturna:
+        # 22/07 sera: il click NON parte subito, ARMA la notturna:
         # scatta al prossimo EOS nel pensatoio, cioè al prossimo salvataggio
         # di pensatoio.kv in RAM (il riflesso lo fa a fine di ogni stream).
         # Pensatoio congelato = nessun EOS in arrivo: si parte subito.
@@ -463,6 +469,11 @@ footer{max-width:1060px;margin:14px auto 0;color:var(--muted);font-size:12px}
     <button id="btn-pens-on" onclick="fai('pensatoio_start','')">▶ riavvia pensatoio</button>
     <button id="btn-pens" onclick="fai('pensatoio_stop','')">❄ ferma pensatoio</button>
   </div>
+  <!-- 25/07: le due finestre dell'agente, stesso servizio sulla 8096 -->
+  <div class="bottoni">
+    <button onclick="finestra('/')">🧠 stream del reasoning</button>
+    <button onclick="finestra('/diario')">📖 diario del riflesso</button>
+  </div>
 </section>
 <section><h2>Riposo</h2>
   <div class="riga"><span class="k">ultima notturna</span><span class="num" id="r-ultima">…</span></div>
@@ -536,6 +547,9 @@ const CONFERME={vram_ram:"Salvo lo SLOT VIVO in RAM come «F»? Sovrascrive la c
   vram_ssd:"Salvo lo SLOT VIVO come «F» e consolido su SSD? Sovrascrive RAM e SSD: sicura che nello slot ci sia proprio F?",
   ssd_vram:"Riporto «F» da SSD in RAM e lo ripristino nello SLOT? Sovrascrive la copia RAM (che può essere più fresca) e quello che c'è nello slot.",
   ssd_ram:"Riporto «F» da SSD in RAM? La copia RAM (che può essere più fresca) viene sovrascritta."};
+// 25/07: le finestre dell'agente vivono sulla 8096, stesso host da cui arriva questa
+// pagina (così vale anche se la dashboard è aperta con un altro nome host).
+function finestra(p){window.open(location.protocol+"//"+location.hostname+":8096"+p,"_blank");}
 async function fai(op,nome){
   const c=CONFERME[op]; if(c && !confirm(c.replaceAll("F",nome))) return;
   $("esito").textContent="… in corso ("+op.replace("_"," → ")+" "+(nome||"")+")";
@@ -653,7 +667,7 @@ async function giro(){
   $("notturna-chip").textContent=s.notturna_in_corso?"▶ notturna in corso"
     :(armata?"🌙 armata: parte al prossimo EOS del pensatoio":"");
   stato($("s-35b"),s.su,"su, agente sveglio","giù, agente dorme");
-  // isteresi 10s: mentre il pensatoio pensa fitto, la riga non sfarfalla
+  // isteresi 10s: mentre l'agente pensa fitto, la riga non sfarfalla
   // tra "in volo" e "libero" a ogni campione
   if(s.busy) busyVisto=Date.now();
   const inVolo=s.su&&(s.busy||Date.now()-busyVisto<10000);

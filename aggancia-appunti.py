@@ -9,20 +9,24 @@ import json
 import re
 import sys
 import time
-import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, "/data/memoria-episodica-affettiva")
+import ponte  # noqa: E402  (unica porta verso :8090, gradino zero 26/07)
 
 APPUNTI = Path("/data/workspace/memoria/appunti.md")
 SIDECAR = Path("/data/workspace/memoria/.appunti-agganci.json")
-BASE_PT = "/data/workspace/memoria/base-L34.pt"
-EMOVEC = "/data/models/emovec.pt"
-STATS = "/data/workspace/memoria/stats-popolazione.pt"
-LUX_READ = "http://127.0.0.1:8090/lux-read"
-LAYER = 34
-SOGLIA = 0.36        # tarata 16/07 su 25 sonde: NON è la scala di SOGLIA_ARCO
+BASE_PT = "/data/memoria-episodica-affettiva/base-L34.pt"
+EMOVEC = "/data/jspace/out-35b/emovec.pt"
+STATS = "/data/memoria-episodica-affettiva/stats-popolazione.pt"
+LAYER = ponte.LAYER_SONDA
+SOGLIA = 0.56        # 28/07, spazio L29-lente: p99 del rumore (sonde-soglie.py,
+                     # validata). Permissiva di proposito: ritenta ogni 24h.
+                     # (la 0.36 era dello spazio L34 grezzo)
 RITENTA_S = 24 * 3600   # un mancato aggancio si ritenta quando Lux è cresciuta
 
-RIGA = re.compile(r"^\s*\[(?P<tema>[^\]]+)\]\s*\{(?P<query>[^}]*)\}")
+# il | iniziale è la notazione dell'agente per "aperto" (adottata il 19/07)
+RIGA = re.compile(r"^\s*\|?\s*\[(?P<tema>[^\]]+)\]\s*\{(?P<query>[^}]*)\}")
 
 
 def righe_aperte(testo):
@@ -52,21 +56,29 @@ def potatura(sidecar, aperte):
 def aggancio_vero(testo):
     import numpy as np
     import torch
-    sys.path.insert(0, ".")
     from lux import Lux
 
-    req = urllib.request.Request(
-        LUX_READ, data=json.dumps({"content": testo, "layer": LAYER}).encode(),
-        headers={"Content-Type": "application/json"})
-    st = np.array(json.loads(urllib.request.urlopen(req, timeout=120).read())["mean"],
-                  np.float32)
-    st -= torch.load(BASE_PT, weights_only=True).float().numpy()
+    grezzo = np.array(ponte.leggi_sonda(testo, lente=False)["mean"], np.float32)
+    st = ponte.trasporta([grezzo])[0] - ponte.base_lente()   # spazio lente L29
 
-    d = torch.load(EMOVEC, weights_only=True)
-    V34 = np.stack([(v := d["vectors"][e][LAYER].float().numpy()) / np.linalg.norm(v)
-                    for e in d["vectors"]])
-    z = torch.load(STATS, weights_only=True)
-    salienza = float(((V34 @ st - z["mu"].numpy()) / (z["sd"].numpy() + 1e-6)).max())
+    # 28/07: salienza z sulle statistiche NUOVE (stats-emo-v2, spazio lente,
+    # Welford). Finche' la popolazione e' fredda (n<30) resta -1: meglio
+    # dichiarare "non so" che inventare uno z su due campioni.
+    salienza = -1.0
+    try:
+        stz = torch.load("/data/memoria-episodica-affettiva/stats-emo-v2.pt",
+                         weights_only=True)
+        if stz.get("n", 0) >= 30:
+            d18 = torch.load("/data/jspace/out-35b/emovec-18.pt",
+                             weights_only=True)
+            V = torch.stack([d18["vectors"][e][LAYER] /
+                             d18["vectors"][e][LAYER].norm()
+                             for e in d18["vectors"]]).float()
+            R = V @ torch.tensor(st, dtype=torch.float32)
+            sd = torch.sqrt(stz["M2"] / max(stz["n"] - 1, 1))
+            salienza = float(((R - stz["mean"]) / (sd + 1e-6)).max())
+    except (OSError, KeyError, RuntimeError):
+        pass
 
     hit = (Lux().confronta(st, via="semantica", k=1) or [None])[0]
     esito = {"ts": time.time(), "salienza": round(salienza, 2)}

@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS nodi (
   firma TEXT,            -- json: {emozione: z} 51-dim
   salienza REAL,
   n_richiami INTEGER DEFAULT 0,
-  classe TEXT DEFAULT 'vissuto'  -- 'vissuto' o 'letto' (regola 2 del contratto)
+  classe TEXT DEFAULT 'vissuto',  -- 'vissuto' o 'letto' (regola 2 del contratto)
+  voluto INTEGER DEFAULT 0       -- 1 = ricordo SCELTO dall'agente (23/07):
+                                 -- marcatore "voglio ricordare" o ricorda-ora
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS nodi_fts USING fts5(testo, content=nodi, content_rowid=id);
 CREATE TRIGGER IF NOT EXISTS nodi_ai AFTER INSERT ON nodi BEGIN
@@ -58,15 +60,24 @@ def _save_vec(d):
 
 
 def add_node(testo, firma, addr_sem, emo_tag, emo_alpha, salienza,
-             fonte="", ts=None, classe="vissuto"):
+             fonte="", ts=None, classe="vissuto", voluto=0):
     """Aggiunge un ricordo. firma: dict {emo: z}; addr_sem: tensor [d].
     classe: 'vissuto' (esperienza) o 'letto' (contenuto web, regola 2)."""
     c = _conn()
+    # INVARIANTE ANTI-DOPPIONE (20/07): stesso testo = stesso ricordo. Finora
+    # l'UNICA difesa era la finestra temporale dell'estrazione: una finestra
+    # sovrapposta (ri-run, marker sbagliato) ri-taggava gli stessi messaggi e
+    # nascevano nodi gemelli. Qui la porta si chiude alla radice: se il testo
+    # esiste già, si ritorna il suo id e non si crea nulla.
+    esistente = c.execute("SELECT id FROM nodi WHERE testo=? LIMIT 1", (testo,)).fetchone()
+    if esistente:
+        c.close()
+        return esistente[0]
     cur = c.execute(
-        "INSERT INTO nodi (ts, testo, fonte, emo_tag, emo_alpha, firma, salienza, classe)"
-        " VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO nodi (ts, testo, fonte, emo_tag, emo_alpha, firma, salienza, classe, voluto)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
         (ts or time.time(), testo, fonte, emo_tag, emo_alpha,
-         json.dumps(firma, ensure_ascii=False), salienza, classe))
+         json.dumps(firma, ensure_ascii=False), salienza, classe, int(voluto)))
     nid = cur.lastrowid
     c.commit()
     c.close()
@@ -157,6 +168,21 @@ def stats():
     return {"nodi": n, "archi": e, "per_emozione": per_emo}
 
 
+def consolida_notte(fattore=0.8, pavimento=0.02):
+    """SHY (Tononi): riscala giù tutti gli archi hebbiani e pota i morti.
+    Il wiring è diurno (vivo, in riflesso.richiama); qui la notte rinormalizza
+    e dimentica ciò che non è tornato. I causali (scottature) NON si toccano.
+    Chiamata da notte-memoria.sh dopo il tagging."""
+    c = _conn()
+    c.execute("UPDATE archi SET w = w * ? WHERE tipo='hebbiano'", (fattore,))
+    potati = c.execute("DELETE FROM archi WHERE tipo='hebbiano' AND w < ?",
+                       (pavimento,)).rowcount
+    c.commit()
+    vivi = c.execute("SELECT COUNT(*) FROM archi WHERE tipo='hebbiano'").fetchone()[0]
+    c.close()
+    return {"potati": potati, "archi_vivi": vivi}
+
+
 if __name__ == "__main__":
     # ponytail: self-check minimo su db temporaneo
     import tempfile
@@ -173,4 +199,8 @@ if __name__ == "__main__":
         r = recall("ricordo", mode="testo", k=1)
         assert r and r[0]["id"] in (1, 2, 3)
         assert stats()["nodi"] == 3
+        # invariante anti-doppione: ri-aggiungere lo stesso testo NON crea un nodo
+        dup = add_node("ricordo 0", f1, torch.randn(2048), "e0", 0.16, 2.0)
+        assert dup == 1, dup
+        assert stats()["nodi"] == 3, "il doppione è stato creato!"
         print("self-check OK")

@@ -78,7 +78,11 @@ ETA_POTATURA = 180 * 86400  # neuroni mai riattivati per 6 mesi -> candidati
 # simili per FORMATO, non per contenuto. La traccia L34 codifica anche il
 # registro, quindi alzare la soglia non seleziona "più affine": rischia di
 # selezionare "stesso tipo di testo". Motivo in più per non salire.
-SOGLIA_ARCO = 0.5      # sotto: nessun arco. Il neonato è solo davvero, e dirlo è la verità.
+# 28/07, spazio L29-lente: sopra il p99 del rumore tra le tracce
+# (0.572) e sotto la mediana dei vicini veri (0.624). È il raggio della
+# "prossimità corticale": due esperienze si cablano solo se stanno davvero
+# vicine. Era 0.5 sullo spazio L34 grezzo.
+SOGLIA_ARCO = 0.58     # sotto: nessun arco. Il neonato è solo davvero, e dirlo è la verità.
 
 
 class Lux:

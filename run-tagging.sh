@@ -25,3 +25,6 @@ RC=$?
 systemctl --user start llama-35b.service voce-watcher.service
 echo "rc=$RC llama=$(systemctl --user is-active llama-35b.service)"
 grep "TAGGING-COMPLETO" /data/memoria-episodica-affettiva/tagging.log || tail -5 /data/memoria-episodica-affettiva/tagging.log
+# 23/07: senza questo exit, l'ultimo grep||tail usciva SEMPRE 0 e il marker
+# avanzava anche a tagging morto (pagato: giornata del 22 non consolidata)
+exit $RC

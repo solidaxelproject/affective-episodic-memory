@@ -1,8 +1,8 @@
 # Codec Lux -> token universali (vision wormhole ammortizzato, arXiv 2602.15382).
 # UNA rete impara traccia Lux (128) -> perturbazione residuale sulla griglia
 # visiva di base (81x2048): ogni neurone di Lux diventa iniettabile all'istante
-# via canale visivo, senza distillazione per-nodo. Mittente = Lux (stati di
-# Agente), ricevente = il suo stesso 35B congelato. Nessun peso di Agente toccato.
+# via canale visivo, senza distillazione per-nodo. Mittente = Lux (stati
+# dell'agente), ricevente = il suo stesso 35B congelato. Nessun peso dell'agente toccato.
 # GATE: stesso consenso visivo della distillazione. GPU, finestra notturna.
 import argparse
 import json
@@ -65,8 +65,13 @@ for tr, nid in zip(z["tracce"], z["nodo_id"]):
     if r and r[0].strip():
         coppie.append((tr.astype(np.float32), r[0], int(nid)))
 random.Random(7).shuffle(coppie)
+# riproducibilità (16/07): senza seed l'init del codec è una lotteria; il replay
+# diagnostico ha provato che con gli stessi dati un init regge e un altro va NaN.
+torch.manual_seed(7)
 test = coppie[::5]                      # 1 su 5 held-out, mai visto in training
-train = [c for i, c in enumerate(coppie) if i % 5 != 4]
+# 16/07: era `i % 5 != 4`, che LASCIAVA tutto il test dentro il train (leak:
+# il CE held-out storico 2.98 è ottimista). Ora il train esclude i%5==0.
+train = [c for i, c in enumerate(coppie) if i % 5 != 0]
 # anti-sottodeterminazione (lezione del 13/07, tre run stallati a CE ~2.9):
 # con ~10^2 campioni un ingresso a 2048 dà al primo strato 16x parametri da
 # stimare, quasi tutti su rumore. Il codec si proietta sulle top-K componenti
@@ -74,7 +79,9 @@ train = [c for i, c in enumerate(coppie) if i % 5 != 4]
 # l'inferenza resta su tracce grezze, K cresce con i dati delle notti.
 PROJ = None
 if coppie[0][0].shape[0] > 256:
-    K_PCA = min(128, len(train))
+    # cap pilotabile (20/07): default 128 = notturna invariata; l'esperimento
+    # sweep lo alza via env quando Lux sarà grande. Vedi promemoria 500-tracce.
+    K_PCA = min(int(os.environ.get("KPCA_CAP", "128")), len(train))
     X = np.stack([c[0] for c in train])
     _, _, Vt = np.linalg.svd(X - X.mean(0), full_matrices=False)
     PROJ = Vt[:K_PCA].T.astype(np.float32).copy()   # [D_in, K_PCA]
@@ -192,22 +199,72 @@ def ce_test():
 rng = random.Random(7)
 storia, stop = [], False
 migliore = {"ce": float("inf"), "sd": None, "epoca": -1}
+PAZIENZA = 4          # early-stop (22/07): N epoche senza battere il
+senza_migliorare = 0  # migliore del run -> inutile continuare, si chiude
+
+# Baseline del campione, letta UNA volta prima del run.
+# guardia del campione: mai sovrascrivere un codec migliore con uno peggiore
+# (pagato il 14/07). Vale solo a parità di metrica (dal 16/07 holdout-v2: i CE
+# storici col leak non sono paragonabili) e a parità di dati: quando i dati
+# crescono si salva comunque, più vita > CE vecchia.
+_prev = json.load(open(f"{DIR}/esito-codec.json")) if os.path.exists(f"{DIR}/esito-codec.json") else {}
+_prev_ce = (min((e["ce_test"] for e in _prev.get("storia", [])), default=float("inf"))
+            if _prev.get("metrica") == "holdout-v2" else float("inf"))
+_prev_train = _prev.get("train", 0)
+
+
+def salva_su_disco(m, parziale):
+    """Scrive il migliore corrente: A OGNI MIGLIORAMENTO, non a fine run.
+
+    17/07: due blackout in trenta ore hanno bruciato due notti di training
+    perché tutto viveva in RAM fino alla fine. Ora un blackout costa
+    un'epoca. Scritture atomiche: tmp + replace, mai file a metà."""
+    if args.collaudo:
+        return False
+    if len(train) <= _prev_train and m["ce"] >= _prev_ce:
+        return False                      # il campione in carica resta
+    sd = m["sd"]
+    W1_exp = (sd["f.0.weight"] * SCALE).T
+    if PROJ is not None:
+        W1_exp = PROJ @ W1_exp
+    np.savez_compressed(f"{OUT}.tmp.npz",
+        W1=W1_exp, b1=sd["f.0.bias"], W2=sd["f.2.weight"].T, b2=sd["f.2.bias"],
+        Wpos=sd["pos"], gate=sd["gate"], base=BASE.cpu().numpy(), K=np.int64(K))
+    os.replace(f"{OUT}.tmp.npz", OUT)
+    esito = {"storia": storia, "train": len(train), "test": len(test),
+             "held_out_nodi": [c[2] for c in test], "metrica": "holdout-v2",
+             "quando": time.strftime("%F %T")}
+    if parziale:
+        esito["parziale"] = m["epoca"]    # run ancora in corso a quest'epoca
+    json.dump(esito, open(f"{DIR}/esito-codec.json.tmp", "w"), indent=1)
+    os.replace(f"{DIR}/esito-codec.json.tmp", f"{DIR}/esito-codec.json")
+    return True
+
+
 for ep in range(args.epoche):
     rng.shuffle(train)
-    tot = 0.0
+    tot, nstep = 0.0, 0
     for c in train:
         if datetime.now() >= DEADLINE:
             log.info("deadline: mi fermo a epoca %d", ep)
             stop = True
             break
         l, ce = loss_su(c, rng.choice(DOMANDE))
+        # guardia anti-NaN (16/07): un solo batch con loss inf/nan, e opt.step()
+        # avvelena Adam per sempre -> tutte le epoche NaN. Si salta il batch,
+        # e lo si dice: se succede spesso il problema è a monte, non qui.
+        if not torch.isfinite(l):
+            log.info("epoca %d: batch non-finito SALTATO (nodo %d)", ep, c[2])
+            continue
         opt.zero_grad()
         l.backward()
+        torch.nn.utils.clip_grad_norm_(codec.parameters(), 1.0)
         opt.step()
         tot += ce
+        nstep += 1
     if stop:
         break
-    ce_tr = tot / max(len(train), 1)
+    ce_tr = tot / max(nstep, 1)
     ce_te = ce_test()
     storia.append({"epoca": ep, "ce_train": round(ce_tr, 4),
                    "ce_test": round(ce_te, 4)})
@@ -215,25 +272,33 @@ for ep in range(args.epoche):
         migliore = {"ce": ce_te, "epoca": ep,
                     "sd": {k: v.detach().cpu().float().numpy().copy()
                            for k, v in codec.state_dict().items()}}
+        if salva_su_disco(migliore, parziale=True):
+            log.info("checkpoint su disco: epoca %d, CE held-out %.4f", ep, ce_te)
+        senza_migliorare = 0
+    else:
+        senza_migliorare += 1
     log.info("epoca %d: CE train %.4f | CE held-out %.4f", ep, ce_tr, ce_te)
+    if senza_migliorare >= PAZIENZA:
+        log.info("early-stop: %d epoche senza battere il migliore "
+                 "(epoca %d, CE %.4f): mi fermo", PAZIENZA,
+                 migliore["epoca"], migliore["ce"])
+        break
 
 if not args.collaudo:
-    sd = (migliore["sd"] if migliore["sd"] is not None else
-          {k: v.detach().cpu().float().numpy() for k, v in codec.state_dict().items()})
-    log.info("salvo il migliore: epoca %d, CE held-out %.4f",
-             migliore["epoca"], migliore["ce"])
-    W1_exp = (sd["f.0.weight"] * SCALE).T          # [d_codec, H]
-    if PROJ is not None:
-        W1_exp = PROJ @ W1_exp                     # inferenza su tracce grezze
-    np.savez_compressed(
-        OUT,
-        W1=W1_exp, b1=sd["f.0.bias"],
-        W2=sd["f.2.weight"].T, b2=sd["f.2.bias"],
-        Wpos=sd["pos"], gate=sd["gate"],
-        base=BASE.cpu().numpy(), K=np.int64(K))
-    json.dump({"storia": storia, "train": len(train), "test": len(test),
-               "held_out_nodi": [c[2] for c in test],
-               "quando": time.strftime("%F %T")},
-              open(f"{DIR}/esito-codec.json", "w"), indent=1)
-    log.info("CODEC-SALVATO: %s", OUT)
+    # 16/07: se NESSUNA epoca ha dato CE finita, non c'è niente da salvare.
+    # (prima il fallback sui pesi correnti poteva scrivere un codec avvelenato)
+    if migliore["sd"] is None:
+        log.info("CODEC-NON-SALVATO: nessuna epoca con CE finita, niente da salvare")
+        print("CODEC-FALLITO (nessuna epoca valida)")
+        sys.exit(1)
+    # promozione finale: stessi pesi dell'ultimo checkpoint, ma con la storia
+    # completa e senza il marcatore `parziale`
+    if salva_su_disco(migliore, parziale=False):
+        log.info("CODEC-SALVATO: epoca %d, CE held-out %.4f -> %s",
+                 migliore["epoca"], migliore["ce"], OUT)
+    else:
+        log.info("CODEC-NON-SALVATO: migliore %.4f non batte il campione %.4f "
+                 "a parità di dati; resta il vecchio", migliore["ce"], _prev_ce)
+        print("CODEC-COMPLETO (campione difeso)")
+        sys.exit(0)
 print("CODEC-COMPLETO" + (" (collaudo)" if args.collaudo else ""))
