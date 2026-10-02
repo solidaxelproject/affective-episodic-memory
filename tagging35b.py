@@ -25,6 +25,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")       # mai piu' rete nel rito
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
@@ -233,13 +234,14 @@ def aggiorna_stats(R, dry=False):
 def inserisci(validi, isolati, Z, emos, cvec, soglia, dry):
     """nodi nel grafo; ritorna {indice: (nid, classe)} e le firme salvate"""
     nomi_cv = [str(x) for x in cvec["nomi"]]
-    creati, firme_salvate, salvati = {}, [], 0
+    creati, firme_salvate, salvati, scartati = {}, [], 0, []
     for i, m in enumerate(validi):
         firma = {e: round(Z[i, j].item(), 3) for j, e in enumerate(emos)}
         salienza = max(firma.values())
         testo = m["testo"]
         if salienza < soglia and not m.get("forzato"):
             log.info("SCARTO (z=%.2f) %s", salienza, testo[:60])
+            scartati.append(i)
             continue
         dominante = max(firma, key=firma.get)
         alpha = float(cvec["centro"][nomi_cv.index(dominante)])
@@ -257,7 +259,7 @@ def inserisci(validi, isolati, Z, emos, cvec, soglia, dry):
             salvati += 1
     log.info("TAGGING-COMPLETO: %d nodi salvati su %d messaggi", salvati,
              len(validi))
-    return creati, firme_salvate
+    return creati, firme_salvate, scartati
 
 
 def alimenta_lux(creati, validi, isolati, Z, emos):
@@ -281,6 +283,45 @@ def alimenta_lux(creati, validi, isolati, Z, emos):
     except Exception:
         log.exception("CRITICO: Lux non ha ricevuto le esperienze (il grafo "
                       "le ha; backfill con lux-demo.py)")
+
+
+def persistenza_notte(scartati, validi, isolati, Z, emos, cvec):
+    """Fasi 2-3 della persistenza (30/09, PIANO-PERSISTENZA-LUX.md): i messaggi
+    scartati non spariscono. Se sono di nuovo la stessa cosa di un neurone, lo
+    stabilizzano (eco); se no alimentano un tema, che diventa ricordo quando
+    torna abbastanza (abitudine). Ritorna i nodi promossi."""
+    try:
+        import persistenza
+        from lux import Lux
+        nomi_cv = [str(x) for x in cvec["nomi"]]
+        ordine = sorted(emos)                    # l'ordine delle firme in Lux
+        col = [emos.index(e) for e in ordine]
+
+        def promuovi(testo, f51, stato, ts, giorni):
+            firma = {e: round(float(x), 3) for e, x in zip(ordine, f51)}
+            dominante = max(firma, key=firma.get)
+            alpha = float(cvec["centro"][nomi_cv.index(dominante)])
+            return memoria.add_node(testo, firma, torch.tensor(stato), dominante, alpha,
+                                    max(firma.values()), fonte="abitudine", ts=ts,
+                                    classe="vissuto")
+
+        sc = []
+        for i in scartati:
+            testo = validi[i]["testo"]
+            if re.search(r"https?://|www\.", testo):   # regola 2: il "letto" non entra
+                continue
+            sc.append((isolati[i].numpy(), Z[i, col].numpy(), testo,
+                       validi[i].get("ts") or time.time()))
+        esito = persistenza.notte(Lux(), sc, promuovi=promuovi)
+        log.info("PERSISTENZA: eco %d su %d neuroni, temi %d (+%d, -%d), promossi %d, potati %d",
+                 esito["eco"], esito["neuroni_eco"], esito["temi"], esito["temi_nuovi"],
+                 esito["temi_dimenticati"], len(esito["promossi"]), esito["potati"])
+        for testo, nid in esito["promossi"]:
+            log.info("ABITUDINE -> nodo %s: %s", nid, testo[:60])
+        return esito["promossi"]
+    except Exception:
+        log.exception("persistenza NON eseguita (eco e abitudini saltano una notte)")
+        return []
 
 
 def imprimi_omeostato(firme_salvate):
@@ -347,15 +388,20 @@ def main():
     Z = (R - mean) / (sd + 1e-6)
 
     cvec = np.load(CVEC)
-    creati, firme = inserisci(validi, isolati, Z, emos, cvec,
-                              args.soglia, args.dry)
-    if args.dry or not creati:
+    creati, firme, scartati = inserisci(validi, isolati, Z, emos, cvec,
+                                        args.soglia, args.dry)
+    if args.dry:
         return
-    if os.path.exists(CODA):
-        os.remove(CODA)
-        log.info("coda ricorda-ora svuotata")
-    alimenta_lux(creati, validi, isolati, Z, emos)
-    imprimi_omeostato(firme)
+    if creati:
+        if os.path.exists(CODA):
+            os.remove(CODA)
+            log.info("coda ricorda-ora svuotata")
+        alimenta_lux(creati, validi, isolati, Z, emos)
+        imprimi_omeostato(firme)
+    # anche nelle notti senza nodi nuovi: eco, temi e oblio vanno avanti
+    promossi = persistenza_notte(scartati, validi, isolati, Z, emos, cvec)
+    if not (creati or promossi):
+        return
     try:
         aggiorna_sidecar(mu)
     except Exception:

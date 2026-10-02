@@ -61,7 +61,72 @@ D_TRACCIA = 2048
 # collegare: è il contrario. Riaprire solo a log cresciuto.
 SOGLIA_NOVITA = 0.001  # distanza coseno oltre cui l'esperienza è "nuova" -> neurone
 HABITUAZIONE = 0.10    # quanto il neurone vincente si sposta verso l'input familiare
-ETA_POTATURA = 180 * 86400  # neuroni mai riattivati per 6 mesi -> candidati
+# ---------- persistenza (30/09, PIANO-PERSISTENZA-LUX.md, fase 1) ----------
+# Prima: pota() a gradino, 180 giorni di CALENDARIO dall'ultimo uso. Nessun
+# richiamo diurno passa da Lux (riflesso e ricorda.py leggono il grafo), e i
+# mesi da spenta contavano come oblio: dal 07/01/2027 la notturna avrebbe
+# cominciato a potare tutti i 450 neuroni. Ora:
+#   - l'orologio e' il TEMPO VISSUTO (notturne riuscite, tempo-vissuto.json):
+#     da spenta non si dimentica
+#   - ogni neurone ha una stabilita' S e una ritenzione R. Curva dell'oblio a
+#     LEGGE DI POTENZA, come quella umana (Wixted & Ebbesen 1991; forma di FSRS,
+#     modello addestrato su milioni di ripetizioni umane):
+#         R(t) = (1 + F * t / S) ** DECAY,  F = 19/81, DECAY = -0.5
+#     S = giorni vissuti dopo cui R scende a 0.9. La coda e' lunga: un ricordo
+#     sbiadisce ma non si azzera in fretta (il "permastore" di Bahrick, 1984)
+#   - a ogni riattivazione S cresce con la formula di FSRS (richiamo riuscito, difficolta' di un 'good'):
+#         S <- S * (1 + K * S**(-B) * (exp(C * (1 - R)) - 1) * peso)
+#     R = 1 (stesso giorno) -> crescita zero: dieci richiami ammassati valgono uno;
+#     R basso (stava svanendo) -> crescita forte: effetto spaziatura (Ebbinghaus,
+#     Cepeda 2006); S**(-B): rendimenti decrescenti sui ricordi gia' stabili
+#   - un ricordo nasce piu' stabile se e' emotivamente forte: l'arousal potenzia
+#     il consolidamento (McGaugh 2004). S0 = S_BASE * fattore(salienza)
+#   - si pota quando R < R_MIN
+# Valori scelti su criterio di memoria umana (scelta di progetto, 30/09).
+S_BASE = 3.173     # FSRS (pesi di default a 19, w2): stabilita' iniziale di un ricordo appreso una volta ("good")
+AROUSAL_MAX = 3.0  # un ricordo emotivamente fortissimo nasce fino a 3x piu' stabile
+F_CURVA, DECAY = 19 / 81, -0.5
+# pesi di default di FSRS (19 parametri): w8 = 1.54575, w9 = 0.1192, w10 = 1.01925; difficolta' iniziale di un
+# "good" D0 = w4 - e^(2 w5) + 1 = 5.28 (w4 = 7.1949, w5 = 0.5345). Fonte: borretti.me/article/implementing-fsrs-in-100-lines
+_D0 = 7.1949 - np.exp(2 * 0.5345) + 1
+K_FSRS, B_FSRS, C_FSRS = float(np.exp(1.54575) * (11 - _D0)), 0.1192, 1.01925
+R_MIN = 0.10       # sotto: potato. Con S = 3 vuol dire ~3.5 anni vissuti senza mai tornare
+S_MAX = 36500.0    # 100 anni vissuti: di fatto nessun tetto, come in FSRS
+# attributi per-neurone: UNA lista sola per pota/consolida/salva (prima erano tre
+# copie scritte a mano, e un array nuovo dimenticato in una si disallineava)
+ATTR_NEURONE = ("tracce", "firme", "attivazioni", "nati", "ultimo_uso",
+                "nodo_id", "nato_da", "ids", "stabilita", "ultimo_vissuto", "echi")
+
+
+def curva(delta, s):
+    """ritenzione dopo delta giorni vissuti con stabilita' s (legge di potenza)"""
+    return (1 + F_CURVA * delta / s) ** DECAY
+
+
+def cresci(s, r, peso=1.0):
+    """stabilita' dopo una riattivazione avvenuta a ritenzione r (formula FSRS)"""
+    return min(S_MAX, s * (1 + K_FSRS * s ** (-B_FSRS) * (np.exp(C_FSRS * (1 - r)) - 1) * peso))
+
+
+def _file_orologio():
+    return FILE.parent / "tempo-vissuto.json"   # accanto a lux.npz (anche nei test)
+
+
+def orologio():
+    """giorni vissuti finora (0 se l'orologio non e' mai partito)"""
+    try:
+        return int(json.load(open(_file_orologio()))["giorni"])
+    except (OSError, ValueError, KeyError):
+        return 0
+
+
+def avanza_orologio():
+    """+1 giorno vissuto: la chiama la notturna a lavoro riuscito, e solo lei."""
+    g = orologio() + 1
+    tmp = _file_orologio().with_suffix(".tmp")
+    json.dump({"giorni": g, "ultimo_avanzamento": time.time()}, open(tmp, "w"))
+    tmp.replace(_file_orologio())
+    return g
 # Similarità minima per legare un neonato a chi era il più vicino al parto.
 # Senza, l'arco non direbbe "vicini": direbbe "sei il meno lontano fra gli
 # estranei che esistevano quando sono nato", e chi nasce per primo in una zona
@@ -110,6 +175,16 @@ class Lux:
             self.archi = meta.get("archi", {})
             self.ids = (z["ids"] if "ids" in z.files
                         else self._battesimo())   # npz vecchio: migrazione
+            # persistenza (30/09): npz vecchio -> S dalle attivazioni, orologio
+            # ripartito da oggi (i mesi passati da spenta non sono oblio)
+            oggi = orologio()
+            att = self.attivazioni.astype(np.float32)
+            self.stabilita = (z["stabilita"] if "stabilita" in z.files else
+                              np.array([self.stabilita_iniziale(f) for f in self.firme], np.float32)
+                              * (1 + np.log(np.maximum(att, 1))).astype(np.float32))
+            self.ultimo_vissuto = (z["ultimo_vissuto"] if "ultimo_vissuto" in z.files
+                                   else np.full(len(self.tracce), float(oggi)))
+            self.echi = z["echi"] if "echi" in z.files else np.zeros(len(self.tracce), np.int32)
             self.nodi = meta.get("nodi")
             if self.nodi is None:   # meta d'epoca: l'unica cosa che sappiamo di
                 self.nodi = {       # ogni neurone è il nodo con cui è nato
@@ -126,6 +201,9 @@ class Lux:
             self.mu = np.zeros(D_TRACCIA, np.float32)
             self.archi = {}
             self.ids = np.zeros(0, f"<U{D_ID}")
+            self.stabilita = np.zeros(0, np.float32)
+            self.ultimo_vissuto = np.zeros(0, np.float64)
+            self.echi = np.zeros(0, np.int32)
             self.nodi = {}
         assert len(self.ids) == len(self.tracce), "ids e tracce disallineati"
 
@@ -210,6 +288,7 @@ class Lux:
                 self.firme[best] += HABITUAZIONE * (f - self.firme[best])
                 self.attivazioni[best] += 1
                 self.ultimo_uso[best] = adesso
+                self.rinforza(best)
                 if len(sims) > 1:  # arco topologico verso il secondo vicino
                     second = int(np.argsort(sims)[-2])
                     self._arco(best, second)
@@ -226,6 +305,9 @@ class Lux:
         self.nodo_id = np.append(self.nodo_id, nodo_id)
         self.nato_da = np.append(self.nato_da, vincente)
         self.ids = np.append(self.ids, self.nuovo_id())
+        self.stabilita = np.append(self.stabilita, np.float32(self.stabilita_iniziale(f)))
+        self.ultimo_vissuto = np.append(self.ultimo_vissuto, float(orologio()))
+        self.echi = np.append(self.echi, np.int32(0))
         nuovo = len(self.tracce) - 1
         self._assorbe(nuovo, nodo_id)
         # ARCO DI NASCITA (15/07). Prima l'arco nasceva SOLO nel ramo del
@@ -295,6 +377,7 @@ class Lux:
         for i in np.argsort(-sims)[:k]:
             self.attivazioni[i] += 1
             self.ultimo_uso[i] = adesso
+            self.rinforza(i)
             out.append(self._esito(sims, i))
         return out
 
@@ -355,13 +438,34 @@ class Lux:
                         "forza": round(f, 3), "salti": d})
         return out
 
-    def pota(self):
-        """Rimuove i neuroni non riattivati da ETA_POTATURA (oblio strutturale)."""
-        vivi = (time.time() - self.ultimo_uso) < ETA_POTATURA
+    # ---------- persistenza (30/09) ----------
+    @staticmethod
+    def stabilita_iniziale(firma):
+        """S0: S_BASE, fino a AROUSAL_MAX volte se la firma e' emotivamente forte.
+        La salienza e' lo z massimo della firma; 1.8 e' la soglia del tagging."""
+        return S_BASE * float(np.clip(np.max(firma) / 1.8, 1.0, AROUSAL_MAX))
+
+    def ritenzione(self, oggi=None):
+        """R per neurone, legge di potenza: (1 + F * giorni vissuti / S) ** DECAY"""
+        oggi = orologio() if oggi is None else oggi
+        return curva(np.maximum(oggi - self.ultimo_vissuto, 0.0), self.stabilita)
+
+    def rinforza(self, i, peso=1.0, oggi=None):
+        """Riattivazione vissuta del neurone i: S cresce tanto piu' quanto il
+        ricordo stava svanendo (R basso). Stesso giorno vissuto: R = 1, crescita
+        zero, quindi dieci richiami in un giorno valgono uno. NON tocca traccia,
+        firma, attivazioni ne' ultimo_uso: quelli li gestisce chi chiama."""
+        oggi = orologio() if oggi is None else oggi
+        self.stabilita[i] = cresci(float(self.stabilita[i]), float(self.ritenzione(oggi)[i]), peso)
+        self.ultimo_vissuto[i] = float(oggi)
+
+    def pota(self, oggi=None):
+        """Oblio strutturale (30/09): via i neuroni con ritenzione < R_MIN.
+        Prima: 180 giorni di calendario dall'ultimo uso, a gradino."""
+        vivi = self.ritenzione(oggi) >= R_MIN
         rimossi = int((~vivi).sum())
         morti = set(self.ids[~vivi].tolist())
-        for attr in ("tracce", "firme", "attivazioni", "nati", "ultimo_uso",
-                     "nodo_id", "nato_da", "ids"):
+        for attr in ATTR_NEURONE:
             setattr(self, attr, getattr(self, attr)[vivi])
         # 15/07: prima era `self.archi = {}` — con gli indici che scalavano, ogni
         # potatura corrompeva TUTTI gli archi e l'unica difesa era buttarli.
@@ -398,6 +502,9 @@ class Lux:
             self.attivazioni[a] += self.attivazioni[b]
             self.nati[a] = min(self.nati[a], self.nati[b])  # nascita = la più antica
             self.ultimo_uso[a] = max(self.ultimo_uso[a], self.ultimo_uso[b])
+            self.stabilita[a] = max(self.stabilita[a], self.stabilita[b])
+            self.ultimo_vissuto[a] = max(self.ultimo_vissuto[a], self.ultimo_vissuto[b])
+            self.echi[a] += self.echi[b]
             if self.nodo_id[a] < 0:
                 self.nodo_id[a] = self.nodo_id[b]  # tieni un link al testo
             # b viene assorbito in a: le sue connessioni sono ora di a. Prima
@@ -421,8 +528,7 @@ class Lux:
                 rimasti[nk] = rimasti.get(nk, 0) + peso
             self.archi = rimasti
             keep = np.arange(len(self.tracce)) != b
-            for attr in ("tracce", "firme", "attivazioni", "nati", "ultimo_uso",
-                         "nodo_id", "nato_da", "ids"):
+            for attr in ATTR_NEURONE:
                 setattr(self, attr, getattr(self, attr)[keep])
             fusioni += 1
             cambiato = True
@@ -447,7 +553,8 @@ class Lux:
             FILE, tracce=self.tracce, firme=self.firme,
             attivazioni=self.attivazioni, nati=self.nati,
             ultimo_uso=self.ultimo_uso, nodo_id=self.nodo_id,
-            nato_da=self.nato_da, mu=self.mu, ids=self.ids)
+            nato_da=self.nato_da, mu=self.mu, ids=self.ids,
+            stabilita=self.stabilita, ultimo_vissuto=self.ultimo_vissuto, echi=self.echi)
         json.dump({"archi": self.archi, "nodi": self.nodi,
                    "n_neuroni": len(self.tracce)}, open(META, "w"))
 
@@ -499,5 +606,34 @@ if __name__ == "__main__":
     assert top[0]["nodo_id"] == 1, top
     # 4. il neurone sa cosa ha assorbito (C2)
     assert all(v for v in g.nodi.values()), "neuroni senza nodi assorbiti"
+    # 5. PERSISTENZA (30/09)
+    # 5a. il tempo da spenta non e' oblio: senza notturne l'orologio non avanza
+    assert (g.ritenzione() > 0.99).all(), "oblio senza tempo vissuto"
+    # 5b. ammassato contro distanziato: 5 richiami nello stesso giorno vissuto
+    #     contro 5 richiami a 20 giorni vissuti di distanza
+    a_, b_ = 0, 1
+    s_a, s_b = float(g.stabilita[a_]), float(g.stabilita[b_])
+    for _ in range(5):
+        g.rinforza(a_, oggi=0)
+    for k_ in range(1, 6):
+        g.rinforza(b_, oggi=20 * k_)
+    assert abs(g.stabilita[a_] - s_a) < 1e-6, "i richiami ammassati non devono contare"
+    assert g.stabilita[b_] > 3 * s_b, f"i distanziati devono stabilizzare: {g.stabilita[b_]}"
+    # 5c. un neurone mai riusato sparisce quando R < R_MIN, uno stabile resta
+    s2 = float(g.stabilita[2])
+    giorno_morte = int(np.ceil(s2 * (R_MIN ** (1 / DECAY) - 1) / F_CURVA)) + 1
+    r_ = g.ritenzione(oggi=100 + giorno_morte)
+    assert r_[2] < R_MIN and r_[b_] >= R_MIN, (r_[2], r_[b_])
+    # 5d. l'orologio avanza solo con avanza_orologio(), e sopravvive al ricarico
+    assert avanza_orologio() == 1 and orologio() == 1
+    g.salva()
+    g2 = Lux()
+    assert np.allclose(g2.stabilita, g.stabilita) and len(g2.echi) == len(g2.tracce)
+    # 5e. pota() su R: 100 giorni vissuti dopo, restano solo i rinforzati
+    n_prima = len(g2.tracce)
+    potati_ = g2.pota(oggi=100 + giorno_morte)
+    assert potati_ == n_prima - 1 and len(g2.stabilita) == len(g2.tracce) == 1, potati_
     print(f"self-check OK: 30 esperienze -> {len(g.tracce)} neuroni distinti, "
-          f"{intra} archi dentro i cluster + {ponti} ponti, richiamo emotivo corretto")
+          f"{intra} archi dentro i cluster + {ponti} ponti, richiamo emotivo corretto; "
+          f"persistenza: ammassati 0 crescita, distanziati S {s_b:.0f}->{g.stabilita[b_]:.0f}, "
+          f"oblio di un neurone mai riusato a {giorno_morte} giorni vissuti, orologio fermo da spenta")

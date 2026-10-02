@@ -1442,7 +1442,11 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     with open(DIARIO, "a", encoding="utf-8") as f:
                         f.write(json.dumps({"ts": time.time(), "n": len(ricordi),
                                             "vettore": emo_top if vettore_acceso else None,
-                                            "ricordi": ricordi}, ensure_ascii=False) + "\n")
+                                            "ricordi": ricordi,
+                                            # 30/09 persistenza: gli id servono alla notturna
+                                            # per rinforzare i neuroni di Lux (solo diario)
+                                            "nid": [int(n) for n, _ in top]},
+                                           ensure_ascii=False) + "\n")
             except Exception:
                 pass  # mai bloccare la parola dell'agente per un riflesso rotto
         # ORA ATTUALE (19/07, richiesta di progetto): l'agente vuole sapere che ora è

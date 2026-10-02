@@ -45,9 +45,17 @@ if [ ! -s "$J" ]; then
   touch /data/workspace/memoria/.ultima-notturna
   exit 0
 fi
+# PERSISTENZA (30/09, PIANO-PERSISTENZA-LUX.md): i richiami del giorno passano dal
+# grafo; qui, PRIMA del tagging (che pota Lux), diventano riattivazioni dei neuroni.
+/data/jspace/venv/bin/python sincronizza-richiami.py \
+  || echo "$(date -Iseconds) sincronia richiami FALLITA (non critico: la prossima notte li riprende)"
 bash run-tagging.sh "$J" \
   || { echo "$(date -Iseconds) tagging FALLITO: marker fermo, la prossima notte rimedia"; exit 1; }
 touch "$MARKER"
+# un giorno VISSUTO in piu' per l'oblio di Lux: solo a notturna riuscita con
+# messaggi veri (una notte senza chat, o da spento, non fa dimenticare)
+/data/jspace/venv/bin/python -c "import lux; print('$(date -Iseconds) giorni vissuti:', lux.avanza_orologio())" \
+  || echo "$(date -Iseconds) orologio vissuto NON avanzato (non critico)"
 # specchio nel workspace dell'agente: dormita-quando.py lo legge per dirgli
 # quanto manca alla prossima notturna possibile (lui non vede memoria-episodica-affettiva)
 touch /data/workspace/memoria/.ultima-notturna

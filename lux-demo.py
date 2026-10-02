@@ -25,7 +25,7 @@ VEC = "/data/workspace/memoria/vettori.pt"
 def carica_memorie():
     v = torch.load(VEC, weights_only=True)
     c = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-    righe = c.execute("SELECT id, ts, firma, emo_tag, testo, classe FROM nodi "
+    righe = c.execute("SELECT id, ts, firma, emo_tag, testo, classe, n_richiami FROM nodi "
                       "WHERE classe='vissuto' ORDER BY ts").fetchall()
     c.close()
     return [(r, v[r[0]]["addr_sem"].float().numpy()) for r in righe if r[0] in v]
@@ -56,7 +56,10 @@ def ricostruisci(memorie):
     for (r, st) in memorie:
         firma = json.loads(r[2])
         f51 = np.array([firma[e] for e in sorted(firma)], np.float32)
-        _, esito = g.esperisci(st, f51, nodo_id=r[0])
+        i, esito = g.esperisci(st, f51, nodo_id=r[0])
+        # persistenza (30/09): chi era stato richiamato non rinasce fragile; stessa
+        # regola della migrazione di lux.py, con i richiami del grafo al posto delle attivazioni
+        g.stabilita[i] = min(lux_mod.S_MAX, float(g.stabilita[i]) * (1 + np.log(1 + (r[6] or 0))))
         nati += esito == "nato"
         rinforzati += esito == "rinforzato"
     g.salva()

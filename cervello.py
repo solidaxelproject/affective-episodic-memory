@@ -32,7 +32,7 @@ if db.exists():
 
 # --- Lux
 try:
-    from lux import Lux
+    from lux import Lux, orologio
     lux = Lux()
     st = lux.stats()
     print(f"\nLUX (organo di memoria crescente)")
@@ -44,6 +44,20 @@ try:
         print(f"  più antico: {eta_g.max():.1f} giorni | "
               f"più attivo: neurone {int(lux.attivazioni.argmax())} "
               f"({int(lux.attivazioni.max())} attivazioni)")
+        # persistenza (30/09): quanto regge ogni ricordo, in giorni VISSUTI
+        r = lux.ritenzione()
+        print(f"  persistenza: {orologio()} giorni vissuti | stabilità mediana "
+              f"{np.median(lux.stabilita):.1f}, massima {lux.stabilita.max():.1f} | "
+              f"stabili (S ≥ 30) {int((lux.stabilita >= 30).sum())} | "
+              f"sbiaditi (R < 0.5) {int((r < 0.5).sum())} | eco ricevute {int(lux.echi.sum())}")
+        try:
+            import persistenza
+            temi = persistenza.Temi()
+            print(f"  temi candidati ad abitudine: {len(temi.centri)}, "
+                  f"più vicino alla soglia: stabilità {temi.stab.max() if len(temi.stab) else 0:.1f}"
+                  f"/{persistenza.S_ABITUDINE:.1f}")
+        except Exception as e:
+            print(f"  temi candidati: non disponibili ({e})")
 except Exception as e:
     print(f"\nLUX: non disponibile ({e})")
 
