@@ -33,7 +33,7 @@ injection point as the memory codec.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                      EAR CODEC  ·  ARCHITECTURE (5 inputs)                   ║
+║           EAR CODEC  ·  ARCHITECTURE (5 inputs: 1 text + 4 neural)           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
                                  AUDIO (16 kHz)
@@ -44,23 +44,23 @@ injection point as the memory codec.
 ║Qwen3-ASR ║ ║  CLAP    ║  ║  MERT    ║  ║ Dasheng  ║  ║emotion2vec ║    FROZEN
 ║  1.7B    ║ ║ (larger) ║  ║  95M     ║  ║  base    ║  ║ plus base  ║    (CPU)
 ║ words    ║ ║sound↔text║  ║ music    ║  ║ ambience ║  ║voice/emot. ║
-║ d=2048   ║ ║ d=768    ║  ║ d=768    ║  ║ d=768    ║  ║ d=768      ║
+║ → TEXT   ║ ║ d=768    ║  ║ d=768    ║  ║ d=768    ║  ║ d=768      ║
 ╚════╦═════╝ ╚═════╦════╝  ╚═════╦════╝  ╚═════╦════╝  ╚═════╦══════╝
-     ║ last layer  ║             ║             ║             ║
-╔════╩═════╗ ╔═════╩════╗  ╔═════╩════╗  ╔═════╩════╗  ╔═════╩══════╗
-║ BRIDGE 1 ║ ║ BRIDGE 2 ║  ║ BRIDGE 3 ║  ║ BRIDGE 4 ║  ║  BRIDGE 5  ║  TRAINED
-║ W3h+W2·  ║ ║          ║  ║          ║  ║          ║  ║            ║  (RecursiveMAS
-║ GELU(W1h)║ ║  →1024   ║  ║  →1024   ║  ║  →1024   ║  ║   →1024    ║  outer links)
-║ +input#1 ║ ║ +input#2 ║  ║ +input#3 ║  ║ +input#4 ║  ║ +input#5   ║
-╚════╦═════╝ ╚═════╦════╝  ╚═════╦════╝  ╚═════╦════╝  ╚═════╦══════╝
-     ╚═════════════╩══════╦══════╩═════════════╩═════════════╝
-                          ║  5 sequences side by side, each with its own
-                          ║  input tag (they work simultaneously)
-╔═════════════════════════╩════════════════════════════════════════════════════╗
+     ║transcript   ║ last layer  ║             ║             ║
+     ║        ╔════╩═════╗ ╔═════╩════╗  ╔═════╩════╗  ╔═════╩══════╗
+     ║        ║ BRIDGE 1 ║ ║ BRIDGE 2 ║  ║ BRIDGE 3 ║  ║  BRIDGE 4  ║  TRAINED
+     ║        ║ W3h+W2·  ║ ║          ║  ║          ║  ║            ║  (RecursiveMAS
+     ║        ║ GELU(W1h)║ ║  →1024   ║  ║  →1024   ║  ║   →1024    ║  outer links)
+     ║        ║ +input#1 ║ ║ +input#2 ║  ║ +input#3 ║  ║ +input#4   ║
+     ║        ╚════╦═════╝ ╚═════╦════╝  ╚═════╦════╝  ╚═════╦══════╝
+     ║             ╚═════════════╩══════╦══════╩═════════════╝
+     ║                                  ║  4 sequences side by side, each with
+     ║                                  ║  its own input tag
+╔════╩══════════════════════════════════╩══════════════════════════════════════╗
 ║  e5 READER · 24 layers, d=1024                                               ║
-║  ┄┄ layers 1-11: FROZEN, skipped by audio (they only serve text)             ║
+║  ┄┄ layers 1-11: FROZEN, crossed only by the transcript text                 ║
 ║  ══ ENTRY POINT OF THE BRIDGES: input of layer 12                            ║
-║  ██ layers 12-24: UNFROZEN (13)  ← learn to read the 5 inputs together       ║
+║  ██ layers 12-24: UNFROZEN (13)  ← read text and audio together              ║
 ╚═════════════════════════╦════════════════════════════════════════════════════╝
                           ║
 ╔═════════════════════════╩════════════════════════════════════════════════════╗
@@ -78,17 +78,24 @@ injection point as the memory codec.
 ║  OCCAMY 35B (frozen) · visual span at L0 ← grid                              ║
 ║                        emotion window ← steering vector × alpha              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
+
+  ASR transcript ──► bge-m3 ──► targeted memory channel ──► memories
+                                (same path as the incoming text)
 ```
 
 ### The five audio models (frozen)
 
-| input | model | content | last-layer size |
+| input | model | content | how it enters the codec |
 |---|---|---|---|
-| 1 | Qwen/Qwen3-ASR-1.7B | the words (audio encoder output) | 2048 |
-| 2 | laion/larger_clap_music_and_speech | sound linked to text | 768 |
-| 3 | m-a-p/MERT-v1-95M | music: timbre, rhythm, mood | 768 |
-| 4 | mispeech/dasheng-base | ambient sounds | 768 |
-| 5 | emotion2vec/emotion2vec_plus_base | the emotion in the voice | 768 |
+| text | Qwen/Qwen3-ASR-1.7B | the words | transcript, read by the e5 reader like the memory codec's text |
+| 1 | laion/larger_clap_music_and_speech | sound linked to text | bridge, last layer d=768 |
+| 2 | m-a-p/MERT-v1-95M | music: timbre, rhythm, mood | bridge, last layer d=768 |
+| 3 | mispeech/dasheng-base | ambient sounds | bridge, last layer d=768 |
+| 4 | emotion2vec/emotion2vec_plus_base | the emotion in the voice | bridge, last layer d=768 |
+
+The ASR is connected to the codec **through text**, with no neural bridge. The transcript enters the e5 reader
+from the first layer, in the same format as the memory codec, and meets the audio from layer 12 on.
+The same transcript is used for memory retrieval (see below).
 
 Dasheng replaces BEATs. On the HEAR benchmark, which evaluates frozen encoders, it averages 78.9 against
 71.1 for BEATs iter3+, and 80.2 against 73.2 on environmental sounds (arXiv 2406.06992). It also has public
@@ -103,7 +110,7 @@ One bridge per model, shaped like the RecursiveMAS outer link:
 
     R(h) = W3·h + W2·GELU(W1·h)
 
-The linear branch `W3` carries the vector from the audio model's space (768 or 2048) to the reader's space
+The linear branch `W3` carries the vector from the audio model's space (768) to the reader's space
 (1024). The non-linear branch only corrects the difference between the two distributions. Each bridge adds a
 learned input tag, so the codec knows which model each piece of the sequence comes from.
 Each model's input is standardized (mean and standard deviation measured on the data).
@@ -113,8 +120,9 @@ Each model's input is standardized (mean and standard deviation measured on the 
 It is a copy of the memory codec:
 
 - **reader** multilingual-e5-large, 24 layers. In the memory codec the first 11 are frozen and the last 13
-  unfrozen. In EAR the bridges enter at **layer 12**, the start of the unfrozen part: audio skips the layers
-  that only serve to read text;
+  unfrozen. In EAR the transcript goes through all 24 layers, the bridges enter at **layer 12**,
+  the start of the unfrozen part: audio skips the layers that only serve to read text.
+  At most 256 text tokens and 4×64 audio tokens, 512 in total;
 - **Perceiver head**, 8 layers, H=1024, 8 heads, 8 learned queries.
 
 ### The two outputs
@@ -125,6 +133,12 @@ It is a copy of the memory codec:
 2. **JEV (emotion)**: a 2048 vector. The chosen emotion is the one, among the 51 of Plutchik's wheel, whose
    steering vector is nearest: the 51 vectors already measured on Occamy act as fixed anchors. The strength of
    the choice gives the dose, always inside the injection window measured for that emotion.
+
+### Memory retrieval
+
+While EAR listens, the ASR transcript goes through bge-m3 and looks for memories in the targeted channel of the
+memory system, the same one the incoming text uses today. The memories found enter the visual channel as grids,
+through their usual mechanism. The internal reading path at layer 29 is left out: it is not practical for audio.
 
 ## Training
 
@@ -138,8 +152,8 @@ It is a copy of the memory codec:
 ║   → reference grids saved ONCE (text → par 8×2048)                           ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ PHASE 1 · BRIDGES (Occamy off, GPU almost free)                              ║
-║   audio → 5 encoders → 5 bridges → same copy FROZEN → par                    ║
-║   loss = distance from the teacher's par  ·  ONLY the 5 bridges are trained  ║
+║   transcript + audio → 4 encoders → 4 bridges → same copy FROZEN → par       ║
+║   loss = distance from the teacher's par  ·  ONLY the 4 bridges are trained  ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ PHASE 2 · 5-INPUT CODEC                                                      ║
 ║   unfreeze e5 layers 12-24 + Perceiver together with the bridges, same loss  ║
@@ -154,7 +168,7 @@ It is a copy of the memory codec:
 
 The logic is the wormhole's: teacher and student use the same codec. The teacher reads the **text** paired
 with the audio (transcript, description of the sound or of the music) and produces the right grid. The student
-starts from the **audio** and has to reach the same grid. Reference grids are computed only once, so phases 1
+starts from the **audio**, that is the ASR transcript plus the 4 neural inputs, and has to reach the same grid. Reference grids are computed only once, so phases 1
 and 2 do not need the 35B model.
 
 The rules learned while training the memory codec still apply: no Adam on bf16 weights, standardized inputs,
@@ -209,6 +223,9 @@ content. It stays outside the codec: possibly a separate module.
 - [x] Emotion anchors measured (6 dyads out of 8 reachable)
 - [x] Script: extraction of the last layers of the 5 models and disk cache (separate venv)
 - [x] Script: bridges, 5-input codec, JEV head (shape test and dry run of phases 1-2 on fake data)
+- [x] ASR connected through text instead of a bridge: transcript into the e5 reader, 4 bridges (scripts updated,
+      dry run to be redone)
+- [ ] Memory retrieval from the transcript (bge-m3, targeted channel)
 - [x] Script: phase 0, retraining the codec copy with "...sto udendo"
 - [x] Script: phases 1-3 and report card
 - [x] First dataset: 1000 synthetic emotional speech clips (200 Italian sentences × 5 emotions), 20 sentences held out

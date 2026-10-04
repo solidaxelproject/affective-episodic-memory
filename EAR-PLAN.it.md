@@ -33,7 +33,7 @@ punto d'iniezione del codec dei ricordi.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                    CODEC EAR  ·  ARCHITETTURA (5 ingressi)                   ║
+║          CODEC EAR  ·  ARCHITETTURA (5 ingressi: 1 testo + 4 neurali)        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
                                  AUDIO (16 kHz)
@@ -44,23 +44,23 @@ punto d'iniezione del codec dei ricordi.
 ║Qwen3-ASR ║ ║  CLAP    ║  ║  MERT    ║  ║ Dasheng  ║  ║emotion2vec ║   CONGELATI
 ║  1.7B    ║ ║ (larger) ║  ║  95M     ║  ║  base    ║  ║ plus base  ║   (CPU)
 ║ parole   ║ ║suono↔testo║ ║ musica   ║  ║ ambiente ║  ║ voce/emoz. ║
-║ d=2048   ║ ║ d=768    ║  ║ d=768    ║  ║ d=768    ║  ║ d=768      ║
+║ → TESTO  ║ ║ d=768    ║  ║ d=768    ║  ║ d=768    ║  ║ d=768      ║
 ╚════╦═════╝ ╚═════╦════╝  ╚═════╦════╝  ╚═════╦════╝  ╚═════╦══════╝
-     ║ultimo layer ║             ║             ║             ║
-╔════╩═════╗ ╔═════╩════╗  ╔═════╩════╗  ╔═════╩════╗  ╔═════╩══════╗
-║ PONTE 1  ║ ║ PONTE 2  ║  ║ PONTE 3  ║  ║ PONTE 4  ║  ║  PONTE 5   ║  ADDESTRATI
-║ W3h+W2·  ║ ║          ║  ║          ║  ║          ║  ║            ║  (outer link
-║ GELU(W1h)║ ║  →1024   ║  ║  →1024   ║  ║  →1024   ║  ║   →1024    ║  RecursiveMAS)
-║ +ingr.#1 ║ ║ +ingr.#2 ║  ║ +ingr.#3 ║  ║ +ingr.#4 ║  ║ +ingr.#5   ║
-╚════╦═════╝ ╚═════╦════╝  ╚═════╦════╝  ╚═════╦════╝  ╚═════╦══════╝
-     ╚═════════════╩══════╦══════╩═════════════╩═════════════╝
-                          ║  5 sequenze affiancate, ognuna con la sua
-                          ║  etichetta d'ingresso (lavorano in simultanea)
-╔═════════════════════════╩════════════════════════════════════════════════════╗
+     ║trascrizione ║ultimo layer ║             ║             ║
+     ║        ╔════╩═════╗ ╔═════╩════╗  ╔═════╩════╗  ╔═════╩══════╗
+     ║        ║ PONTE 1  ║ ║ PONTE 2  ║  ║ PONTE 3  ║  ║  PONTE 4   ║  ADDESTRATI
+     ║        ║ W3h+W2·  ║ ║          ║  ║          ║  ║            ║  (outer link
+     ║        ║ GELU(W1h)║ ║  →1024   ║  ║  →1024   ║  ║   →1024    ║  RecursiveMAS)
+     ║        ║ +ingr.#1 ║ ║ +ingr.#2 ║  ║ +ingr.#3 ║  ║ +ingr.#4   ║
+     ║        ╚════╦═════╝ ╚═════╦════╝  ╚═════╦════╝  ╚═════╦══════╝
+     ║             ╚═════════════╩══════╦══════╩═════════════╝
+     ║                                  ║  4 sequenze affiancate, ognuna con la sua
+     ║                                  ║  etichetta d'ingresso
+╔════╩══════════════════════════════════╩══════════════════════════════════════╗
 ║  LETTORE e5 · 24 strati, d=1024                                              ║
-║  ┄┄ strati 1-11: CONGELATI, li salta l'audio (servono solo al testo)         ║
+║  ┄┄ strati 1-11: CONGELATI, li attraversa solo il testo della trascrizione   ║
 ║  ══ PUNTO D'INGRESSO DEI PONTI: entrata dello strato 12                      ║
-║  ██ strati 12-24: SCONGELATI (13)  ← imparano a leggere i 5 ingressi insieme ║
+║  ██ strati 12-24: SCONGELATI (13)  ← leggono testo e audio insieme           ║
 ╚═════════════════════════╦════════════════════════════════════════════════════╝
                           ║
 ╔═════════════════════════╩════════════════════════════════════════════════════╗
@@ -78,17 +78,24 @@ punto d'iniezione del codec dei ricordi.
 ║  OCCAMY 35B (congelato) · span visivo a L0 ← griglia                         ║
 ║                           finestra dell'emozione ← vettore di steering×alpha ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
+
+  trascrizione ASR ──► bge-m3 ──► canale mirato della memoria ──► ricordi
+                                  (stesso percorso del testo in ingresso)
 ```
 
 ### I cinque modelli audio (congelati)
 
-| ingresso | modello | contenuto | dimensione dell'ultimo layer |
+| ingresso | modello | contenuto | come entra nel codec |
 |---|---|---|---|
-| 1 | Qwen/Qwen3-ASR-1.7B | le parole (uscita dell'encoder audio) | 2048 |
-| 2 | laion/larger_clap_music_and_speech | il suono collegato al testo | 768 |
-| 3 | m-a-p/MERT-v1-95M | la musica: timbro, ritmo, umore | 768 |
-| 4 | mispeech/dasheng-base | i suoni dell'ambiente | 768 |
-| 5 | emotion2vec/emotion2vec_plus_base | l'emozione della voce | 768 |
+| testo | Qwen/Qwen3-ASR-1.7B | le parole | trascrizione, letta dal lettore e5 come il testo del codec dei ricordi |
+| 1 | laion/larger_clap_music_and_speech | il suono collegato al testo | ponte, ultimo layer d=768 |
+| 2 | m-a-p/MERT-v1-95M | la musica: timbro, ritmo, umore | ponte, ultimo layer d=768 |
+| 3 | mispeech/dasheng-base | i suoni dell'ambiente | ponte, ultimo layer d=768 |
+| 4 | emotion2vec/emotion2vec_plus_base | l'emozione della voce | ponte, ultimo layer d=768 |
+
+L'ASR si aggancia al codec **attraverso il testo**, senza ponte neurale. La trascrizione entra nel lettore e5
+dal primo strato, con lo stesso formato del codec dei ricordi, e incontra l'audio dallo strato 12 in poi.
+La stessa trascrizione serve al recupero dei ricordi (vedi sotto).
 
 Dasheng prende il posto di BEATs. Sul benchmark HEAR, che valuta proprio gli encoder congelati, ha una media di
 78.9 contro 71.1 di BEATs iter3+, e 80.2 contro 73.2 sui suoni ambientali (arXiv 2406.06992). In più ha pesi
@@ -103,7 +110,7 @@ Un ponte per modello, nella forma dell'outer link di RecursiveMAS:
 
     R(h) = W3·h + W2·GELU(W1·h)
 
-Il ramo lineare `W3` porta il vettore dallo spazio del modello audio (768 o 2048) allo spazio del lettore (1024).
+Il ramo lineare `W3` porta il vettore dallo spazio del modello audio (768) allo spazio del lettore (1024).
 Il ramo non lineare corregge solo la differenza fra le due distribuzioni. Ogni ponte aggiunge un'etichetta
 d'ingresso imparata, così il codec sa da quale modello arriva ogni pezzo della sequenza.
 L'ingresso di ogni modello è standardizzato (media e deviazione standard misurate sui dati).
@@ -113,8 +120,9 @@ L'ingresso di ogni modello è standardizzato (media e deviazione standard misura
 È una copia del codec dei ricordi:
 
 - **lettore** multilingual-e5-large, 24 strati. Nel codec dei ricordi i primi 11 sono congelati e gli ultimi
-  13 scongelati. In EAR i ponti entrano allo **strato 12**, cioè all'inizio della parte scongelata: l'audio
-  salta gli strati che servono solo a leggere il testo;
+  13 scongelati. In EAR la trascrizione attraversa tutti i 24 strati, i ponti entrano allo **strato 12**,
+  cioè all'inizio della parte scongelata: l'audio salta gli strati che servono solo a leggere il testo.
+  Massimo 256 token di testo e 4×64 token audio, 512 in tutto;
 - **testa Perceiver**, 8 strati, H=1024, 8 teste, 8 domande imparate.
 
 ### Le due uscite
@@ -125,6 +133,13 @@ L'ingresso di ogni modello è standardizzato (media e deviazione standard misura
 2. **JEV (emozione)**: un vettore di 2048. L'emozione scelta è quella, fra le 51 della ruota di Plutchik, il
    cui vettore di steering è più vicino: i 51 vettori già misurati su Occamy fanno da ancore fisse. La forza
    della scelta dà la dose, sempre dentro la finestra di iniezione misurata per quell'emozione.
+
+### Il recupero dei ricordi
+
+Mentre EAR ascolta, la trascrizione dell'ASR passa per bge-m3 e cerca i ricordi nel canale mirato della
+memoria, lo stesso che oggi usa il testo in ingresso. I ricordi trovati entrano come griglie nel canale visivo,
+con il loro meccanismo abituale. Il percorso di lettura interna allo strato 29 resta fuori: per l'audio non è
+praticabile.
 
 ## Addestramento
 
@@ -138,8 +153,8 @@ L'ingresso di ogni modello è standardizzato (media e deviazione standard misura
 ║   → griglie di riferimento salvate UNA volta (testo → par 8×2048)            ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ FASE 1 · PONTI (Occamy spento, GPU quasi libera)                             ║
-║   audio → 5 encoder → 5 ponti → stessa copia CONGELATA → par                 ║
-║   loss = distanza da par dell'insegnante   ·  si addestrano SOLO i 5 ponti   ║
+║   trascrizione + audio → 4 encoder → 4 ponti → stessa copia CONGELATA → par  ║
+║   loss = distanza da par dell'insegnante   ·  si addestrano SOLO i 4 ponti   ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ FASE 2 · CODEC A 5 INGRESSI                                                  ║
 ║   sblocco e5 strati 12-24 + Perceiver insieme ai ponti, stessa loss          ║
@@ -154,7 +169,8 @@ L'ingresso di ogni modello è standardizzato (media e deviazione standard misura
 
 La logica è quella del wormhole: insegnante e studente usano lo stesso codec. L'insegnante legge il **testo**
 appaiato all'audio (trascrizione, descrizione del suono o della musica) e produce la griglia giusta.
-Lo studente parte dall'**audio** e deve arrivare alla stessa griglia. Le griglie di riferimento si calcolano una
+Lo studente parte dall'**audio**, cioè dalla trascrizione dell'ASR più i 4 ingressi neurali, e deve arrivare
+alla stessa griglia. Le griglie di riferimento si calcolano una
 volta sola, quindi nelle fasi 1 e 2 il modello da 35B non serve.
 
 Valgono le regole imparate addestrando il codec dei ricordi: niente Adam su pesi in bf16, ingressi
@@ -210,6 +226,9 @@ contenuto. Resta fuori dal codec: eventualmente un modulo a parte.
 - [x] Ancore emotive misurate (6 diadi su 8 raggiungibili)
 - [x] Script: estrazione degli ultimi layer dei 5 modelli e cache su disco (venv separato)
 - [x] Script: ponti, codec a 5 ingressi, testa JEV (prova di forma e prova a secco delle fasi 1-2 su dati finti)
+- [x] ASR agganciato via testo invece che con un ponte: trascrizione nel lettore e5, 4 ponti (script aggiornati,
+      da rifare la prova a secco)
+- [ ] Recupero dei ricordi dalla trascrizione (bge-m3, canale mirato)
 - [x] Script: fase 0, riaddestramento della copia del codec con "...sto udendo"
 - [x] Script: fasi 1-3 e pagella
 - [x] Primo dataset: 1000 clip vocali emotive sintetiche (200 frasi italiane × 5 emozioni), 20 frasi held-out
