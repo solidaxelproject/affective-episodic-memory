@@ -277,6 +277,10 @@ Tutto gira in locale, su un solo PC: nessuna API esterna, nessun dato che lascia
 - Storage: NVMe Samsung 990 PRO 1TB per modelli e dati
 - OS: Linux Mint 22.3
 
+## EAR, il codec audio (in progettazione)
+
+EAR converte l'audio in una griglia per il canale visivo del modello, come fa il codec dei ricordi con il testo, e in parallelo sceglie l'emozione da iniettare come vettore di steering. Cinque modelli audio congelati (Qwen3-ASR, CLAP, MERT, Dasheng, emotion2vec) sono collegati con ponti addestrati a una copia del codec dei ricordi con 5 ingressi. Architettura, fasi di addestramento e stato: [EAR-PLAN.it.md](EAR-PLAN.it.md).
+
 ## Sviluppi futuri
 
 Due sviluppi sul tavolo, entrambi costruiti sullo stesso canale visivo che il

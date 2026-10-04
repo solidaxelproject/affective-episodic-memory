@@ -277,6 +277,10 @@ Everything runs locally, on one PC: no external APIs, no data leaving the machin
 - Storage: Samsung 990 PRO 1TB NVMe for models and data
 - OS: Linux Mint 22.3
 
+## EAR, the audio codec (in design)
+
+EAR converts audio into a grid for the model's visual channel, the same way the memory codec does with text, and in parallel picks the emotion to inject as a steering vector. Five frozen audio models (Qwen3-ASR, CLAP, MERT, Dasheng, emotion2vec) are connected through trained bridges to a 5-input copy of the memory codec. Architecture, training phases and status: [EAR-PLAN.md](EAR-PLAN.md).
+
 ## Future directions
 
 Two developments are on the table, both building on the same visual channel
