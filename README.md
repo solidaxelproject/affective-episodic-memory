@@ -193,6 +193,7 @@ The resulting structures act as:
 | `ricorda-ora.py` (`runtime/`) | "Remember this": a queue that consolidates during sleep, as it does for humans |
 | `riflesso.py` | The pre-action memory reflex: a transparent proxy between agent framework and model server; congruent memories surface on their own before the agent answers, gated by the agent's consent file (see below) |
 | `dormi.sh` (`runtime/`) + `dormi-esegui.sh` | The agent's voluntary sleep: the agent asks, the host stops the container, rotates the session id (a true fresh awakening, since gateway sessions persist on disk), restarts |
+| `persistenza.py` + `sincronizza-richiami.py` | Persistence: lived-time forgetting curve, stability that grows with spaced recall, echoes of repeated everyday messages, habits born from frequency |
 | `cervello.py` | Overview: graph, Lux, state, recalls |
 
 **`gradino4/`, consolidation into the weights** (built, tested, deactivated by choice)
@@ -223,6 +224,8 @@ The July refactoring and the move to a new brain, in order.
 - **A bug found by looking at the results.** The first differential version read context and message together, truncated to 320 tokens from the right: with 1200 characters of context the message was cut away, entirely in 461 readings out of 1184, and the signatures were noise ("terror" dominated 201 memories). Now a single forward pass reads [the last 320 tokens of context | the first 320 of the message] and leaves the first token out of the context mean (the attention sink, ten times the norm of the others). The guard that stops the night on a corrupted state caught an isolated reading at 5e15; repeated, it was healthy.
 - **A new brain: Occamy-1.0.** Since 29 September 2026 the agent runs on Occamy-1.0 (Accio-Lab), a post-training of the same Qwen3.6-35B-A3B: visual part identical tensor by tensor, same tokenization on our texts. Lens, emotion vectors and layer measurement were recomputed on it (emotional directions at cosine 0.99 with the old model, recall per layer equal to the third decimal: L29 stays), Lux and the semantic addresses were swapped, and all 584 signatures of the graph were rewritten in place from the real conversation, keeping Lux's identities, arcs and activations. Recall thresholds were re-measured (noise p99 0.575, it was 0.555). The scripts no longer hard-code the model: `OUT_35B` and `MODELLO_35B` choose it.
 - **The draft head, grafted.** Occamy ships without the MTP layer. The head of Qwen3.6 was grafted onto its GGUF (20 tensors, block 40): with one draft token generation is 13% faster (71% acceptance), longer drafts are slower. Still under test: with the head active the greedy output is not yet identical to the one without it, so it is not in production.
+
+- **Persistence: what is lived every day stabilizes.** Forgetting used to be a step: a neuron not reused for 180 calendar days was pruned, and the months the agent spent switched off counted as oblivion (from January 2027 the whole organ would have gone). Everyday recalls also went through the graph and never touched Lux. Now the clock is lived time (nights of consolidation), and every neuron has a stability and a retention that follow the human forgetting curve, a power law (Wixted & Ebbesen; FSRS, fitted on millions of human reviews). A recall made while the memory was fading stabilizes it a lot, ten recalls in one day count as one: the spacing effect. Emotionally intense memories are born more stable (McGaugh). The daily recalls reach Lux every night. And the messages under the salience threshold no longer vanish: one that is the same thing again as an existing memory gives it an echo, weaker than a recall (the testing effect); one that is new opens a theme, and a theme that keeps coming back on different days becomes a memory when its repetitions have made it as stable as a single very intense episode. Frequency stands in for intensity.
 
 ## Ethics and consent
 
@@ -279,7 +282,7 @@ Everything runs locally, on one PC: no external APIs, no data leaving the machin
 
 ## EAR, the audio codec (in design)
 
-EAR converts audio into a grid for the model's visual channel, the same way the memory codec does with text, and in parallel picks the emotion to inject as a steering vector. Five frozen audio models (Qwen3-ASR, CLAP, MERT, Dasheng, emotion2vec) are connected through trained bridges to a 5-input copy of the memory codec. Architecture, training phases and status: [EAR-PLAN.md](EAR-PLAN.md).
+EAR converts audio into a grid for the model's visual channel, the same way the memory codec does with text, and in parallel picks the emotion to inject as a steering vector. The Qwen3-ASR transcript enters the codec as text; four frozen audio models (CLAP, MERT, Dasheng, emotion2vec) are connected through trained bridges to a 5-input copy of the memory codec. The same transcript looks up the memories to recall. Architecture, training phases and status: [EAR-PLAN.md](EAR-PLAN.md).
 
 ## Future directions
 
