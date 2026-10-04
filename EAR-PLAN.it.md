@@ -42,9 +42,9 @@ punto d'iniezione del codec dei ricordi.
      ║             ║               ║               ║               ║             ║
 ╔════╩═════╗ ╔═════╩════╗  ╔═══════╩══╗  ╔═════════╩╗  ╔═══════════╩╗            ║
 ║Qwen3-ASR ║ ║  CLAP    ║  ║  MERT    ║  ║ Dasheng  ║  ║emotion2vec ║   CONGELATI
-║  0.6B    ║ ║ (larger) ║  ║  95M     ║  ║  base    ║  ║ plus base  ║   (CPU)
+║  1.7B    ║ ║ (larger) ║  ║  95M     ║  ║  base    ║  ║ plus base  ║   (CPU)
 ║ parole   ║ ║suono↔testo║ ║ musica   ║  ║ ambiente ║  ║ voce/emoz. ║
-║ d=1024   ║ ║ d=768    ║  ║ d=768    ║  ║ d=768    ║  ║ d=768      ║
+║ d=2048   ║ ║ d=768    ║  ║ d=768    ║  ║ d=768    ║  ║ d=768      ║
 ╚════╦═════╝ ╚═════╦════╝  ╚═════╦════╝  ╚═════╦════╝  ╚═════╦══════╝
      ║ultimo layer ║             ║             ║             ║
 ╔════╩═════╗ ╔═════╩════╗  ╔═════╩════╗  ╔═════╩════╗  ╔═════╩══════╗
@@ -84,7 +84,7 @@ punto d'iniezione del codec dei ricordi.
 
 | ingresso | modello | contenuto | dimensione dell'ultimo layer |
 |---|---|---|---|
-| 1 | Qwen/Qwen3-ASR-0.6B | le parole | 1024 |
+| 1 | Qwen/Qwen3-ASR-1.7B | le parole (uscita dell'encoder audio) | 2048 |
 | 2 | laion/larger_clap_music_and_speech | il suono collegato al testo | 768 |
 | 3 | m-a-p/MERT-v1-95M | la musica: timbro, ritmo, umore | 768 |
 | 4 | mispeech/dasheng-base | i suoni dell'ambiente | 768 |
@@ -94,8 +94,8 @@ Dasheng prende il posto di BEATs. Sul benchmark HEAR, che valuta proprio gli enc
 78.9 contro 71.1 di BEATs iter3+, e 80.2 contro 73.2 sui suoni ambientali (arXiv 2406.06992). In più ha pesi
 pubblici su Hugging Face con licenza Apache-2.0.
 
-Esistono versioni più grandi (Qwen3-ASR-1.7B, MERT-v1-330M, emotion2vec_plus_large). Si parte dalle piccole
-per la velocità: tutti e cinque girano su CPU, circa 500M di parametri in tutto.
+Per Qwen3-ASR si usa la versione 1.7B, la più precisa. Per gli altri esistono versioni più grandi
+(MERT-v1-330M, emotion2vec_plus_large): si parte dalle piccole per la velocità.
 
 ### I ponti
 
@@ -103,7 +103,7 @@ Un ponte per modello, nella forma dell'outer link di RecursiveMAS:
 
     R(h) = W3·h + W2·GELU(W1·h)
 
-Il ramo lineare `W3` porta il vettore dallo spazio del modello audio (768 o 1024) allo spazio del lettore (1024).
+Il ramo lineare `W3` porta il vettore dallo spazio del modello audio (768 o 2048) allo spazio del lettore (1024).
 Il ramo non lineare corregge solo la differenza fra le due distribuzioni. Ogni ponte aggiunge un'etichetta
 d'ingresso imparata, così il codec sa da quale modello arriva ogni pezzo della sequenza.
 L'ingresso di ogni modello è standardizzato (media e deviazione standard misurate sui dati).
@@ -208,10 +208,13 @@ contenuto. Resta fuori dal codec: eventualmente un modulo a parte.
 - [x] Paper di riferimento raccolti
 - [x] Architettura e logica di addestramento disegnate
 - [x] Ancore emotive misurate (6 diadi su 8 raggiungibili)
-- [ ] Script: estrazione degli ultimi layer dei 5 modelli (CPU) e cache su disco
-- [ ] Script: ponti, codec a 5 ingressi, testa JEV
-- [ ] Script: fase 0, riaddestramento della copia del codec con "...sto udendo"
-- [ ] Dataset appaiato: scelta, licenze, preparazione, held-out per tipo
+- [x] Script: estrazione degli ultimi layer dei 5 modelli e cache su disco (venv separato)
+- [x] Script: ponti, codec a 5 ingressi, testa JEV (prova di forma e prova a secco delle fasi 1-2 su dati finti)
+- [x] Script: fase 0, riaddestramento della copia del codec con "...sto udendo"
+- [x] Script: fasi 1-3 e pagella
+- [x] Primo dataset: 1000 clip vocali emotive sintetiche (200 frasi italiane × 5 emozioni), 20 frasi held-out
+- [ ] Dataset allargato (suoni, musica, parlato vero): scelta, licenze, preparazione, held-out per tipo
+- [ ] Pausa del training del codec dei ricordi a fine epoca 2, per il primo giro di EAR
 - [ ] Fase 0, insegnante
 - [ ] Fase 1, ponti
 - [ ] Fase 2, codec a 5 ingressi + JEV

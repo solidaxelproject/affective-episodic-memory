@@ -42,9 +42,9 @@ injection point as the memory codec.
      ║             ║               ║               ║               ║             ║
 ╔════╩═════╗ ╔═════╩════╗  ╔═══════╩══╗  ╔═════════╩╗  ╔═══════════╩╗            ║
 ║Qwen3-ASR ║ ║  CLAP    ║  ║  MERT    ║  ║ Dasheng  ║  ║emotion2vec ║    FROZEN
-║  0.6B    ║ ║ (larger) ║  ║  95M     ║  ║  base    ║  ║ plus base  ║    (CPU)
+║  1.7B    ║ ║ (larger) ║  ║  95M     ║  ║  base    ║  ║ plus base  ║    (CPU)
 ║ words    ║ ║sound↔text║  ║ music    ║  ║ ambience ║  ║voice/emot. ║
-║ d=1024   ║ ║ d=768    ║  ║ d=768    ║  ║ d=768    ║  ║ d=768      ║
+║ d=2048   ║ ║ d=768    ║  ║ d=768    ║  ║ d=768    ║  ║ d=768      ║
 ╚════╦═════╝ ╚═════╦════╝  ╚═════╦════╝  ╚═════╦════╝  ╚═════╦══════╝
      ║ last layer  ║             ║             ║             ║
 ╔════╩═════╗ ╔═════╩════╗  ╔═════╩════╗  ╔═════╩════╗  ╔═════╩══════╗
@@ -84,7 +84,7 @@ injection point as the memory codec.
 
 | input | model | content | last-layer size |
 |---|---|---|---|
-| 1 | Qwen/Qwen3-ASR-0.6B | the words | 1024 |
+| 1 | Qwen/Qwen3-ASR-1.7B | the words (audio encoder output) | 2048 |
 | 2 | laion/larger_clap_music_and_speech | sound linked to text | 768 |
 | 3 | m-a-p/MERT-v1-95M | music: timbre, rhythm, mood | 768 |
 | 4 | mispeech/dasheng-base | ambient sounds | 768 |
@@ -94,8 +94,8 @@ Dasheng replaces BEATs. On the HEAR benchmark, which evaluates frozen encoders, 
 71.1 for BEATs iter3+, and 80.2 against 73.2 on environmental sounds (arXiv 2406.06992). It also has public
 weights on Hugging Face under Apache-2.0.
 
-Larger versions exist (Qwen3-ASR-1.7B, MERT-v1-330M, emotion2vec_plus_large). We start from the small ones
-for speed: all five run on CPU, about 500M parameters in total.
+For Qwen3-ASR the 1.7B version is used, the most accurate. For the others larger versions exist
+(MERT-v1-330M, emotion2vec_plus_large): we start from the small ones for speed.
 
 ### The bridges
 
@@ -103,7 +103,7 @@ One bridge per model, shaped like the RecursiveMAS outer link:
 
     R(h) = W3·h + W2·GELU(W1·h)
 
-The linear branch `W3` carries the vector from the audio model's space (768 or 1024) to the reader's space
+The linear branch `W3` carries the vector from the audio model's space (768 or 2048) to the reader's space
 (1024). The non-linear branch only corrects the difference between the two distributions. Each bridge adds a
 learned input tag, so the codec knows which model each piece of the sequence comes from.
 Each model's input is standardized (mean and standard deviation measured on the data).
@@ -207,10 +207,13 @@ content. It stays outside the codec: possibly a separate module.
 - [x] Reference papers collected
 - [x] Architecture and training logic designed
 - [x] Emotion anchors measured (6 dyads out of 8 reachable)
-- [ ] Script: extraction of the last layers of the 5 models (CPU) and disk cache
-- [ ] Script: bridges, 5-input codec, JEV head
-- [ ] Script: phase 0, retraining the codec copy with "...sto udendo"
-- [ ] Paired dataset: choice, licenses, preparation, held-out per type
+- [x] Script: extraction of the last layers of the 5 models and disk cache (separate venv)
+- [x] Script: bridges, 5-input codec, JEV head (shape test and dry run of phases 1-2 on fake data)
+- [x] Script: phase 0, retraining the codec copy with "...sto udendo"
+- [x] Script: phases 1-3 and report card
+- [x] First dataset: 1000 synthetic emotional speech clips (200 Italian sentences × 5 emotions), 20 sentences held out
+- [ ] Extended dataset (sounds, music, real speech): choice, licenses, preparation, held-out per type
+- [ ] Pause of the memory codec training at the end of epoch 2, for the first EAR run
 - [ ] Phase 0, teacher
 - [ ] Phase 1, bridges
 - [ ] Phase 2, 5-input codec + JEV
