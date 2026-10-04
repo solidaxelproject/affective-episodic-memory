@@ -24,6 +24,10 @@ injection point as the memory codec.
 - **Recursive Multi-Agent Systems** (arXiv 2604.25917): frozen models connected by light trained *outer links*,
   which carry last-layer states from one latent space to another without going through text.
   In EAR the outer links are the **bridges** between the audio models and the codec.
+- **Jev-Mem** (arXiv 2609.23986): a fast "System One" controller makes the memory decisions (routing, candidate
+  scoring, when to stop) without autoregressive generation; the slow "System Two" model steps in only for complex
+  reasoning. EAR's **JEV** output follows the same idea: a typed decision in a single pass, the choice of one of 51
+  emotions, without making the 35B model generate text.
 
 ## Architecture
 

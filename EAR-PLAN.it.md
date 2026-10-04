@@ -24,6 +24,10 @@ punto d'iniezione del codec dei ricordi.
 - **Recursive Multi-Agent Systems** (arXiv 2604.25917): modelli congelati collegati da *outer link* leggeri
   addestrati, che trasportano gli stati dell'ultimo layer da uno spazio latente all'altro senza passare dal testo.
   In EAR gli outer link sono i **ponti** fra i modelli audio e il codec.
+- **Jev-Mem** (arXiv 2609.23986): un controller veloce "Sistema Uno" prende le decisioni sulla memoria (instradamento,
+  punteggio dei candidati, quando fermarsi) senza generazione autoregressiva; il modello lento "Sistema Due" entra solo
+  per il ragionamento complesso. L'uscita **JEV** di EAR segue la stessa idea: una decisione tipizzata in un passaggio,
+  la scelta di una fra 51 emozioni, senza far generare testo al modello da 35B.
 
 ## Architettura
 
