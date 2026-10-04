@@ -225,7 +225,8 @@ content. It stays outside the codec: possibly a separate module.
 - [x] Script: bridges, 5-input codec, JEV head (shape test and dry run of phases 1-2 on fake data)
 - [x] ASR connected through text instead of a bridge: transcript into the e5 reader, 4 bridges (scripts updated,
       dry run to be redone)
-- [ ] Memory retrieval from the transcript (bge-m3, targeted channel)
+- [x] Script: memory retrieval from the transcript (bge-m3, targeted channel), [ear/richiamo_ear.py](ear/richiamo_ear.py)
+- [ ] Injection of the memories recalled from audio into the model's turn
 - [x] Script: phase 0, retraining the codec copy with "...sto udendo"
 - [x] Script: phases 1-3 and report card
 - [x] First dataset: 1000 synthetic emotional speech clips (200 Italian sentences × 5 emotions), 20 sentences held out

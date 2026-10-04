@@ -228,7 +228,8 @@ contenuto. Resta fuori dal codec: eventualmente un modulo a parte.
 - [x] Script: ponti, codec a 5 ingressi, testa JEV (prova di forma e prova a secco delle fasi 1-2 su dati finti)
 - [x] ASR agganciato via testo invece che con un ponte: trascrizione nel lettore e5, 4 ponti (script aggiornati,
       da rifare la prova a secco)
-- [ ] Recupero dei ricordi dalla trascrizione (bge-m3, canale mirato)
+- [x] Script: recupero dei ricordi dalla trascrizione (bge-m3, canale mirato), [ear/richiamo_ear.py](ear/richiamo_ear.py)
+- [ ] Iniezione dei ricordi richiamati dall'audio nel turno del modello
 - [x] Script: fase 0, riaddestramento della copia del codec con "...sto udendo"
 - [x] Script: fasi 1-3 e pagella
 - [x] Primo dataset: 1000 clip vocali emotive sintetiche (200 frasi italiane × 5 emozioni), 20 frasi held-out
