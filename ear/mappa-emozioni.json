@@ -1,0 +1,24 @@
+{
+ "nota": "PROPOSTA (04/10): valori da confermare prima del lancio. Usata da ear_modello.py (bersaglio JEV) e valuta-ear.py.",
+ "e2v_classi": ["angry", "disgusted", "fearful", "happy", "neutral", "other", "sad", "surprised", "unknown"],
+ "e2v_a_primaria": {
+  "angry": "anger", "disgusted": "disgust", "fearful": "fear", "happy": "joy",
+  "sad": "sadness", "surprised": "surprise", "neutral": null, "other": null, "unknown": null
+ },
+ "intensita": {
+  "anger": ["annoyance", "anger", "rage"],
+  "joy": ["serenity", "joy", "ecstasy"],
+  "sadness": ["pensiveness", "sadness", "grief"],
+  "fear": ["apprehension", "fear", "terror"],
+  "surprise": ["distraction", "surprise", "amazement"],
+  "disgust": ["boredom", "disgust", "loathing"],
+  "trust": ["acceptance", "trust", "admiration"],
+  "anticipation": ["interest", "anticipation", "vigilance"]
+ },
+ "soglie_intensita": [0.5, 0.85],
+ "nota_soglie": "probabilita' della classe < 0.5 -> intensita' bassa, 0.5-0.85 -> media, > 0.85 -> alta",
+ "dataset_a_emozione": {
+  "arrabbiata": "anger", "calma": "serenity", "eccitata": "ecstasy", "felice": "joy", "triste": "sadness"
+ },
+ "nota_dataset": "solo per la pagella (confronto con le etichette dei WAV), non per il training: il bersaglio del JEV e' emotion2vec (scelta di progetto)"
+}
