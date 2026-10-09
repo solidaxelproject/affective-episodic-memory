@@ -211,7 +211,7 @@ Tutti replicabili con gli script del repo, su un singolo consumer PC (16GB VRAM)
 - **L'indirizzamento emotivo corregge quello semantico.** Su un seme di paura la ricerca semantica pesca l'oggetto sbagliato, quella emotiva pesca giusto.
 - **La porta visiva è controllabile.** Re-iniezione di una scena = descrizione identica; interpolazioni tra scene = percezioni coerenti di immagini mai esistite; la percezione è categorica (il modello sceglie un bacino, niente ibridi).
 - **Il primo sogno.** Un ricordo distillato in griglia visiva: risponde a domande mai viste, e il modello prolunga la scena oltre il testo. Memoria ricostruttiva, con boundary extension come nei viventi.
-- **Lux su dati reali:** 81 esperienze → 52 neuroni (29 fusioni), crescita sub-lineare, richiami corretti.
+- **Lux su dati reali:** 81 esperienze → 52 neuroni (29 fusioni), crescita sub-lineare, richiami corretti. *(Prova del 13/07, prima della decisione del 15/07 di non fondere più le esperienze: da allora ogni esperienza diventa un neurone.)*
 - **Il canale vettoriale in produzione:** il server forkato dà output bit-identico al percorso token quando riceve gli stessi contenuti, e il draft speculativo resta attivo sui prompt normali. Zero costo quando non si usa.
 
 ## Cosa è cambiato da luglio

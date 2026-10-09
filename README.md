@@ -211,7 +211,7 @@ All replicable with the scripts in this repo, on a single consumer PC (16GB VRAM
 - **Emotional addressing corrects semantic addressing.** On a fear-seeded query the semantic search fetches the wrong object, the emotional one fetches the right one.
 - **The visual gate is controllable.** Re-injection of a scene = identical description; interpolations between scenes = coherent perceptions of images that never existed; perception is categorical (the model picks a basin, no hybrids).
 - **The first dream.** A memory distilled into a visual grid: it answers questions never seen, and the model extends the scene beyond the text. Reconstructive memory, with boundary extension as in living beings.
-- **Lux on real data:** 81 experiences → 52 neurons (29 fusions), sub-linear growth, correct recalls.
+- **Lux on real data:** 81 experiences → 52 neurons (29 fusions), sub-linear growth, correct recalls. *(Run of 13/07, before the 15/07 decision to stop merging experiences: since then every experience becomes its own neuron.)*
 - **The vector channel in production:** the forked server yields output bit-identical to the token path when given the same content, and speculative drafting stays active on normal prompts. Zero cost when unused.
 
 ## What changed since July
