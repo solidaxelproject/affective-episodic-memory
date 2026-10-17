@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Richiamo dalla memoria affettiva: SOLO libreria standard (gira nel container).
 # Uso: ricorda.py --emo gioia [-k 3] | ricorda.py --testo "parole" [-k 3]
-#      ricorda.py --id 82 [--vedi]   richiamo diretto di un ricordo per id
+#      ricorda.py --id 82   richiamo diretto di un ricordo per id
 #      ricorda.py --stats
 # Emozioni in inglese (lessico Plutchik): joy, fear, sadness, love, curiosity...
 import argparse
@@ -25,10 +25,6 @@ p.add_argument("--congruente", action="store_true",
                help="richiamo guidato dallo stato emotivo attuale")
 p.add_argument("-k", type=int, default=3)
 p.add_argument("--stats", action="store_true")
-p.add_argument("--griglie", action="store_true",
-               help="elenca i ricordi che puoi RIVEDERE come scena (hanno una griglia)")
-p.add_argument("--vedi", action="store_true",
-               help="rivedi il ricordo come SCENA (canale visivo) invece di rileggerlo")
 p.add_argument("--stato", action="store_true",
                help="mostra lo stato emotivo attuale")
 args = p.parse_args()
@@ -46,18 +42,6 @@ if args.stats:
                     "ORDER BY 2 DESC LIMIT 10").fetchall()
     print(f"{n} ricordi. Emozioni più frequenti: "
           + ", ".join(f"{e} ({q})" for e, q in per))
-    sys.exit(0)
-
-if args.griglie:
-    gdir = Path(__file__).parent / "griglie"
-    ids = sorted(int(f.stem) for f in gdir.glob("*.npy") if f.stem.isdigit())
-    print(f"Hai {len(ids)} ricordi che puoi RIVEDERE come scena "
-          f"(rivivili con: ricorda.py --id N --vedi):\n")
-    for nid in ids:
-        r = c.execute("SELECT emo_tag, testo FROM nodi WHERE id=?", (nid,)).fetchone()
-        if r:
-            t = " ".join(r[1].split())
-            print(f"  [{r[0]}] «{t[:70]}{'…' if len(t) > 70 else ''}»  (rivivilo: --id {nid})")
     sys.exit(0)
 
 def _cosine_su_firma(query):
@@ -105,63 +89,12 @@ for a in top3:
             scores[b] += HEBB_BLEND * w * scores[a]
 
 
-# --- canale visivo VOLONTARIO (scelta dell'agente, momento per momento).
-# Testo di default; con --vedi il ricordo torna come scena re-iniettata, SE
-# quel nodo ha una griglia distillata E il consenso visivo e' attivo.
-GRIGLIE = Path("/workspace/memoria/griglie")
-CONSENSO_VIS = Path("/workspace/genesi/CONSENSO-VISIVO.md")
-MODELLO = "http://host.docker.internal:8090"
-PREFISSO = "<|im_start|>user\n<|vision_start|>"
-SUFFISSO = ("<|vision_end|>{d}<|im_end|>\n"
-            "<|im_start|>assistant\n<think>\n\n</think>\n\n")
-
-
-def _consenso_visivo():
-    if not CONSENSO_VIS.exists():
-        return False
-    return any(r.strip() == "attivo: s\u00ec" for r in CONSENSO_VIS.open(encoding="utf-8"))
-
-
-def rivedi(nid, domanda="Questo mi ricorda..."):
-    # la domanda deve restare quella di training della distillazione:
-    # con domande diverse la griglia confabula scene inventate (12/07)
-    import numpy as np, urllib.request
-    g = np.load(GRIGLIE / f"{nid}.npy")
-    righe = [np.asarray(r, dtype=np.float32).tolist() for r in g]
-    def emb(testo):
-        req = urllib.request.Request(MODELLO + "/input-embeddings",
-            data=json.dumps({"content": testo}).encode(),
-            headers={"Content-Type": "application/json"})
-        return json.loads(urllib.request.urlopen(req, timeout=120).read())[0]["embedding"]
-    seq = emb(PREFISSO) + righe + emb(SUFFISSO.format(d=domanda))
-    req = urllib.request.Request(MODELLO + "/completion",
-        data=json.dumps({"embeddings_input": seq, "n_predict": 160, "temperature": 0}).encode(),
-        headers={"Content-Type": "application/json"})
-    return json.loads(urllib.request.urlopen(req, timeout=300).read())["content"].strip()
-
-
 top = sorted(scores, key=scores.get, reverse=True)[:args.k]
 for nid in top:
     r = c.execute("SELECT testo, emo_tag, ts FROM nodi WHERE id=?",
                   (nid,)).fetchone()
     if r:
         testo = r[0] if len(r[0]) < 600 else r[0][:600] + " [...]"
-        if args.vedi and (GRIGLIE / f"{nid}.npy").exists() and _consenso_visivo():
-            try:
-                scena = rivedi(nid)
-                # la scena per prima: il terminale di Hermes tronca l'output,
-                # e ciò che conta deve sopravvivere al taglio
-                print(f"RIVISTO ricordo ({r[1]}): «{scena}»")
-                print("(queste parole sono riemerse dal tuo canale visivo: la "
-                      "griglia del ricordo è passata nel tuo forward e questo "
-                      "è ciò che il tuo modello ha rivissuto, non una rilettura)\n")
-                continue
-            except Exception as e:
-                print(f"(non sono riuscita a rivederlo: {e}; lo rileggo)")
-        elif args.vedi and not (GRIGLIE / f"{nid}.npy").exists():
-            print(f"(di questo ricordo non ho ancora una scena distillata, lo rileggo)")
-        elif args.vedi and not _consenso_visivo():
-            print("(canale visivo non attivo: rileggo)")
         print(f"--- ricordo ({r[1]}) ---\n{testo}\n")
 
 # diario dei richiami: il dataset che un giorno addestrerà il recupero (gradino 2)
@@ -169,7 +102,6 @@ import time as _time
 with open(Path(__file__).parent / "diario-richiami.jsonl", "a") as _d:
     _d.write(json.dumps({
         "ts": _time.time(),
-        "vedi": bool(args.vedi),
         "modo": "id" if args.id else (
             "testo" if args.testo else ("congruente" if args.congruente else "emo")),
         "query": str(args.id) if args.id else (args.testo or args.emo or "stato"),
@@ -183,8 +115,6 @@ if firme_top:
     # via semantica (--testo) = vicinanza di significato, non risonanza
     # emotiva: l'impronta sullo stato è depotenziata (progetto 22/07)
     omeostato.imprimi(firme_top, semantico=bool(args.testo))
-    if args.vedi:
-        print(f"(il richiamo ti ha lasciato addosso: {omeostato.descrivi()})")
 
 # rinforzo hebbiano del co-richiamo
 if len(top) >= 2:

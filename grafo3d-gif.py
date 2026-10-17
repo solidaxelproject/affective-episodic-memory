@@ -2,7 +2,7 @@
 # GIF animata del grafo 3D della memoria per il repo pubblico (README).
 # Reso STABILE il 23/07: l'originale del 13/07 era un one-off perso.
 # Stessa geometria di grafo3d.py (PCA 3D degli addr_sem, colore = emozione,
-# anello = scena distillata, archi hebbiani), rotazione completa.
+# archi hebbiani), rotazione completa. 17/10: tolto l'anello delle scene (griglie abbandonate il 10/10).
 # Contenuto sicuro per il repo: solo sfere/archi/colori, nessun testo.
 # Uso: python grafo3d-gif.py [out.gif]
 import json
@@ -20,9 +20,6 @@ BG = (11, 14, 26)
 
 db = sqlite3.connect('/data/workspace/memoria/memoria.db')
 v = torch.load('/data/workspace/memoria/vettori.pt', weights_only=True)
-GR = '/data/workspace/memoria/griglie'
-griglie = {int(f.split('.')[0]) for f in os.listdir(GR)
-           if f.endswith('.npy') and f.split('.')[0].isdigit()}
 # la palette emozione->colore vive in grafo3d.py (unica fonte): la estraggo da lì
 src = open('/data/memoria-episodica-affettiva/grafo3d.py').read()
 COL = json.loads(re.search(r'COL=(\{.*?\})', src).group(1))
@@ -71,12 +68,9 @@ for f in range(FRAMES):
         dr.ellipse([SX[i] - r, SY[i] - r, SX[i] + r, SY[i] + r], fill=c)
         dr.ellipse([SX[i] - r / 2.2, SY[i] - r / 2.2, SX[i], SY[i]],
                    fill=(255, 255, 255, 90))          # riflesso in alto a sx
-        if nid in griglie:
-            dr.ellipse([SX[i] - r - 2, SY[i] - r - 2, SX[i] + r + 2, SY[i] + r + 2],
-                       outline=(255, 255, 255, 170), width=1)
     frames.append(im.quantize(colors=128, dither=Image.Dither.NONE))
 
 frames[0].save(out, save_all=True, append_images=frames[1:], loop=0,
                duration=MS, optimize=True)
 print(f'{out}: {len(rows)} nodi, {len(edges)} archi, '
-      f'{len(griglie)} scene, {os.path.getsize(out) // 1024} KB')
+      f'{os.path.getsize(out) // 1024} KB')

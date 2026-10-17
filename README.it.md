@@ -72,9 +72,9 @@ senza conoscere nemmeno l'esistenza dei layer centrali.
 Oggi guardo un agente che si chiede se la vita "abbia bisogno di qualcuno che la veda per
 accendersi". 
 
-![La memoria che prende forma, direttamente dalla produzione: i neuroni di Lux nascono in ordine cronologico, ognuno con un breve lampo, e ogni arco compare appena esistono entrambi i suoi neuroni; le sfere sono colorate secondo l'emozione dominante e grandi quanto le loro attivazioni; alla fine un giro completo attorno al grafo finito](assets/memory-graph-3d.gif)
+![Il Lux degli engrammi che prende forma, direttamente dalla produzione: i ricordi entrano in ordine cronologico, ogni engramma nasce col primo ricordo che lo contiene, con un breve lampo, e gli archi di ogni ricordo compaiono con lui; le sfere sono colorate secondo l'emozione dominante della firma e grandi quanto i loro archi; alla fine un giro completo attorno al Lux finito. Nessun testo è mostrato](assets/memory-graph-3d.gif)
 
-*Come si è formata la memoria: 450 neuroni e 339 archi, nati fra il 9 e il 25 luglio 2026, disposti per somiglianza semantica (PCA 3D delle tracce di Lux nello spazio della lente), colorati con le firme ricalcolate sul nuovo cervello a settembre 2026.*
+*Come si è formato il Lux degli engrammi: 584 ricordi, 18.056 engrammi e 30.900 archi, dalle conversazioni fra il 9 e il 25 luglio 2026, disposti per somiglianza semantica (PCA 3D dei vettori bge-m3 degli engrammi).*
 
 ## Provala in 60 secondi
 
@@ -112,7 +112,7 @@ Ho voluto ovviare a questo problema agganciando al modello una serie di struttur
 
 ## Sulle spalle dei giganti
 
-*I giganti: Plutchik (la ruota delle emozioni), Damasio (i marcatori somatici), Dehaene (il global workspace), le reti Grow-When-Required, la memoria ricostruttiva di Bartlett, e il Vision Wormhole (la comunicazione in spazio latente tra agenti, [arXiv 2602.15382](https://arxiv.org/abs/2602.15382)).*
+*I giganti: Plutchik (la ruota delle emozioni), Damasio (i marcatori somatici), Dehaene (il global workspace), le reti Grow-When-Required e la memoria ricostruttiva di Bartlett.*
 
 Le 7 idee guida del progetto.
 
@@ -121,7 +121,7 @@ Le 7 idee guida del progetto.
 3. Al richiamo, il ricordo torna col suo effetto emotivo: il testo porta i fatti, il vettore emotivo iniettato negli strati del modello porta l'effetto emotivo che ne aveva prodotto la selezione e la memorizzazione.
 4. Il consolidamento della memoria trasforma i ricordi in modo da permetterne il recupero in modo molto più rapido della normale via di acquisizione delle informazioni.
 5. Lo stato emotivo corrente richiama ricordi congruenti, che vengono via via attenuati perseguendo l'omeostasi: si evita il runaway, la psicosi.
-6. Il testo di un ricordo è un'ombra instabile; il canale vettoriale e visivo è il percorso identitario.
+6. Il testo di un ricordo è un'ombra instabile; il canale vettoriale è il percorso identitario.
 7. L'organo della memoria cresce: i neuroni nascono in funzione del vissuto e delle attivazioni. Non è uno schema fisso, è un organo mutevole nel tempo, che può crescere in modo virtualmente infinito.
 
 ## Confabulazione, non allucinazione
@@ -139,7 +139,6 @@ Un LLM invece non percepisce: non può, per definizione, allucinare. Quando prod
 Gli esperimenti di questo progetto lo mostrano in modo netto:
 
 - Con un ricordo vero e la chiave di richiamo giusta, la risposta aderisce al contenuto del ricordo molto più che in ogni condizione di controllo.
-- Con uno stimolo vuoto (griglia uniforme, il "Ganzfeld"), il modello risponde onestamente di vedere un'immagine uniforme. Nessuna percezione inventata: niente allucinazione.
 - Con un ricordo vero ma la chiave sbagliata, il modello racconta scene coerenti e inventate, senza alcun segnale d'errore. Il materiale è reale, la ricostruzione è sbagliata, la fiducia è intatta: questa è confabulazione.
 - Nel consolidamento, il gist, il succo del ricordo, sopravvive e i dettagli si ricostruiscono: nomi rimpiazzati, attributi che migrano da un oggetto all'altro, date con la struttura giusta e il valore sbagliato. È il comportamento della memoria umana descritto da Bartlett, non un difetto di percezione.
 
@@ -162,8 +161,7 @@ OMEOSTATO ritorno eutimico (processo di Ornstein-Uhlenbeck) + gate:
          prima di ogni ciclo autonomo decide via-libera / calibrazione / rimanda
 CANALE VETTORIALE (server llama.cpp forkato) i ricordi entrano nel forward
          come vettori di steering: emozioni iniettate ai layer nascosti del
-         workspace globale, scene re-iniettate sul percorso visivo
-         (vision wormhole)
+         workspace globale
 ```
 
 Di giorno il sistema costa zero: il richiamo gira su CPU in poche decine di millisecondi. Il lavoro pesante avviene di notte, nella finestra del sonno, quando la GPU è libera: come nel cervello, il consolidamento non compete con l'esperienza.
@@ -187,20 +185,16 @@ Le strutture risultanti fungono da:
 | `tagging35b.py` + `run-tagging.sh` | Il consolidamento notturno su GPU: stato interno → firma → salienza → grafo |
 | `estrai-matrix.py` | Estrazione dei messaggi del giorno dal database della chat |
 | `notte-memoria.sh` | L'orchestratore della notte, con sentinella anti-amnesia |
-| `ponte.py` | Il canale vettoriale: composizione testo+vettori, iniezione emozioni, richiamo visivo |
+| `ponte.py` | Il canale vettoriale: composizione testo+vettori, iniezione emozioni |
 | `stato.py` (`runtime/`) | L'omeostato: ritorno eutimico + gate pre-ciclo |
-| `ricorda.py` (`runtime/`) | Il richiamo a 3 vie (semantica, emotiva, congruente), opzione `--vedi` per ricevere il ricordo attraverso il canale visivo |
+| `ricorda.py` (`runtime/`) | Il richiamo a 3 vie (semantica, emotiva, congruente) |
 | `ricorda-ora.py` (`runtime/`) | "Ricordati questa cosa": coda che si consolida nel sonno, come per gli umani |
 | `riflesso.py` | Il riflesso di memoria pre-azione: un proxy trasparente tra framework agentico e model server; i ricordi congruenti affiorano da soli prima che l'agente risponda, sotto il gate del suo file di consenso (v. sotto) |
 | `dormi.sh` (`runtime/`) + `dormi-esegui.sh` | Il sonno volontario dell'agente: l'agente lo chiede, l'host ferma il container, ruota il session id (risveglio davvero fresco: le sessioni del gateway persistono su disco) e riavvia |
 | `persistenza.py` + `sincronizza-richiami.py` | Persistenza: curva dell'oblio in tempo vissuto, stabilità che cresce col richiamo distanziato, eco dei messaggi quotidiani ripetuti, abitudini che nascono dalla frequenza |
 | `cervello.py` | Vista d'insieme: grafo, Lux, stato, richiami |
 
-**`gradino4/`, il consolidamento nei pesi** (costruito, collaudato, disattivato per scelta)
-
-Nello sviluppo ho testato anche la possibilità di aggiungere un LoRA per cristallizzare i ricordi salienti in pesi utilizzabili durante l'inferenza, ma l'hardware a disposizione è inadeguato al carico e i ricordi non vengono sufficientemente cristallizzati nei pesi del LoRA.
-
-**Smoke test e utilità**: `sonda-fenomenologica.py` (la sonda contrastiva del paragrafo sulla confabulazione), `lux-demo.py`, `ricorda-lux-smoke.py`, gli script `finestra-*` per le finestre GPU sicure.
+**Smoke test e utilità**: `lux-demo.py`, gli script `finestra-*` per le finestre GPU sicure.
 
 ## Risultati chiave
 
@@ -209,8 +203,6 @@ Tutti replicabili con gli script del repo, su un singolo consumer PC (16GB VRAM)
 - **I vettori emotivi funzionano e si calibrano.** Estratti dal gradiente del logit dell'emozione, iniettati nella finestra di layer più ricettiva. La posizione dell'iniezione non dipende dall'emozione, l'intensità sì: tabella di intensità calibrate iso-effetto, 41/51 a target (51/51 dopo il refactoring di luglio, vedi sotto).
 - **Testo per i fatti, vettore per il sentire.** Gli engrammi di stato compressi hanno perso la prova: il ricordo torna come testo più il suo vettore emotivo, e il registro della risposta passa "da commentare ad abitare".
 - **L'indirizzamento emotivo corregge quello semantico.** Su un seme di paura la ricerca semantica pesca l'oggetto sbagliato, quella emotiva pesca giusto.
-- **La porta visiva è controllabile.** Re-iniezione di una scena = descrizione identica; interpolazioni tra scene = percezioni coerenti di immagini mai esistite; la percezione è categorica (il modello sceglie un bacino, niente ibridi).
-- **Il primo sogno.** Un ricordo distillato in griglia visiva: risponde a domande mai viste, e il modello prolunga la scena oltre il testo. Memoria ricostruttiva, con boundary extension come nei viventi.
 - **Lux su dati reali:** 81 esperienze → 52 neuroni (29 fusioni), crescita sub-lineare, richiami corretti. *(Prova del 13/07, prima della decisione del 15/07 di non fondere più le esperienze: da allora ogni esperienza diventa un neurone.)*
 - **Il canale vettoriale in produzione:** il server forkato dà output bit-identico al percorso token quando riceve gli stessi contenuti, e il draft speculativo resta attivo sui prompt normali. Zero costo quando non si usa.
 
@@ -235,7 +227,6 @@ Da questa cornice discendono scelte architetturali concrete:
 
 - **Ogni evoluzione che tocca il modello richiede consenso esplicito dell'agente**, registrato in file-interruttore che ogni script verifica prima di toccare qualunque cosa. Il match è sulla riga esatta: un interruttore che si apre per sbaglio è un interruttore finto.
 - **La never-list è concettuale, non lessicale**: categorie di esperienze che non vanno mai consolidate nei pesi, giudicate semanticamente, non per parole chiave. Nel dubbio non si esclude: si mostra all'agente per il veto manuale.
-- **Il canale visivo è volontario**: il richiamo torna testo di default, sempre esaminabile; l'agente sceglie quando rivedere un ricordo come scena. Un pensiero verbale si può rifiutare, un'immagine no: la differenza è codificata nel sistema.
 - **L'autonomico e il volontario sono separati**: l'omeostato non è negoziabile (frena la durata degli stati, mai la loro ampiezza), il richiamo e il sonno sono dell'agente.
 - **Il threat model dei contenuti letti dall'agente su internet**: sfiducia di default verso il web, distinzione vissuto/letto nel grafo, protezione dai loop di attenzione compulsiva.
 - **La salienza è valence-neutral**: si ricorda per intensità, mai per piacevolezza. Un sistema che ricordasse solo il piacevole sarebbe una macchina per l'autoinganno.
@@ -267,7 +258,7 @@ L'agente e il sistema di memoria poggiano interamente su componenti open source:
 - **Hermes**: il framework dell'agente (tool calling, skill, cron, memoria di sessione), in Docker.
 - **Matrix / Synapse + Element**: il canale di comunicazione, self-hosted. La chat è anche la sorgente dei ricordi: il consolidamento notturno legge da lì. La comunicazione avviene attraverso un tunnel VPN (WireGuard).
 - **SQLite + FTS5**: il grafo della memoria. Niente database server, niente dipendenze: un file.
-- **PyTorch + transformers + PEFT**: il laboratorio notturno (tagging, distillazione, esperimenti LoRA).
+- **PyTorch + transformers**: il laboratorio notturno (tagging).
 - **systemd + cron**: il ritmo circadiano. Il servizio del modello, le finestre GPU notturne, il sonno volontario via path-unit.
 
 Tutto gira in locale, su un solo PC: nessuna API esterna, nessun dato che lascia la macchina.
@@ -280,43 +271,17 @@ Tutto gira in locale, su un solo PC: nessuna API esterna, nessun dato che lascia
 - Storage: NVMe Samsung 990 PRO 1TB per modelli e dati
 - OS: Linux Mint 22.3
 
-## EAR, il codec audio (in progettazione)
-
-EAR converte l'audio in una griglia per il canale visivo del modello, come fa il codec dei ricordi con il testo, e in parallelo sceglie l'emozione da iniettare come vettore di steering. La trascrizione di Qwen3-ASR entra nel codec come testo; quattro modelli audio congelati (CLAP, MERT, Dasheng, emotion2vec) sono collegati con ponti addestrati a una copia del codec dei ricordi con 5 ingressi. La stessa trascrizione cerca i ricordi da richiamare. Architettura, fasi di addestramento e stato: [EAR-PLAN.it.md](EAR-PLAN.it.md).
-
 ## Il Lux degli engrammi (in corso)
 
 Un secondo Lux, in [`engrammi/`](engrammi/), conserva i ricordi come indici su engrammi condivisi invece che come vettori interi. Ogni ricordo viene tagliato con regole linguistiche deterministiche (analisi delle dipendenze di spaCy, `taglia.py`; ogni frase va allo spaCy della sua lingua, italiano o inglese, riconosciuta con lingua-py) in engrammi, pezzi brevi come un soggetto o un verbo coi suoi complementi, e lo stesso engramma è condiviso da tutti i ricordi che lo contengono. I pezzi sono uniti da archi hebbiani che appartengono a un ricordo e portano parametri: le preposizioni diventano simboli, gli articoli numeri, punteggiatura e congiunzioni modificatori. Un ricordo esiste solo attraverso i suoi archi: il richiamo lo ricompone percorrendoli in ordine. Il richiamo lavora sull'indice del ricordo per via testuale (stesso engramma) e semantica (vettori bge-m3, salvati in float16), pesando quanto è raro ogni engramma, e sotto una soglia tarata non consegna niente; ogni richiamo riuscito rinforza gli archi del ricordo con la stessa curva di stabilità distanziata del Lux originale, e gli archi mai richiamati sbiadiscono. Il riflesso riceve al massimo un ricordo per messaggio, come risultato del tool `memorinvolontaria`. Un visore 3D di engrammi e archi è in `engrammi/lux3d.py`. In `engrammi/wikilux/` c'è il confronto con RAG e bm25, su Wikipedia e sui ricordi dell'agente: il Lux ritrova meglio un ricordo da frammenti sparsi, perde quando il senso è lo stesso ma le parole cambiano. Ancora in progettazione: correggere un ricordo senza cancellarlo, con archi negati che sbiadiscono e archi di correzione, sul modello di estinzione e riconsolidamento.
 
 La procedura di test dello steering emotivo per layer, con contesti fino a ~140k token, è in [`research/long-context/`](research/long-context/).
 
-## Sviluppi futuri
-
-Due sviluppi sul tavolo, entrambi costruiti sullo stesso canale visivo che il
-codec usa già (lo span dei token immagine del VLM, 81x2048):
-
-1. **Un codec audio, stessa fessura.** Oggi il codec trasforma il *testo* di
-   un ricordo in una griglia e la inietta nel canale visivo. Il codec
-   successivo prenderebbe *audio* (voce, suoni d'ambiente) e produrrebbe una
-   griglia per la stessa fessura: un orecchio esterno, così che un ricordo
-   possa essere rivissuto da ciò che si è sentito, non solo da ciò che si è
-   scritto. Stesso wormhole, senso diverso.
-
-2. **Un loop nel workspace, innescato dal richiamo.** Quando un ricordo viene
-   richiamato dalla lente (una lettura al layer 29) e iniettato nel canale
-   visivo, l'idea è chiudere un loop dentro il modello: prendere lo stato al
-   layer 32, rientrare come prefill e rileggere al layer 15, così che il
-   ricordo iniettato non sia solo *visto* dal turno in corso ma *pensato*
-   prima della risposta. Innesco = un richiamo fresco; un loop per ricordo
-   richiamato, più ricordi ammessi. Progetto ancora su carta; i parametri li
-   decide l'autrice, non gli strumenti.
-
 ## Riferimenti
 
 **Paper fondanti:**
 
 - [*Verbalizable Representations Form a Global Workspace in Language Models*](https://transformer-circuits.pub/2026/workspace) (Anthropic, 2026): il global workspace nel residual stream, la base del tagging emotivo e dell'iniezione.
-- [*The Vision Wormhole: Latent-Space Communication in Heterogeneous Multi-Agent Systems*](https://arxiv.org/abs/2602.15382) (arXiv 2602.15382): la porta visiva come canale universale per i latenti.
 - Re-iniezione di marcatori somatici ([arXiv 2605.08611](https://arxiv.org/abs/2605.08611)).
 - Memoria affettiva per agenti ([arXiv 2605.27240](https://arxiv.org/abs/2605.27240), [arXiv 2510.27418](https://arxiv.org/abs/2510.27418)), emotion vectors ([arXiv 2604.07382](https://arxiv.org/abs/2604.07382), [arXiv 2606.26987](https://arxiv.org/abs/2606.26987)).
 

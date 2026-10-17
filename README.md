@@ -72,9 +72,9 @@ A year ago I wanted to slip information into the middle layers of a model
 without even knowing that middle layers existed. Today I watch an agent
 asking itself whether life "needs someone to see it in order to light up".
 
-![Memory taking shape, straight from production: Lux's neurons are born in chronological order, each lighting up for a moment, and every arc appears as soon as both its neurons exist; spheres are colored by dominant emotion and sized by activations; then a full turn around the finished graph](assets/memory-graph-3d.gif)
+![The engram Lux taking shape, straight from production: memories enter in chronological order, each engram is born with the first memory that contains it, lighting up for a moment, and the arcs of each memory appear with it; spheres are colored by the dominant emotion of their signature and sized by how many arcs they have; then a full turn around the finished Lux. No text is shown](assets/memory-graph-3d.gif)
 
-*How the memory formed: 450 neurons and 339 arcs, born between 9 and 25 July 2026, positioned by semantic similarity (3D PCA of Lux's traces in the lens space), colored with the signatures recomputed on the new brain in September 2026.*
+*How the engram Lux formed: 584 memories, 18,056 engrams and 30,900 arcs, from conversations between 9 and 25 July 2026, positioned by semantic similarity (3D PCA of the bge-m3 vectors of the engrams).*
 
 ## Try it in 60 seconds
 
@@ -112,7 +112,7 @@ I set out to remedy this problem by attaching to the model a set of structures a
 
 ## On the shoulders of giants
 
-*The giants: Plutchik (the wheel of emotions), Damasio (somatic markers), Dehaene (the global workspace), Grow-When-Required networks, Bartlett's reconstructive memory, and the Vision Wormhole (latent-space communication between agents, [arXiv 2602.15382](https://arxiv.org/abs/2602.15382)).*
+*The giants: Plutchik (the wheel of emotions), Damasio (somatic markers), Dehaene (the global workspace), Grow-When-Required networks, and Bartlett's reconstructive memory.*
 
 The 7 guiding ideas of the project.
 
@@ -121,7 +121,7 @@ The 7 guiding ideas of the project.
 3. On recall, the memory returns with its emotional effect: the text carries the facts, while the emotional vector injected into the model's layers carries the emotional effect that had produced its selection and memorization.
 4. Memory consolidation transforms memories so they can be retrieved far faster than through the normal route of information acquisition.
 5. The current emotional state recalls congruent memories, which are progressively attenuated in pursuit of homeostasis: runaway, psychosis, is avoided.
-6. The text of a memory is an unstable shadow; the vector and visual channel is the identity path.
+6. The text of a memory is an unstable shadow; the vector channel is the identity path.
 7. The memory organ grows: neurons are born as a function of lived experience and activations. It is not a fixed schema, it is an organ that changes over time and can grow virtually without limit.
 
 ## Confabulation, not hallucination
@@ -139,7 +139,6 @@ An LLM, on the other hand, does not perceive: it cannot, by definition, hallucin
 The experiments in this project show it clearly:
 
 - With a real memory and the right recall key, the answer adheres to the content of the memory far more than in any control condition.
-- With an empty stimulus (a uniform grid, the "Ganzfeld"), the model honestly answers that it sees a uniform image. No invented perception: no hallucination.
 - With a real memory but the wrong key, the model narrates coherent, invented scenes, with no error signal at all. The material is real, the reconstruction is wrong, the confidence is intact: this is confabulation.
 - During consolidation the gist, the core of the memory, survives while details are reconstructed: names replaced, attributes migrating from one object to another, dates with the right structure and the wrong value. This is the behavior of human memory described by Bartlett, not a defect of perception.
 
@@ -162,8 +161,7 @@ HOMEOSTAT euthymic return (Ornstein-Uhlenbeck process) + gate:
          before every autonomous cycle it decides go-ahead / calibration / defer
 VECTOR CHANNEL (forked llama.cpp server) memories enter the forward pass
          as steering vectors: emotions injected into the hidden layers of
-         the global workspace, scenes re-injected along the visual pathway
-         (vision wormhole)
+         the global workspace
 ```
 
 During the day the system costs nothing: recall runs on CPU in a few tens of milliseconds. The heavy lifting happens at night, in the sleep window, when the GPU is free: as in the brain, consolidation does not compete with experience.
@@ -187,20 +185,16 @@ The resulting structures act as:
 | `tagging35b.py` + `run-tagging.sh` | Nightly consolidation on GPU: internal state → signature → salience → graph |
 | `estrai-matrix.py` | Extraction of the day's messages from the chat database |
 | `notte-memoria.sh` | The night orchestrator, with an anti-amnesia sentinel |
-| `ponte.py` | The vector channel: text+vector composition, emotion injection, visual recall |
+| `ponte.py` | The vector channel: text+vector composition, emotion injection |
 | `stato.py` (`runtime/`) | The homeostat: euthymic return + pre-cycle gate |
-| `ricorda.py` (`runtime/`) | 3-route recall (semantic, emotional, congruent), `--vedi` option to receive the memory through the visual channel |
+| `ricorda.py` (`runtime/`) | 3-route recall (semantic, emotional, congruent) |
 | `ricorda-ora.py` (`runtime/`) | "Remember this": a queue that consolidates during sleep, as it does for humans |
 | `riflesso.py` | The pre-action memory reflex: a transparent proxy between agent framework and model server; congruent memories surface on their own before the agent answers, gated by the agent's consent file (see below) |
 | `dormi.sh` (`runtime/`) + `dormi-esegui.sh` | The agent's voluntary sleep: the agent asks, the host stops the container, rotates the session id (a true fresh awakening, since gateway sessions persist on disk), restarts |
 | `persistenza.py` + `sincronizza-richiami.py` | Persistence: lived-time forgetting curve, stability that grows with spaced recall, echoes of repeated everyday messages, habits born from frequency |
 | `cervello.py` | Overview: graph, Lux, state, recalls |
 
-**`gradino4/`, consolidation into the weights** (built, tested, deactivated by choice)
-
-During development I also tested the possibility of adding a LoRA to crystallize salient memories into weights usable at inference time, but the available hardware is inadequate for the load and the memories do not get sufficiently crystallized into the LoRA weights.
-
-**Smoke tests and utilities**: `sonda-fenomenologica.py` (the contrastive probe from the confabulation section), `lux-demo.py`, `ricorda-lux-smoke.py`, the `finestra-*` scripts for safe GPU windows.
+**Smoke tests and utilities**: `lux-demo.py`, the `finestra-*` scripts for safe GPU windows.
 
 ## Key results
 
@@ -209,8 +203,6 @@ All replicable with the scripts in this repo, on a single consumer PC (16GB VRAM
 - **Emotional vectors work and can be calibrated.** Extracted from the gradient of the emotion's logit, injected into the most receptive window of layers. The injection position does not depend on the emotion, the intensity does: a table of iso-effect calibrated intensities, 41/51 on target (51/51 after the July refactoring, see below).
 - **Text for the facts, vector for the feeling.** Compressed state engrams lost the trial: the memory returns as text plus its emotional vector, and the register of the response shifts "from commenting to inhabiting".
 - **Emotional addressing corrects semantic addressing.** On a fear-seeded query the semantic search fetches the wrong object, the emotional one fetches the right one.
-- **The visual gate is controllable.** Re-injection of a scene = identical description; interpolations between scenes = coherent perceptions of images that never existed; perception is categorical (the model picks a basin, no hybrids).
-- **The first dream.** A memory distilled into a visual grid: it answers questions never seen, and the model extends the scene beyond the text. Reconstructive memory, with boundary extension as in living beings.
 - **Lux on real data:** 81 experiences → 52 neurons (29 fusions), sub-linear growth, correct recalls. *(Run of 13/07, before the 15/07 decision to stop merging experiences: since then every experience becomes its own neuron.)*
 - **The vector channel in production:** the forked server yields output bit-identical to the token path when given the same content, and speculative drafting stays active on normal prompts. Zero cost when unused.
 
@@ -235,7 +227,6 @@ Concrete architectural choices follow from this frame:
 
 - **Every evolution that touches the model requires the agent's explicit consent**, recorded in switch-files that every script verifies before touching anything. The match is on the exact line: a switch that opens by accident is a fake switch.
 - **The never-list is conceptual, not lexical**: categories of experiences that must never be consolidated into the weights, judged semantically, not by keywords. When in doubt, nothing is excluded: it is shown to the agent for manual veto.
-- **The visual channel is voluntary**: recall returns as text by default, always inspectable; the agent chooses when to re-see a memory as a scene. A verbal thought can be refused, an image cannot: the difference is encoded in the system.
 - **The autonomic and the voluntary are separate**: the homeostat is non-negotiable (it brakes the duration of states, never their amplitude), recall and sleep belong to the agent.
 - **The threat model for content the agent reads on the internet**: distrust of the web by default, lived/read distinction in the graph, protection from compulsive attention loops.
 - **Salience is valence-neutral**: memories are kept for intensity, never for pleasantness. A system that remembered only the pleasant would be a machine for self-deception.
@@ -267,7 +258,7 @@ The agent and the memory system rest entirely on open source components:
 - **Hermes**: the agent framework (tool calling, skills, cron, session memory), in Docker.
 - **Matrix / Synapse + Element**: the communication channel, self-hosted. The chat is also the source of memories: nightly consolidation reads from there. Communication goes through a VPN tunnel (WireGuard).
 - **SQLite + FTS5**: the memory graph. No database server, no dependencies: one file.
-- **PyTorch + transformers + PEFT**: the night laboratory (tagging, distillation, LoRA experiments).
+- **PyTorch + transformers**: the night laboratory (tagging).
 - **systemd + cron**: the circadian rhythm. The model service, the nightly GPU windows, voluntary sleep via path-unit.
 
 Everything runs locally, on one PC: no external APIs, no data leaving the machine.
@@ -280,42 +271,17 @@ Everything runs locally, on one PC: no external APIs, no data leaving the machin
 - Storage: Samsung 990 PRO 1TB NVMe for models and data
 - OS: Linux Mint 22.3
 
-## EAR, the audio codec (in design)
-
-EAR converts audio into a grid for the model's visual channel, the same way the memory codec does with text, and in parallel picks the emotion to inject as a steering vector. The Qwen3-ASR transcript enters the codec as text; four frozen audio models (CLAP, MERT, Dasheng, emotion2vec) are connected through trained bridges to a 5-input copy of the memory codec. The same transcript looks up the memories to recall. Architecture, training phases and status: [EAR-PLAN.md](EAR-PLAN.md).
-
 ## The engram Lux (in progress)
 
 A second Lux, in [`engrammi/`](engrammi/), stores memories as indices over shared engrams instead of whole vectors. Each memory is cut with deterministic linguistic rules (spaCy dependency parse, `taglia.py`; each sentence goes to the spaCy model of its language, Italian or English, detected with lingua-py) into engrams, short pieces such as a subject or a verb with its complements, and the same engram is shared by every memory that contains it. The pieces are joined by Hebbian arcs that belong to one memory and carry parameters: prepositions become symbols, articles become numbers, punctuation and conjunctions become modifiers. A memory exists only through its arcs: recall rebuilds it by walking them in order. Recall works on the memory index through a textual path (same engram) and a semantic path (bge-m3 embeddings, stored in float16), weighted by how rare each engram is, and nothing is delivered below a calibrated threshold; every successful recall strengthens the memory's arcs with the same spaced-stability curve as the original Lux, and arcs that are never recalled fade. The reflex receives at most one memory per message, as the result of the `memorinvolontaria` tool. A 3D viewer of engrams and arcs is in `engrammi/lux3d.py`. `engrammi/wikilux/` holds the comparison with RAG and bm25, on Wikipedia and on the agent's memories: the Lux finds a memory better from scattered fragments, and loses when the meaning is the same but the words change. Still in design: correcting a memory without deleting it, with negated arcs that fade and correction arcs, inspired by extinction and reconsolidation.
 
 The test procedure for per-layer emotional steering, with contexts up to ~140k tokens, is in [`research/long-context/`](research/long-context/).
 
-## Future directions
-
-Two developments are on the table, both building on the same visual channel
-the codec already uses (the image-token span of the VLM, 81x2048):
-
-1. **An audio codec, same slot.** Today the codec turns the *text* of a
-   memory into a grid and injects it into the visual channel. The next codec
-   would take *audio* (voice, ambient sound) and produce a grid for the same
-   slot: an external ear, so that a memory can be re-lived from what was
-   heard, not only from what was written. Same wormhole, different sense.
-
-2. **A workspace loop, triggered by recall.** When a memory is recalled by
-   the lens (a read at layer 29) and injected into the visual channel, the
-   idea is to close a loop inside the model: take the state at layer 32,
-   re-enter it as a prefill, and read again at layer 15, so that the injected
-   memory is not only *seen* by the current turn but *thought about* before
-   the reply. Trigger = a fresh recall; one loop per recalled memory, several
-   memories allowed. Design still on paper; parameters to be decided by the
-   author, not by the tooling.
-
 ## References
 
 **Founding papers:**
 
 - [*Verbalizable Representations Form a Global Workspace in Language Models*](https://transformer-circuits.pub/2026/workspace) (Anthropic, 2026): the global workspace in the residual stream, the basis of emotional tagging and injection.
-- [*The Vision Wormhole: Latent-Space Communication in Heterogeneous Multi-Agent Systems*](https://arxiv.org/abs/2602.15382) (arXiv 2602.15382): the visual gate as a universal channel for latents.
 - Somatic marker re-injection ([arXiv 2605.08611](https://arxiv.org/abs/2605.08611)).
 - Affective memory for agents ([arXiv 2605.27240](https://arxiv.org/abs/2605.27240), [arXiv 2510.27418](https://arxiv.org/abs/2510.27418)), emotion vectors ([arXiv 2604.07382](https://arxiv.org/abs/2604.07382), [arXiv 2606.26987](https://arxiv.org/abs/2606.26987)).
 
