@@ -73,14 +73,26 @@ def _cosine_su_firma(query):
     return out
 
 
+def _cerca_testo(q):
+    """FTS5 sul testo libero. La query passa com'e' (OR, NOT, prefisso* restano
+    operatori); se FTS5 la rifiuta (com'era, "casa, mare", e-mail, paura: tanta)
+    si riprova con ogni parola tra virgolette, cioe' come testo e non sintassi."""
+    sql = ("SELECT rowid, rank FROM nodi_fts WHERE nodi_fts MATCH ? "
+           "ORDER BY rank LIMIT 20")
+    try:
+        return c.execute(sql, (q,)).fetchall()
+    except sqlite3.OperationalError:
+        q = " ".join('"' + p.replace('"', '""') + '"' for p in q.split())
+        return c.execute(sql, (q,)).fetchall() if q else []
+
+
 scores = {}
 if args.id:
     if not c.execute("SELECT 1 FROM nodi WHERE id=?", (args.id,)).fetchone():
         sys.exit(f"nessun ricordo con id {args.id}")
     scores = {args.id: 1.0}
 elif args.testo:
-    rows = c.execute("SELECT rowid, rank FROM nodi_fts WHERE nodi_fts MATCH ? "
-                     "ORDER BY rank LIMIT 20", (args.testo,)).fetchall()
+    rows = _cerca_testo(args.testo)
     scores = {r[0]: 1.0 / (1 + i) for i, r in enumerate(rows)}
 elif args.congruente:
     st = omeostato.carica()

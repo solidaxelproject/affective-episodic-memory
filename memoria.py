@@ -101,6 +101,19 @@ def _hebb_boost(c, scores):
     return scores
 
 
+def _cerca_testo(c, q):
+    """FTS5 sul testo libero. La query passa com'e' (OR, NOT, prefisso* restano
+    operatori); se FTS5 la rifiuta (com'era, "casa, mare", e-mail, paura: tanta)
+    si riprova con ogni parola tra virgolette, cioe' come testo e non sintassi."""
+    sql = ("SELECT rowid, rank FROM nodi_fts WHERE nodi_fts MATCH ? "
+           "ORDER BY rank LIMIT 20")
+    try:
+        return c.execute(sql, (q,)).fetchall()
+    except sqlite3.OperationalError:
+        q = " ".join('"' + p.replace('"', '""') + '"' for p in q.split())
+        return c.execute(sql, (q,)).fetchall() if q else []
+
+
 def recall(query, mode="emotiva", k=3, update_hebb=True):
     """query: nome emozione (mode=emotiva), parola/frase (mode=testo),
     oppure tensor firma 51-dim / stato (mode=emotiva/semantica)."""
@@ -115,9 +128,7 @@ def recall(query, mode="emotiva", k=3, update_hebb=True):
         return []
     scores = {}
     if mode == "testo":
-        rows = c.execute(
-            "SELECT rowid, rank FROM nodi_fts WHERE nodi_fts MATCH ? "
-            "ORDER BY rank LIMIT 20", (query,)).fetchall()
+        rows = _cerca_testo(c, query)
         scores = {r[0]: 1.0 / (1 + i) for i, r in enumerate(rows)}
     else:
         key = "addr_emo" if mode == "emotiva" else "addr_sem"
@@ -198,6 +209,10 @@ if __name__ == "__main__":
         assert [x["id"] for x in r] == [1, 2], r
         r = recall("ricordo", mode="testo", k=1)
         assert r and r[0]["id"] in (1, 2, 3)
+        # testo libero con punteggiatura: e' testo, non sintassi FTS5
+        r = recall("ricordo, 0?", mode="testo", k=1)
+        assert r and r[0]["id"] == 1, r
+        assert recall("l'ultimo ricordo", mode="testo") == []
         assert stats()["nodi"] == 3
         # invariante anti-doppione: ri-aggiungere lo stesso testo NON crea un nodo
         dup = add_node("ricordo 0", f1, torch.randn(2048), "e0", 0.16, 2.0)
