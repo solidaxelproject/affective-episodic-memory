@@ -126,7 +126,12 @@ def descrivi(k=4):
 if __name__ == "__main__":
     import sys
     if "--imprimi-test" in sys.argv:  # self-check
-        FILE.unlink(missing_ok=True)
+        # in una cartella temporanea: accanto a questo file vive lo stato VERO
+        # (in produzione /data/workspace/memoria/stato-emotivo.json)
+        import tempfile
+        _td = tempfile.TemporaryDirectory()
+        FILE = Path(_td.name) / "stato-emotivo.json"
+        CONF = Path(_td.name) / "eutimia.json"
         emos = ["joy", "sadness", "serenity", "rage"]
         s1 = imprimi([{e: (3.0 if e == "rage" else 0.0) for e in emos}])
         assert s1["rage"] > 0.5, s1
