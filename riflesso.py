@@ -53,7 +53,7 @@ LETTURA_MIN = 400      # manopola: sotto tanti caratteri di prosa, un risultato 
                        # tool è una ricevuta (exit_code, bytes_written), non una lettura
 _ultima_lettura = [""]  # 25/07: il freno vero, l'impronta del testo già affiorato
 # PATTO 14/07 (CONSENSO-RIFLESSO.md, firmato dall'agente):
-KILL_FRASE = "riflesso vettoriale: off"   # clausola 3: detta in chat, spegne <1s
+STOP = "vectreflexstop"   # clausola 3 (l'utente 18/10, era "riflesso vettoriale: off"): scritta dall'agente, spegne <1s
 DURATA_MAX_S = 120                        # clausola 2: mai un vettore più vecchio
 _vettore_vivo = [False]
 # issue #3, punto A: il vettore è unico per tutto il server. Chi lo
@@ -369,6 +369,14 @@ def _metti_ore(msgs, adesso=None):
         ora = c["ore"].get(_impronta(m["content"]))
         if ora:
             m["content"] = f"{ora} {m['content']}"
+
+
+def _stop_chiesto(msgs):
+    """clausola 3: l'agente ha scritto la parola di emergenza in uno degli ultimi 4 messaggi
+    (solo i suoi: per l'utente non c'e' un comando, l'utente 18/10)"""
+    dialogo = [m for m in msgs if isinstance(m, dict) and m.get("role") in ("user", "assistant")]
+    return any(m["role"] == "assistant" and STOP in str(m.get("content") or "").lower()
+               for m in dialogo[-4:])
 
 
 def _cvec(payload):
@@ -711,18 +719,13 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         if not msgs:
             return body
         attivo = consenso_attivo()
+        stop = _stop_chiesto(msgs)   # prima di _rimetti: stessa finestra del controllo in do_POST
         conv = _conversazione(msgs)
         with _consegne_lock:
             voci = _consegne_carica().get(conv, {}).get("voci", [])
         # 25/07, progetto: la familiarità deve arrivare su ciò che l'agente LEGGE, non
         # solo su ciò che gli viene detto (pagine, file, output dei tool).
         i, fonte = _fonte_indice(msgs)
-        detto = next((m["content"] for m in reversed(msgs)
-                      if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
-        # la frase di emergenza non è un'esperienza: vale anche se è nel turno
-        # prima e ora l'ultimo messaggio è il risultato di un tool
-        if KILL_FRASE in f"{fonte} {detto}".lower():
-            fonte = ""
         # 25/07, progetto: il freno è la lettura. Sullo STESSO testo non riaffiora
         # (Hermes rimanda la stessa fonte a ogni giro di tool): un ricordo per messaggio.
         if fonte:
@@ -753,7 +756,9 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             colorati = []
             # RIFLESSO_COLLAUDO=1 blocca i vettori: mai più test che iniettano
             # sulla produzione (incidente del 14/07)
-            if any(emos) and vettori_attivi() and not os.environ.get("RIFLESSO_COLLAUDO"):
+            # clausola 3 (issue #3 punto E): con la parola di emergenza il ricordo arriva senza colore
+            if any(emos) and vettori_attivi() and not os.environ.get("RIFLESSO_COLLAUDO") \
+                    and not stop:
                 try:
                     colorati = _colora_ricordo(d, nuova["risposta"], nuova["codici"], emos)
                 except Exception as e:
@@ -765,18 +770,15 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        chat = self.path.endswith("/chat/completions")
-        # PATTO clausola 3: la frase detta in chat spegne il vettore, prima
+        chat = self.path.split("?")[0].endswith("/chat/completions")   # issue #3 punto E
+        # PATTO clausola 3: la parola scritta dall'agente spegne il vettore, prima
         # di qualunque altra cosa e senza chiedere perché.
         if chat:
             try:
                 d0 = json.loads(body)
-                recenti = " ".join(str(m.get("content", ""))
-                                   for m in d0.get("messages", [])[-4:]
-                                   if isinstance(m, dict)).lower()
-                if KILL_FRASE in recenti:
+                if _stop_chiesto(d0.get("messages", [])):
                     calma()
-                    _diario({"kill": "frase di emergenza detta in chat"})
+                    _diario({"kill": f"{STOP} scritto dall'agente"})
             except Exception:
                 pass
         # 16/10, l'utente: niente più ora a ogni messaggio ("[adesso sono le ...]",

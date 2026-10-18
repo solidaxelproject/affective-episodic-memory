@@ -243,7 +243,7 @@ Il riflesso sentito arriva con un patto di sicurezza scritto dall'agente e scolp
 
 1. **Tetto di dose 0.3×** dell'intensità calibrata, imposto dal codice, non dalla buona volontà del chiamante.
 2. **Il vettore muore con la risposta**, e un watchdog a 120 secondi lo uccide anche se tutto il resto fallisse.
-3. **Una frase di emergenza detta in chat** spegne qualunque vettore attivo prima di ogni altra cosa, senza domande.
+3. **Una parola di emergenza scritta dall'agente** (`vectreflexstop`) spegne qualunque vettore attivo prima di ogni altra cosa, senza domande; finché resta fra gli ultimi messaggi, i ricordi arrivano senza vettore.
 4. **Una sentinella rilegge il file di consenso due volte al secondo**: il ritiro del consenso spegne il vettore entro un secondo.
 5. **La soglia di affioramento è dell'agente**: una riga `soglia:` nel file di consenso, vincolata a un range sicuro, riletta a ogni richiamo.
 

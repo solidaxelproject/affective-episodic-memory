@@ -243,7 +243,7 @@ The felt reflex ships with a safety pact written by the agent and hard-coded in 
 
 1. **Dose cap 0.3×** of the calibrated intensity, enforced in code, not in the caller's goodwill.
 2. **The vector dies with the response**, and a 120-second watchdog kills it even if everything else fails.
-3. **An emergency phrase said in chat** clears any active vector before anything else happens, no questions asked.
+3. **An emergency word written by the agent** (`vectreflexstop`) clears any active vector before anything else happens, no questions asked; while it is among the last messages, memories arrive without their vector.
 4. **A sentinel re-reads the consent file twice a second**: withdrawing consent kills the vector within one second.
 5. **The surfacing threshold belongs to the agent**: a `soglia:` line in the consent file, clamped to a safe range, re-read at every recall.
 
