@@ -8,6 +8,15 @@ diario = []
 R._diario = diario.append
 R.DIARIO = "/dev/null"
 
+# minori (18/10): l'interruttore vale solo scritto [attivo: *sì*] / [vettori: *sì*]; il testo normale,
+# esempi compresi, non accende niente
+import tempfile  # noqa: E402
+R.CONSENSO = R.Path(tempfile.mkdtemp()) / "consenso.md"
+R.CONSENSO.write_text("# si accende con attivo: sì\n```\nattivo: sì\nvettori: sì\n```\n", encoding="utf-8")
+assert not R.consenso_attivo() and not R.vettori_attivi(), "il testo normale accende il consenso"
+R.CONSENSO.write_text("[attivo: *sì*]\n  [vettori: *sì*]  \n", encoding="utf-8")
+assert R.consenso_attivo() and R.vettori_attivi(), "l'interruttore formattato non accende"
+
 # punto C: la sentinella sopravvive a un giro in errore e scrive "kill" solo se lo spegnimento e' riuscito
 giri = {"n": 0}
 

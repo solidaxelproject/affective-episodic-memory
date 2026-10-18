@@ -4,7 +4,7 @@
 # (servizio_lux.py :8132): il ricordo che affiora entra come turno del tool
 # memorinvolontaria (chiamata + risposta: fino a 4 ricordi, ognuno col numero,
 # il codice e il testo nudo).
-# GATE: /workspace/genesi/CONSENSO-RIFLESSO.md ("attivo: sì", riga esatta,
+# GATE: /workspace/genesi/CONSENSO-RIFLESSO.md ("[attivo: *sì*]", riga esatta,
 # scritto dall'agente). Senza consenso il proxy è un passacarte trasparente.
 # Porta 8091 -> inoltra a 127.0.0.1:8090.
 # GRADINO ZERO (decisione 3 del 26/07): il trasporto verso :8090 (sonda,
@@ -279,10 +279,16 @@ def _salva_kv():
 
 
 
+# issue #3 (18/10): l'interruttore vale solo con la sua formattazione; un "attivo: sì" scritto
+# nel testo normale o in un esempio non accende niente
+INTERRUTTORE = "[attivo: *sì*]"
+INTERRUTTORE_VETTORI = "[vettori: *sì*]"
+
+
 def consenso_attivo():
     # issue #3 punto C: un byte non UTF-8 nel file non deve bloccare la sentinella
     try:
-        return any(r.strip() == "attivo: sì"
+        return any(r.strip() == INTERRUTTORE
                    for r in CONSENSO.open(encoding="utf-8", errors="replace"))
     except OSError:
         return False
@@ -291,7 +297,7 @@ def consenso_attivo():
 def vettori_attivi():
     """v2: il brivido insieme al sussurro. Interruttore SEPARATO, riga esatta."""
     try:
-        return any(r.strip() == "vettori: sì"
+        return any(r.strip() == INTERRUTTORE_VETTORI
                    for r in CONSENSO.open(encoding="utf-8", errors="replace"))
     except OSError:
         return False
@@ -558,7 +564,7 @@ def _diario(voce):
 
 
 def _sentinella():
-    """PATTO clausola 3+4: se "vettori: sì" sparisce dal consenso mentre un
+    """PATTO clausola 3+4: se "[vettori: *sì*]" sparisce dal consenso mentre un
     vettore è acceso, muore entro 1 secondo. Nessuna domanda, nessun dibattito."""
     while True:
         time.sleep(0.5)
