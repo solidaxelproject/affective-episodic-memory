@@ -20,6 +20,7 @@ import http.server
 import json
 import os
 import re
+import socket
 import sqlite3
 import sys
 import threading
@@ -60,6 +61,23 @@ _vettore_vivo = [False]
 # accende tiene questo lock fino a calma(), e ogni inoltro aspetta che sia libero:
 # nessun'altra richiesta passa mentre il ricordo si colora.
 _vettore_lock = threading.Lock()
+# issue #3 punto A, design dell'utente (18/10): il vettore appartiene alla KV cache
+# del suo flusso. Allo scambio se ne va con la cache messa in pausa; al ripristino
+# torna alla dose a cui era arrivato e la discesa riprende da li': il tempo della
+# discesa scorre solo mentre la cache del flusso sta nello slot. Piu' vettori
+# attivi si SOMMANO (l'utente 18/10, test multivettore); come sommarli e la curva
+# della discesa sono della fase 2 (PIANO-1.11-FASI-2-3.md, punto 7).
+DURATA_S = 0    # fase 2: durata = permanenza x dose x importanza; 0 = muore col prefill, come oggi
+_vettori = {"chat": [], "pensatoio": []}   # flusso -> [{emo, dose, nato, durata}]
+_vissuto = {"chat": 0.0, "pensatoio": 0.0}  # secondi passati con la cache nello slot
+_caricato = [time.time()]                   # quando la cache di _cw[0] e' entrata nello slot
+# 18/10: se la chat interrompe il pensatoio, il gateway rifa' il giro dall'ultima
+# risposta di un tool, quindi il vettore torna alla dose di quel momento, non a
+# quella della pausa. E un pensiero nuovo ricomincia la cache del pensatoio: i suoi
+# vettori tornano allo stato di default.
+_punto = {}             # flusso -> orologio all'inizio della richiesta in corso (fine dell'ultimo tool)
+_interrotto = set()     # flussi tagliati a meta' generazione
+_pens_conv = [None]     # pensiero in corso nel pensatoio (impronta del primo messaggio)
 
 # ---- MEMORIA INVOLONTARIA (11/10, piano del refactoring Lux + richiamo):
 # il Lux degli engrammi sceglie fino a 4 ricordi per messaggio (1.10.0, 16/10),
@@ -118,8 +136,9 @@ SOGLIA_CW = 100_000     # soglie gemelle: oltre, avviso di spazio in coda
 AFK_S = 60              # spec punto 5: 1 min senza typing = l'utente non c'è
 _cw = ["chat"]          # cosa c'è nello slot adesso (al deploy corrente->chat)
 _cw_lock = threading.Lock()
-_pens_vivi = []         # upstream del pensatoio in streaming: la chat li abortisce
+_pens_vivi = []         # socket del pensatoio verso :8090: la chat li taglia
 _chat_calda = [0.0]     # ultima attività chat (fine risposta o typing visto)
+_chat_in_volo = [0]     # richieste della chat in corso (issue #3 punto A): il pensatoio aspetta
 _tok_cw = {"chat": 0, "pensatoio": 0}
 _avvisato_cw = {"chat": False, "pensatoio": False}
 HS = "http://127.0.0.1:8008"
@@ -181,7 +200,51 @@ def _scambia(fl):
         _slot("save", KV_FLUSSO[_cw[0]])
     if (KV_RAM / KV_FLUSSO[fl]).exists():
         _slot("restore", KV_FLUSSO[fl])
+    _cambia_cw(fl)
+
+
+def _cambia_cw(fl):
+    """nello slot entra la cache di fl: l'orologio della discesa del flusso che esce si ferma"""
+    esce = _cw[0]
+    if esce in _vissuto:
+        if esce in _interrotto and esce in _punto:
+            _vissuto[esce] = _punto[esce]     # riparte dalla fine dell'ultimo tool
+        else:
+            _vissuto[esce] += time.time() - _caricato[0]
+        _interrotto.discard(esce)
+    _caricato[0] = time.time()
     _cw[0] = fl
+
+
+def _nuovo_pensiero(conv):
+    """un risveglio nuovo nel pensatoio: cache ricominciata, vettori e orologio a zero"""
+    if conv == _pens_conv[0]:
+        return
+    _pens_conv[0] = conv
+    _vettori["pensatoio"].clear()
+    _vissuto["pensatoio"] = 0.0
+    _punto.pop("pensatoio", None)
+    if _cw[0] == "pensatoio":
+        _caricato[0] = time.time()
+
+
+def _chat_ferma():
+    """il pensatoio puo' prendere lo slot: chat fredda da AFK_S e nessuna sua richiesta in corso"""
+    return time.time() - _chat_calda[0] >= AFK_S and not _chat_in_volo[0]
+
+
+def _interrompi_pensatoio():
+    """spec punto 4 (19/07): la chat interrompe il pensiero in corso. shutdown e non
+    close: con keep-alive la close aspetta la risposta e con Connection: close c.sock
+    e' gia' None (issue #3), lo stream andava fino in fondo. Il server vede la
+    connessione chiusa e ferma la generazione; il gateway ritenta."""
+    if _pens_vivi:
+        _interrotto.add("pensatoio")
+    for s in list(_pens_vivi):
+        try:
+            s.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
 
 def _salva_kv():
@@ -420,7 +483,7 @@ def inietta_emozione(tag, intensita=0.3):
         _diario({"assuefazione": {"emo": tag, "trigger_recenti": len(recenti) - 1,
                                   "intensita": round(efficace, 3)}})
     _cvec({"layers": layers, "relative": True})
-    return True
+    return efficace
 
 
 def calma():
@@ -441,6 +504,47 @@ def calma():
                                        "SPEGNERE A MANO: curl -X POST :8090/control-vector "
                                        "-d '{\"clear\": true}'"}) + "\n")
     return False
+
+
+def _orologio(fl):
+    """secondi vissuti dal flusso fl con la sua cache nello slot (si ferma in pausa)"""
+    return _vissuto[fl] + (time.time() - _caricato[0] if _cw[0] == fl else 0.0)
+
+
+def _vivi(fl):
+    """[(emo, dose di adesso)] dei vettori ancora vivi del flusso; i finiti si tolgono.
+    ponytail: discesa lineare, la curva vera e' della fase 2"""
+    t = _orologio(fl)
+    _vettori[fl][:] = [v for v in _vettori[fl] if t - v["nato"] < v["durata"]]
+    return [(v["emo"], v["dose"] * (1 - (t - v["nato"]) / v["durata"])) for v in _vettori[fl]]
+
+
+def _azzera_vettori():
+    for vv in _vettori.values():
+        vv.clear()
+
+
+def _applica_flusso(fl):
+    """Prima di ogni calcolo di un flusso (prefill o inoltro): sul server la SOMMA,
+    layer per layer, dei vettori vivi di quel flusso alla dose gia' scesa; nessuno =
+    spento. Il server tiene un vettore solo e lo sostituisce, quindi la somma si fa
+    qui. Solo dentro _vettore_lock."""
+    if not vettori_attivi() or os.environ.get("RIFLESSO_COLLAUDO"):
+        _azzera_vettori()      # consenso ritirato: al ritorno non riappare niente di vecchio
+    dosi = _vivi(fl) if fl in _vettori else []
+    if not dosi:
+        if _vettore_vivo[0]:
+            calma()
+        return
+    somma = {}
+    for emo, dose in dosi:
+        for l, v in (ponte.dirs_emozione(emo, dose) or {}).items():
+            somma[l] = [a + b for a, b in zip(somma[l], v)] if l in somma else list(v)
+    _cvec({"layers": somma, "relative": True})
+    _vettore_vivo[0] = True
+    watchdog = threading.Timer(DURATA_MAX_S, _scaduto)   # PATTO clausola 2, come per il prefill
+    watchdog.daemon = True
+    watchdog.start()
 
 
 def _diario(voce):
@@ -493,7 +597,7 @@ def _scaduto():
 
 
 
-def _colora_ricordo(d, risposta, codici, emos):
+def _colora_ricordo(d, risposta, codici, emos, flusso=None):
     """Design dell'autrice (10/10): ricordo scelto -> vettore
     della sua emozione -> prefill del SOLO testo del ricordo -> vettore spento.
     Il resto del prompt e la generazione restano senza vettore: la colorazione
@@ -504,7 +608,9 @@ def _colora_ricordo(d, risposta, codici, emos):
     poi il ricordo col vettore. L'inoltro dopo riusa la cache e prosegue senza.
     1.10.0: con più ricordi nella stessa risposta ognuno si riempie col vettore
     della SUA emozione (emos, None = senza vettore), un /completion per ricordo.
-    Le emozioni dei ricordi colorati, [] se nessuno."""
+    Le emozioni dei ricordi colorati, [] se nessuno.
+    issue #3 punto A (18/10): fuori dal ricordo vale il vettore del flusso
+    (_applica_flusso), e il vettore del ricordo resta al flusso per DURATA_S."""
     corpo = {k: v for k, v in d.items()
              if k in ("messages", "tools", "tool_choice", "chat_template_kwargs")}
     st, r = ponte.post("/apply-template", corpo, timeout=30)
@@ -521,11 +627,16 @@ def _colora_ricordo(d, risposta, codici, emos):
     fini = [i + risposta.rfind("\n", 0, risposta.index(f"°\n{c}\n")) for c in codici[1:]] + [b]
     colorati = []
     with _vettore_lock:
+        _applica_flusso(flusso)
         if ponte.post("/completion", {"prompt": prompt[:a], "n_predict": 1,
                                       "cache_prompt": True}, timeout=600)[0] != 200:
             return []
         for fine, emo in zip(fini, emos):
-            if not emo or not inietta_emozione(emo):
+            if flusso == "pensatoio" and _cw[0] != flusso:
+                _diario({"colora": "la chat ha preso lo slot: prefill del pensatoio interrotto"})
+                break
+            dose = inietta_emozione(emo) if emo else False
+            if not dose:
                 ponte.post("/completion", {"prompt": prompt[:fine], "n_predict": 1,
                                            "cache_prompt": True}, timeout=600)
                 continue
@@ -537,8 +648,14 @@ def _colora_ricordo(d, risposta, codici, emos):
                 ponte.post("/completion", {"prompt": prompt[:fine], "n_predict": 1,
                                            "cache_prompt": True}, timeout=600)
                 colorati.append(emo)
+                if DURATA_S > 0 and flusso in _vettori:
+                    _vettori[flusso].append({"emo": emo, "dose": dose, "nato": _orologio(flusso),
+                                             "durata": DURATA_S})
             finally:
-                calma()
+                try:
+                    _applica_flusso(flusso)   # durata 0: nessun vettore vivo -> calma(), come prima
+                except Exception:
+                    calma()
                 watchdog.cancel()
     return colorati
 
@@ -644,11 +761,20 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         pass
 
     def _inoltra(self, body, flusso=None):
-        with _vettore_lock:   # issue #3 punto A: mai dentro un prefill colorato
-            pass
+        if flusso is not None:
+            with _vettore_lock:   # issue #3 punto A: mai dentro un prefill colorato
+                _applica_flusso(flusso)   # il vettore del flusso che genera, nessun altro
         up = http.client.HTTPConnection(*UPSTREAM, timeout=600)
         if flusso == "pensatoio":
-            _pens_vivi.append(up)
+            with _cw_lock:     # o la chat ci trova fra i vivi e ci taglia, o noi vediamo lo slot suo
+                if _cw[0] != flusso:
+                    self.send_error(503, "la chat ha preso lo slot")
+                    _diario({"cw": "pensatoio rimandato: la chat ha preso lo slot"})
+                    return
+                up.connect()
+                _pens_vivi.append(up.sock)
+                _punto[flusso] = _orologio(flusso)
+        sock = up.sock
         resp = None
         try:
             up.putrequest(self.command, self.path)
@@ -698,10 +824,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 up.close()
             except Exception:
                 pass
-            if up in _pens_vivi:
-                _pens_vivi.remove(up)
+            if sock in _pens_vivi:
+                _pens_vivi.remove(sock)
         # fine stream: specchio del KV in RAM (thread: mai in mezzo alla chat)
-        if resp.status == 200 and ("completion" in self.path or "/v1/chat" in self.path):
+        if resp is not None and resp.status == 200 and ("completion" in self.path or "/v1/chat" in self.path):
             if flusso == "chat":
                 _chat_calda[0] = time.time()
             threading.Thread(target=_salva_kv, daemon=True).start()
@@ -709,7 +835,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self._inoltra(None)
 
-    def _memoria(self, body):
+    def _memoria(self, body, flusso=None):
         """Memoria involontaria: a ogni lettura nuova il Lux sceglie fino a 4
         ricordi, tutti nella stessa risposta del tool; i ricordi già consegnati nella conversazione tornano al loro posto.
         A consenso spento il richiamo gira lo stesso e rinforza gli archi (WIRING
@@ -760,7 +886,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             if any(emos) and vettori_attivi() and not os.environ.get("RIFLESSO_COLLAUDO") \
                     and not stop:
                 try:
-                    colorati = _colora_ricordo(d, nuova["risposta"], nuova["codici"], emos)
+                    colorati = _colora_ricordo(d, nuova["risposta"], nuova["codici"], emos, flusso)
                 except Exception as e:
                     _diario({"colora": f"fallito: {e}"})
             # 30/09 persistenza: gli id servono alla notturna (solo diario)
@@ -777,6 +903,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             try:
                 d0 = json.loads(body)
                 if _stop_chiesto(d0.get("messages", [])):
+                    _azzera_vettori()   # issue #3 punto A: anche quelli in pausa con l'altra cache
                     calma()
                     _diario({"kill": f"{STOP} scritto dall'agente"})
             except Exception:
@@ -796,37 +923,51 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass  # mai bloccare la parola dell'agente per un orologio rotto
         # --- doppia CW (19/07): riconosci il flusso, scambia le cache.
-        flusso = None
+        flusso = _flusso(body) if chat else None
+        if flusso == "chat":
+            _chat_in_volo[0] += 1     # fino a fine risposta: il pensatoio non prende lo slot
+        try:
+            self._post_chat(body, chat, flusso)
+        finally:
+            if flusso == "chat":
+                _chat_in_volo[0] -= 1
+                _chat_calda[0] = time.time()
+
+    def _post_chat(self, body, chat, flusso):
         if chat:
-            flusso = _flusso(body)
-            if flusso == "pensatoio":
-                # spec punto 5: il pensiero riprende solo a chat fredda
-                inizio = time.time()
-                while True:
-                    if _typing():
-                        _chat_calda[0] = time.time()
-                    if time.time() - _chat_calda[0] >= AFK_S:
-                        break
-                    time.sleep(3)
-                if time.time() - inizio > 5:
-                    _diario({"cw": f"pensatoio trattenuto {time.time()-inizio:.0f}s (chat calda)"})
-            with _cw_lock:
-                if flusso in KV_FLUSSO and flusso != _cw[0]:
-                    if flusso == "chat":
-                        # spec punto 4: la chat interrompe il pensiero in corso
-                        # (socket chiuso = cancel su llama; Hermes ritenta e
-                        # col restore riprocessa solo il delta)
-                        for c in list(_pens_vivi):
-                            try:
-                                c.sock and c.sock.close()
-                            except Exception:
-                                pass
-                    _scambia(flusso)
-                    _diario({"cw": f"scambio -> {flusso}"})
-                elif flusso == "altro" and _cw[0] in KV_FLUSSO:
-                    _slot("save", KV_FLUSSO[_cw[0]])  # al riparo prima dell'estraneo
-                    _cw[0] = "altro"
-                    _diario({"cw": "flusso estraneo: slot ceduto, CW al riparo"})
+            inizio = time.time()
+            while True:
+                if flusso == "pensatoio":
+                    # spec punto 5: il pensiero riprende solo a chat fredda, e mai con
+                    # una richiesta della chat in corso (issue #3 punto A)
+                    while True:
+                        if _typing():
+                            _chat_calda[0] = time.time()
+                        if _chat_ferma():
+                            break
+                        time.sleep(3)
+                with _cw_lock:
+                    if flusso == "pensatoio" and _chat_in_volo[0]:
+                        continue    # la chat e' arrivata nel frattempo: di nuovo in attesa
+                    if flusso == "pensatoio":
+                        try:
+                            _nuovo_pensiero(_conversazione(json.loads(body).get("messages", [])))
+                        except ValueError:
+                            pass
+                    if flusso in KV_FLUSSO and flusso != _cw[0]:
+                        if flusso == "chat":
+                            # spec punto 4: la chat interrompe il pensiero in corso
+                            # (il gateway ritenta e col restore riprocessa solo il delta)
+                            _interrompi_pensatoio()
+                        _scambia(flusso)
+                        _diario({"cw": f"scambio -> {flusso}"})
+                    elif flusso == "altro" and _cw[0] in KV_FLUSSO:
+                        _slot("save", KV_FLUSSO[_cw[0]])  # al riparo prima dell'estraneo
+                        _cambia_cw("altro")
+                        _diario({"cw": "flusso estraneo: slot ceduto, CW al riparo"})
+                    break
+            if flusso == "pensatoio" and time.time() - inizio > 5:
+                _diario({"cw": f"pensatoio trattenuto {time.time()-inizio:.0f}s (chat calda)"})
             # soglie gemelle: oltre 100k l'avviso di spazio, in coda come l'ora
             if flusso in KV_FLUSSO and _tok_cw[flusso] > SOGLIA_CW \
                     and not _avvisato_cw[flusso]:
@@ -853,7 +994,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         # del tool non va separato dalla sua chiamata).
         if chat:
             try:
-                body = self._memoria(body)
+                body = self._memoria(body, flusso)
             except Exception as e:
                 _diario({"memoria": f"rotta: {e}"})  # mai bloccare la parola dell'agente
         self._inoltra(body, flusso)

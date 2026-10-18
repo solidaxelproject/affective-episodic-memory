@@ -54,6 +54,10 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
    (regola picco-fine). La discesa si scandisce con l'ora dei messaggi (il riflesso registra l'arrivo di ogni messaggio,
    l'agente ne vede uno ogni 5). Durata = permanenza dell'emozione x dose di partenza x importanza (Verduyn 2009/2011).
    La dose per engramma, token per token, resta per quando il motore lo permettera'.
+   **Piu' vettori insieme (18/10/2026):** i vettori di steering si SOMMANO (piu' ricordi nella stessa risposta del
+   tool, o un vettore nuovo mentre un altro sta scendendo). Il modo di sommarli si stabilisce in questa fase. Base: test
+   multivettore del 18/10, fino a 12 emozioni insieme o in differita, testo mai rotto, ogni emozione conserva circa la
+   sua probabilita' di emergere.
 8. **Effetto sulla forza.** Dalla carica nuova si ricalcola S0; S si scala nella stessa proporzione, cosi' i rinforzi
    gia' presi restano.
 9. **Rodaggio di 30 giorni** per tutti i cambiamenti: giorni 0-10 al 10% dell'effetto pieno, 10-20 al 30%, 20-30 al
