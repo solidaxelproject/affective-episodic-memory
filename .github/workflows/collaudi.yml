@@ -1,0 +1,23 @@
+# Collaudi: le verifiche che girano senza GPU (python3 collaudi.py), a ogni push e a ogni PR.
+name: collaudi
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  collaudi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: dipendenze (numpy; torch solo CPU, per memoria.py)
+        run: |
+          pip install numpy
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python collaudi.py
