@@ -46,5 +46,34 @@ with tempfile.TemporaryDirectory() as td:
     # 3. testo che dopo la pulizia non dice niente: nessun ricordo, nessun crollo
     for q in ("?", '"', "   "):
         assert "--- ricordo" not in ricorda(q), q
+    # 4. (18/10) il ricordo si ritrova col suo codice, lo stesso che il riflesso mette nel tool
+    import hashlib
+    n, cod = int(hashlib.sha256(repr(1784880047.304042).encode()).hexdigest(), 16), ""
+    for _ in range(16):   # stessa funzione di riflesso._codice e lux_engrammi.codice
+        n, k = divmod(n, 36)
+        cod += "0123456789abcdefghijklmnopqrstuvwxyz"[k]
+    c = sqlite3.connect(td / "memoria.db")
+    c.execute("INSERT INTO nodi (ts, testo, emo_tag, firma) VALUES (?, ?, ?, ?)",
+              (1784880047.304042, "la luna sopra il porto", "joy", firma))
+    c.commit()
+    c.close()
+    r = subprocess.run([sys.executable, "ricorda.py", "--id", cod, "-k", "1"], cwd=td,
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0 and "luna sopra il porto" in r.stdout and cod in r.stdout, r.stdout + r.stderr
+    r = subprocess.run([sys.executable, "ricorda.py", "--id", "zzzzzzzzzzzzzzzz"], cwd=td,
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode != 0, "un codice inesistente deve dire che il ricordo non c'e'"
+    # 5. (18/10) --richiamati: i ricordi consegnati dal riflesso dall'ultima notturna, col codice
+    r = subprocess.run([sys.executable, "ricorda.py", "--richiamati"], cwd=td,
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0 and "--- ricordo" not in r.stdout and cod not in r.stdout, r.stdout + r.stderr
+    (td / "consegne-memorinvolontaria.json").write_text(json.dumps(
+        {"conv": {"ts": 1.0, "voci": [{"dopo": "x", "codici": [cod], "risposta": "1°\n" + cod + "\nla luna"}]}}))
+    diario = (td / "diario-richiami.jsonl").read_text()
+    r = subprocess.run([sys.executable, "ricorda.py", "--richiamati"], cwd=td,
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0 and cod in r.stdout and "luna sopra il porto" in r.stdout, r.stdout + r.stderr
+    assert (td / "diario-richiami.jsonl").read_text() == diario, \
+        "--richiamati non e' un richiamo: non deve scrivere nel diario dei richiami"
 
 print("test_ricorda: TUTTO VERDE")

@@ -33,6 +33,9 @@ python3 estrai-matrix.py "$GIORNI" > "$J" || { echo "estrazione fallita"; exit 1
 # ad agente già addormentato. Prima d'ora andava chiesta a mano: ultima il 14/07.
 echo "$(date -Iseconds) dormi richiesto (mezzanotte, chat estratta)" >> /data/workspace/memoria/dormi.log
 touch /data/workspace/memoria/.dormi-richiesto
+# 18/10, l'utente: con la dormita la conversazione finisce, e con lei la lista dei ricordi
+# consegnati dal riflesso (quella che l'agente legge con ricorda.py --richiamati)
+rm -f /data/workspace/memoria/consegne-memorinvolontaria.json
 
 # REGOLA DI PROGETTO (19/07 sera): il marker avanza SOLO a lavoro riuscito: se
 # una notte salta o fallisce, la successiva riparte da dov'era il marker e

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # Richiamo dalla memoria affettiva: SOLO libreria standard (gira nel container).
 # Uso: ricorda.py --emo gioia [-k 3] | ricorda.py --testo "parole" [-k 3]
-#      ricorda.py --id 82   richiamo diretto di un ricordo per id
+#      ricorda.py --id <codice>   richiamo diretto di un ricordo (codice di 16 caratteri, 18/10;
+#                                 vale anche il numero del nodo)
+#      ricorda.py --richiamati   i ricordi che il riflesso mi ha consegnato dall'ultima notturna (18/10)
 #      ricorda.py --stats
 # Emozioni in inglese (lessico Plutchik): joy, fear, sadness, love, curiosity...
 import argparse
+import hashlib
 import json
 import math
 import sqlite3
@@ -20,14 +23,25 @@ import stato as omeostato
 p = argparse.ArgumentParser()
 p.add_argument("--emo")
 p.add_argument("--testo")
-p.add_argument("--id", type=int, help="richiama un ricordo preciso per id")
+p.add_argument("--id", help="richiama un ricordo preciso: il suo codice (o il numero del nodo)")
 p.add_argument("--congruente", action="store_true",
                help="richiamo guidato dallo stato emotivo attuale")
 p.add_argument("-k", type=int, default=3)
 p.add_argument("--stats", action="store_true")
+p.add_argument("--richiamati", action="store_true",
+               help="i ricordi consegnati dal riflesso dall'ultima notturna, col loro codice")
 p.add_argument("--stato", action="store_true",
                help="mostra lo stato emotivo attuale")
 args = p.parse_args()
+
+
+def codice(ts):
+    """il codice del ricordo, come lux_engrammi.codice e il riflesso: SHA-256 del timestamp, 16 caratteri [0-9a-z]"""
+    n, s = int(hashlib.sha256(repr(ts).encode()).hexdigest(), 16), ""
+    for _ in range(16):
+        n, r = divmod(n, 36)
+        s += "0123456789abcdefghijklmnopqrstuvwxyz"[r]
+    return s
 
 if args.stato:
     print("stato attuale:", omeostato.descrivi())
@@ -42,6 +56,22 @@ if args.stats:
                     "ORDER BY 2 DESC LIMIT 10").fetchall()
     print(f"{n} ricordi. Emozioni più frequenti: "
           + ", ".join(f"{e} ({q})" for e, q in per))
+    sys.exit(0)
+
+if args.richiamati:
+    # il file lo scrive il riflesso a ogni consegna e lo svuota la notturna; solo lettura, non e' un richiamo
+    try:
+        conv = json.loads((Path(__file__).parent / "consegne-memorinvolontaria.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        conv = {}
+    codici = list(dict.fromkeys(cod for v in sorted(conv.values(), key=lambda v: v.get("ts", 0))
+                                for voce in v.get("voci", []) for cod in voce.get("codici") or [voce.get("codice")]))
+    nodi = {codice(ts): (emo, testo) for ts, emo, testo in c.execute("SELECT ts, emo_tag, testo FROM nodi")}
+    if not codici:
+        print("nessun ricordo richiamato dall'ultima notturna")
+    for cod in codici:
+        emo, testo = nodi.get(cod, ("?", "(non piu' nel grafo)"))
+        print(f"{cod} ({emo}) {testo.splitlines()[0][:120] if testo else ''}")
     sys.exit(0)
 
 def _cosine_su_firma(query):
@@ -72,9 +102,12 @@ def _cerca_testo(q):
 
 scores = {}
 if args.id:
-    if not c.execute("SELECT 1 FROM nodi WHERE id=?", (args.id,)).fetchone():
-        sys.exit(f"nessun ricordo con id {args.id}")
-    scores = {args.id: 1.0}
+    q = args.id.strip().lower()
+    nid = int(q) if q.isdigit() else next(
+        (i for i, ts in c.execute("SELECT id, ts FROM nodi") if codice(ts) == q), None)
+    if nid is None or not c.execute("SELECT 1 FROM nodi WHERE id=?", (nid,)).fetchone():
+        sys.exit(f"nessun ricordo con codice {args.id}")
+    scores = {nid: 1.0}
 elif args.testo:
     rows = _cerca_testo(args.testo)
     scores = {r[0]: 1.0 / (1 + i) for i, r in enumerate(rows)}
@@ -107,7 +140,7 @@ for nid in top:
                   (nid,)).fetchone()
     if r:
         testo = r[0] if len(r[0]) < 600 else r[0][:600] + " [...]"
-        print(f"--- ricordo ({r[1]}) ---\n{testo}\n")
+        print(f"--- ricordo {codice(r[2])} ({r[1]}) ---\n{testo}\n")
 
 # diario dei richiami: il dataset che un giorno addestrerà il recupero (gradino 2)
 import time as _time
