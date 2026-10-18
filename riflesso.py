@@ -445,9 +445,16 @@ def _sentinella():
     vettore è acceso, muore entro 1 secondo. Nessuna domanda, nessun dibattito."""
     while True:
         time.sleep(0.5)
-        if _vettore_vivo[0] and not vettori_attivi():
-            calma()
-            _diario({"kill": "consenso vettoriale ritirato: spento dalla sentinella"})
+        # issue #3 punto C: un giro in errore non ferma la sentinella; "kill" solo
+        # se lo spegnimento e' riuscito (se fallisce, calma() ha gia' scritto CRITICO)
+        try:
+            if _vettore_vivo[0] and not vettori_attivi() and calma():
+                _diario({"kill": "consenso vettoriale ritirato: spento dalla sentinella"})
+        except Exception as e:
+            try:
+                _diario({"sentinella": f"giro fallito: {e!r}"})
+            except Exception:
+                pass
 
 
 def _scaduto():
