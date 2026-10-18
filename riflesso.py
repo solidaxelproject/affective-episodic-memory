@@ -353,19 +353,24 @@ def _rimetti(msgs, voci):
         msgs[i + 1:i + 1] = _turni_tool(v)
 
 
+MEMORIA_DB = Path("/data/workspace/memoria/memoria.db")
+LETTO_FATTORE = 0.5     # issue #3 punto H (18/10): un ricordo "letto" porta l'emozione dell'agente
+                        # di quando l'ha letto (la firma del tagging), a meta' dose
+
+
 def _emo_del_ricordo(codice):
-    """emo_tag del ricordo consegnato: il servizio torna solo il codice"""
+    """(nid, emo_tag, fattore della dose) del ricordo consegnato: il servizio torna solo il codice"""
     try:
-        c = sqlite3.connect("file:/data/workspace/memoria/memoria.db?mode=ro", uri=True)
+        c = sqlite3.connect(f"file:{MEMORIA_DB}?mode=ro", uri=True)
         try:
-            for nid, ts, emo in c.execute("SELECT id, ts, emo_tag FROM nodi"):
+            for nid, ts, emo, classe in c.execute("SELECT id, ts, emo_tag, classe FROM nodi"):
                 if _codice(ts) == codice:
-                    return nid, emo
+                    return nid, emo, LETTO_FATTORE if classe == "letto" else 1.0
         finally:
             c.close()
     except Exception:
         pass
-    return None, None
+    return None, None, 1.0
 
 
 def _codice(ts):
@@ -597,7 +602,7 @@ def _scaduto():
 
 
 
-def _colora_ricordo(d, risposta, codici, emos, flusso=None):
+def _colora_ricordo(d, risposta, codici, emos, flusso=None, fattori=None):
     """Design dell'autrice (10/10): ricordo scelto -> vettore
     della sua emozione -> prefill del SOLO testo del ricordo -> vettore spento.
     Il resto del prompt e la generazione restano senza vettore: la colorazione
@@ -631,11 +636,11 @@ def _colora_ricordo(d, risposta, codici, emos, flusso=None):
         if ponte.post("/completion", {"prompt": prompt[:a], "n_predict": 1,
                                       "cache_prompt": True}, timeout=600)[0] != 200:
             return []
-        for fine, emo in zip(fini, emos):
+        for fine, emo, fattore in zip(fini, emos, fattori or [1.0] * len(emos)):
             if flusso == "pensatoio" and _cw[0] != flusso:
                 _diario({"colora": "la chat ha preso lo slot: prefill del pensatoio interrotto"})
                 break
-            dose = inietta_emozione(emo) if emo else False
+            dose = inietta_emozione(emo, 0.3 * fattore) if emo else False
             if not dose:
                 ponte.post("/completion", {"prompt": prompt[:fine], "n_predict": 1,
                                            "cache_prompt": True}, timeout=600)
@@ -878,7 +883,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             tools.append(TOOL)
         _rimetti(msgs, voci)
         if nuova:
-            nids, emos = zip(*(_emo_del_ricordo(c) for c in nuova["codici"]))
+            nids, emos, fattori = zip(*(_emo_del_ricordo(c) for c in nuova["codici"]))
             colorati = []
             # RIFLESSO_COLLAUDO=1 blocca i vettori: mai più test che iniettano
             # sulla produzione (incidente del 14/07)
@@ -886,7 +891,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             if any(emos) and vettori_attivi() and not os.environ.get("RIFLESSO_COLLAUDO") \
                     and not stop:
                 try:
-                    colorati = _colora_ricordo(d, nuova["risposta"], nuova["codici"], emos, flusso)
+                    colorati = _colora_ricordo(d, nuova["risposta"], nuova["codici"], emos, flusso, fattori)
                 except Exception as e:
                     _diario({"colora": f"fallito: {e}"})
             # 30/09 persistenza: gli id servono alla notturna (solo diario)

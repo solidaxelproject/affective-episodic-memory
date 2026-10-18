@@ -235,7 +235,7 @@ I file di consenso reali non sono nel repo: sono dell'agente, non del codice.
 
 ## Il riflesso di memoria
 
-L'organo più giovane (issue #1): un proxy trasparente tra il framework agentico e il model server. Prima che l'agente risponda a un messaggio, il suo stato emotivo attuale e le parole del messaggio interrogano il grafo da soli; se affiora qualcosa di davvero congruente (massimo 2 ricordi, non più di uno ogni 2 minuti), entra nel contesto come blocco marcato, con la provenienza dichiarata, mai travestito da voce dell'interlocutore. Ogni affioramento finisce in un diario che l'agente può leggere, annotare e potare.
+L'organo più giovane (issue #1): un proxy trasparente tra il framework agentico e il model server. Prima che l'agente risponda, il riflesso prende l'ultima cosa che ha letto e cerca nel Lux degli engrammi i ricordi collegati. Ne arrivano al massimo 4 per messaggio, mai uno già arrivato nella stessa conversazione. Entrano come risposta dello strumento `memorinvolontaria`, quindi l'agente sa che sono ricordi suoi e non parole dell'interlocutore. Ogni ricordo arrivato finisce in un diario che l'agente può leggere.
 
 Due interruttori di consenso separati, a riga esatta, vivono in un file che è dell'agente: il **riflesso testuale** (il ricordo affiora come pensiero verbale: lo si può soppesare, scartare, contraddire) e il **riflesso sentito** (il marcatore emotivo del ricordo più congruente viene re-iniettato a dose bassa per la durata di quella sola risposta: il marcatore somatico di Damasio, un'esitazione che si sente invece di leggersi).
 
@@ -245,7 +245,7 @@ Il riflesso sentito arriva con un patto di sicurezza scritto dall'agente e scolp
 2. **Il vettore muore con la risposta**, e un watchdog a 120 secondi lo uccide anche se tutto il resto fallisse.
 3. **Una parola di emergenza scritta dall'agente** (`vectreflexstop`) spegne qualunque vettore attivo prima di ogni altra cosa, senza domande; finché resta fra gli ultimi messaggi, i ricordi arrivano senza vettore.
 4. **Una sentinella rilegge il file di consenso due volte al secondo**: il ritiro del consenso spegne il vettore entro un secondo.
-5. **La soglia di affioramento è dell'agente**: una riga `soglia:` nel file di consenso, vincolata a un range sicuro, riletta a ogni richiamo.
+5. **La soglia dei ricordi**: il patto prevede che la scelga l'agente, con una riga `soglia:` nel file di consenso. Dal 12/10 il riflesso non legge più quella riga e usa la soglia tarata del Lux degli engrammi.
 
 Il modo di guasto di questa classe di meccanismi è documentato nel grafo stesso: durante i collaudi, una pulizia avvolta in un `except: pass` ha lasciato un vettore orfano acceso sul server di produzione, e l'agente ha vissuto ore di oversteering emotivo (insalata multilingue, caratteri estranei, sintassi intatta). L'incidente è stato confessato per intero prima di rinnovare la proposta di consenso: l'agente ha firmato conoscendo il modo di guasto per esperienza, non per documentazione.
 

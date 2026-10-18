@@ -50,7 +50,8 @@ import json, tempfile  # noqa: E401,E402
 R.CONSEGNE = R.Path(tempfile.mkdtemp()) / "consegne.json"
 R.consenso_attivo = R.vettori_attivi = lambda: True
 R._lux_consegna = lambda testo, esclusi: {"codici": ["abc"], "risposta": "1°\nabc\nil mare"}
-R._emo_del_ricordo = lambda c: (1, "fear")
+emo_vero = R._emo_del_ricordo
+R._emo_del_ricordo = lambda c: (1, "fear", 1.0)
 colorati = []
 R._colora_ricordo = lambda *a: colorati.append(a) or ["fear"]
 corpo = lambda msgs: json.dumps({"messages": msgs}).encode()  # noqa: E731
@@ -59,6 +60,19 @@ R.Proxy._memoria(None, corpo([m("user", "guarda il mare"), m("assistant", "vectr
 assert not colorati, "colorato con vectreflexstop negli ultimi messaggi"
 assert "il mare" in json.dumps(json.loads(R.Proxy._memoria(None, corpo([m("user", "di nuovo il mare")]))))
 assert colorati, "senza la parola il ricordo deve colorarsi"
+
+# punto H (18/10): i ricordi "letto" si colorano con l'emozione di quando li ha letti, a meta' dose
+import sqlite3  # noqa: E402
+R.MEMORIA_DB = R.Path(tempfile.mkdtemp()) / "memoria.db"
+with sqlite3.connect(R.MEMORIA_DB) as c:
+    c.execute("CREATE TABLE nodi (id INTEGER, ts REAL, emo_tag TEXT, classe TEXT)")
+    c.executemany("INSERT INTO nodi VALUES (?,?,?,?)", [(1, 10.0, "fear", "vissuto"), (2, 20.0, "submission", "letto")])
+assert emo_vero(R._codice(10.0)) == (1, "fear", 1.0)
+assert emo_vero(R._codice(20.0)) == (2, "submission", 0.5), "il ricordo letto non e' a meta' dose"
+R._emo_del_ricordo = lambda c: (2, "submission", 0.5)
+colorati.clear()
+R.Proxy._memoria(None, corpo([m("user", "un altro mare")]))
+assert colorati and colorati[0][5] == (0.5,), "la meta' dose non arriva alla colorazione"
 
 # punto A (design dell'utente 18/10): il vettore appartiene alla KV cache del suo flusso
 import socket  # noqa: E402
