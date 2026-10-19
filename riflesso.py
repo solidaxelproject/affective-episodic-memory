@@ -404,6 +404,37 @@ def _ora_corta(t):
     return f"[{t.tm_mday}/{t.tm_mon}/{t.tm_year}|{t.tm_hour}:{t.tm_min:02d}]"
 
 
+def _in_coda(msgs, testo):
+    """19/10: il template di Occamy vuole un solo system, in testa: il testo del momento
+    va in coda all'ultimo messaggio invece che in un system in mezzo (in place)"""
+    c = msgs[-1].get("content")
+    if isinstance(c, list):
+        c.append({"type": "text", "text": "\n\n" + testo})
+    else:
+        msgs[-1]["content"] = (c or "") + "\n\n" + testo
+
+
+def _segna_volo():
+    """20/10: quante richieste della chat sono in volo, per la barra del prefill
+    (~/.local/bin/barra-prefill): i prefill partiti con la chat in volo sono della chat"""
+    try:
+        Path(VOLO).write_text(str(_chat_in_volo[0]))
+    except OSError:
+        pass
+
+
+def _code(body, testi):
+    """20/10: i testi in coda all'ultimo messaggio, se non e' la risposta della
+    memoria involontaria (il ricordo resta nudo: si riprova alla richiesta dopo)"""
+    d = json.loads(body)
+    msgs = d.get("messages", [])
+    if not msgs or not testi or str(msgs[-1].get("tool_call_id", "")).startswith(TOOL_RICORDO):
+        return body, False
+    for t in testi:
+        _in_coda(msgs, t)
+    return json.dumps(d).encode(), True
+
+
 def _metti_ore(msgs, adesso=None):
     """davanti a un messaggio dell'utente ogni OGNI, l'ora del suo arrivo (in place)"""
     conv = _conversazione(msgs)
@@ -739,6 +770,7 @@ def query_riflesso(testo):
 
 
 STREAM_LIVE = "/tmp/stream-live.log"
+VOLO = "/tmp/chat-in-volo"
 
 
 def _tee_sse(buf, chunk, fh):
@@ -921,15 +953,14 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 pass
         # 16/10, l'utente: niente più ora a ogni messaggio ("[adesso sono le ...]",
         # dal 19/07): l'ora vera sta davanti a un suo messaggio ogni 5 (_metti_ore).
-        # Resta in CODA, del momento, la destinazione unica delle riflessioni (25/07).
-        if chat:
+        # Resta in CODA, del momento, la destinazione unica delle riflessioni (25/07):
+        # 20/10 la mette _code() dopo la memoria involontaria.
+        if chat and _flusso(body) == "chat":
             try:
                 d2 = json.loads(body)
                 msgs = d2.get("messages", [])
                 if msgs:
-                    if _flusso(body) == "chat":
-                        _metti_ore(msgs)
-                    msgs.insert(len(msgs) - 1, {"role": "system", "content": PENSATOIO_DOVE})
+                    _metti_ore(msgs)
                     body = json.dumps(d2).encode()
             except Exception:
                 pass  # mai bloccare la parola dell'agente per un orologio rotto
@@ -937,12 +968,14 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         flusso = _flusso(body) if chat else None
         if flusso == "chat":
             _chat_in_volo[0] += 1     # fino a fine risposta: il pensatoio non prende lo slot
+            _segna_volo()
         try:
             self._post_chat(body, chat, flusso)
         finally:
             if flusso == "chat":
                 _chat_in_volo[0] -= 1
                 _chat_calda[0] = time.time()
+                _segna_volo()
 
     def _post_chat(self, body, chat, flusso):
         if chat:
@@ -979,35 +1012,38 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     break
             if flusso == "pensatoio" and time.time() - inizio > 5:
                 _diario({"cw": f"pensatoio trattenuto {time.time()-inizio:.0f}s (chat calda)"})
+        coda = [PENSATOIO_DOVE] if chat else []
+        avviso = None
+        if chat:
             # soglie gemelle: oltre 100k l'avviso di spazio, in coda come l'ora
             if flusso in KV_FLUSSO and _tok_cw[flusso] > SOGLIA_CW \
                     and not _avvisato_cw[flusso]:
-                try:
-                    d3 = json.loads(body)
-                    msgs = d3.get("messages", [])
-                    if msgs:
-                        avviso = (
-                            "[avviso di spazio: questo flusso di pensiero ha superato i "
-                            "100mila token e la finestra si sta riempiendo: tutto rallenta. "
-                            "È il momento di tirare le fila e chiudere il pensiero.]"
-                            if flusso == "pensatoio" else
-                            "[avviso di spazio: la conversazione ha superato i 100mila "
-                            "token e la finestra si sta riempiendo: tutto rallenta. "
-                            "La valvola è la dormita, che consolida i ricordi e libera la testa.]")
-                        msgs.insert(len(msgs) - 1, {"role": "system", "content": avviso})
-                        body = json.dumps(d3).encode()
-                        _avvisato_cw[flusso] = True
-                        _diario({"cw": f"avviso 100k -> {flusso} ({_tok_cw[flusso]} tok)"})
-                except Exception:
-                    pass
-        # MEMORIA INVOLONTARIA: per ultima, DOPO lo scambio CW (il prefill colorato
-        # deve finire nella cache giusta) e dopo gli inserimenti in coda (il turno
-        # del tool non va separato dalla sua chiamata).
+                avviso = (
+                    "[avviso di spazio: questo flusso di pensiero ha superato i "
+                    "100mila token e la finestra si sta riempiendo: tutto rallenta. "
+                    "È il momento di tirare le fila e chiudere il pensiero.]"
+                    if flusso == "pensatoio" else
+                    "[avviso di spazio: la conversazione ha superato i 100mila "
+                    "token e la finestra si sta riempiendo: tutto rallenta. "
+                    "La valvola è la dormita, che consolida i ricordi e libera la testa.]")
+                coda.append(avviso)
+        # MEMORIA INVOLONTARIA: DOPO lo scambio CW (il prefill colorato deve finire
+        # nella cache giusta).
         if chat:
             try:
                 body = self._memoria(body, flusso)
             except Exception as e:
                 _diario({"memoria": f"rotta: {e}"})  # mai bloccare la parola dell'agente
+            # 20/10: i testi in coda per ULTIMI, dopo la memoria: cosi' non entrano
+            # nella query del Lux ne' nell'impronta del messaggio a cui il ricordo
+            # si aggancia, e non toccano la cache colorata
+            try:
+                body, messi = _code(body, coda)
+                if messi and avviso:
+                    _avvisato_cw[flusso] = True
+                    _diario({"cw": f"avviso 100k -> {flusso} ({_tok_cw[flusso]} tok)"})
+            except Exception:
+                pass
         self._inoltra(body, flusso)
 
 
