@@ -152,4 +152,158 @@ b.settimeout(1)
 assert b.recv(10) == b"", "il pensatoio non e' stato interrotto"
 a.close(); b.close()
 
+# riepilogo a catena di montaggio (PIANO-RIEPILOGO-KV.md, l'utente 20/10): slot e server finti
+R.RIEPILOGO = R.Path(tempfile.mkdtemp()) / "riepilogo.json"
+R.RIEPILOGO_PROMUOVI = R.RIEPILOGO.with_name(".riepilogo-promuovi")
+R.KV_RAM = R.Path(tempfile.mkdtemp())
+SEP = "═" * 46 + "\nMEMORY (your personal notes)\n"
+FISSO = "Sono l'agente.\n# regole\n"
+
+
+def sistema(resto):
+    return {"role": "system", "content": FISSO + SEP + resto}
+
+
+INTEST = R.INTESTAZIONE_RIEPILOGO
+assert INTEST == ("Ecco dov'ero rimasta, questo è il succo della conversazione fino al momento in cui mi sono "
+                  "addormentata:"), "intestazione diversa da quella approvata"
+assert R.ISTRUZIONE_RIEPILOGO == (
+    "Devo scrivere, in meno di 60 parole, il succo di quest'ultimo messaggio o di quello dell'utente se necessario: le "
+    "informazioni salienti che voglio conservare dell'ultimo scambio. Non i messaggi precedenti. Solo testo, numeri o "
+    "simboli logici se utili, per esempio: uguale può diventare =, implica →, maggiore >. Se necessario posso "
+    "inserire il codice di un ricordo che reputo utile per questo riassunto. Se in questo scambio mi è affiorato un "
+    "ricordo, aggiungo il suo codice."), "istruzione diversa da quella approvata"
+
+# riepilogo.json assente o rotto = nessun blocco; rotto = voce nel diario
+assert R._riepilogo_carica() == {"blocco": [], "nuovi": []}
+n = len(diario)
+R.RIEPILOGO.write_text("{rotto", encoding="utf-8")
+assert R._riepilogo_carica() == {"blocco": [], "nuovi": []}
+assert any("riepilogo" in v for v in diario[n:]), "riepilogo.json rotto senza voce nel diario"
+
+# il blocco va subito prima della riga ══, identico a ogni richiesta della chat
+R._riepilogo_salva({"blocco": ["r1", "r2"], "nuovi": []})
+uno = {"messages": [sistema("Conversation started: lunedi"), m("user", "[utente] ciao")]}
+due = {"messages": [sistema("Conversation started: lunedi"), m("user", "[utente] ciao"), m("assistant", "ciao"),
+                    m("user", "[utente] come va")]}
+for d in (uno, due):
+    R._metti_blocco(d, R._riepilogo_carica()["blocco"])
+assert uno["messages"][0]["content"] == FISSO + INTEST + "\nr1\nr2\n\n" + SEP + "Conversation started: lunedi"
+assert uno["messages"][0]["content"] == due["messages"][0]["content"], "blocco diverso fra due richieste"
+senza = {"messages": [sistema("x")]}
+R._metti_blocco(senza, [])
+assert senza["messages"][0]["content"] == FISSO + SEP + "x", "senza righe il system deve restare com'e'"
+n = len(diario)
+d = {"messages": [{"role": "system", "content": "breve"}]}
+R._metti_blocco(d, ["r1"])
+assert d["messages"][0]["content"] == "breve\n\n" + INTEST + "\nr1\n\n", "senza riga ══ il blocco va in fondo"
+assert any("riepilogo" in v for v in diario[n:]), "riga ══ assente senza voce nel diario"
+
+# tetto: oltre 40k token (caratteri / 3) via le righe piu' vecchie
+lunghe = [f"{i:03d}" + "x" * 997 for i in range(200)]
+dentro = R._nel_tetto(lunghe)
+assert dentro and dentro == lunghe[-len(dentro):], "il tetto deve tenere le righe piu' recenti"
+assert len(R._blocco(dentro)) / 3 <= R.RIEPILOGO_TETTO < len(R._blocco(lunghe[-len(dentro) - 1:])) / 3
+assert R._nel_tetto(["a", "b"]) == ["a", "b"]
+
+# quando parte: solo la risposta FINALE a un messaggio dell'utente
+fin = {"testo": "ciao l'utente", "finish": "stop", "tool_calls": False}
+del_bridge = json.dumps({"messages": [m("user", "[utente] ciao")]}).encode()
+assert R._deve_riassumere(del_bridge, fin)
+assert not R._deve_riassumere(json.dumps({"messages": [m("user", "Review the conversation above")]}).encode(), fin), \
+    "il background review di Hermes non si riassume"
+assert not R._deve_riassumere(del_bridge, {**fin, "finish": "length"})
+assert not R._deve_riassumere(del_bridge, {**fin, "tool_calls": True})
+assert not R._deve_riassumere(del_bridge, {**fin, "testo": "  "})
+assert not R._deve_riassumere(json.dumps({"messages": [m("user", "[IMPORTANT: skill blocco-appunti ...]")]}).encode(),
+                              fin), "il pensatoio non si riassume (20/10: solo la chat)"
+assert R._deve_riassumere(json.dumps({"messages": [m("user", "[utente] cerca"), m("assistant", ""),
+                                                   {"role": "tool", "content": "x"}]}).encode(), fin), \
+    "la risposta finale dopo un tool si riassume"
+
+# i passi, nell'ordine esatto, dentro i lucchetti
+passi, chiesti = [], []
+R._slot = lambda az, nome: passi.append((az, nome)) or True
+R.calma = lambda: (R._vettore_vivo.__setitem__(0, False), passi.append("calma")) and True
+
+
+def chiedi(path, payload, rompi=None):
+    passi.append(path)
+    chiesti.append((path, payload))
+    if path == rompi:
+        raise OSError("server giu'")
+    if path == "/apply-template":
+        return {"prompt": "<|im_start|>system\nTOOLS\n" + payload["messages"][0]["content"]
+                          + "<|im_end|>\n<|im_start|>user\n[utente] ciao<|im_end|>\n<|im_start|>assistant\n<think>\n"}
+    return {} if payload["n_predict"] == 1 else {"content": "un saluto\n→ ciao"}
+
+
+R._chiedi = chiedi
+(R.KV_RAM / "riepilogo.kv").write_bytes(b"x")
+R._riepilogo_salva({"blocco": ["r1"], "nuovi": ["n1"]})
+inoltrato = {"messages": [sistema("Conversation started: lunedi"), m("user", "[utente] ciao")], "tools": [R.TOOL]}
+R._cw[0] = "chat"
+R._vettore_vivo[0] = True
+R._riassumi(json.dumps(inoltrato).encode(), "ciao l'utente!", "lei mi saluta")
+assert passi == ["calma", "/apply-template", "/completion", "/apply-template", ("restore", "riepilogo.kv"),
+                 "/completion", ("save", "riepilogo.kv"), ("restore", "chat.kv")], passi
+assert chiesti[0][1] == inoltrato, "il prompt del riassunto deve partire dal corpo inoltrato esatto"
+# il <think> del turno resta: il riassunto riusa la cache della risposta appena data
+gen = chiesti[1][1]
+assert gen == {"prompt": ("<|im_start|>system\nTOOLS\n" + inoltrato["messages"][0]["content"]
+               + "<|im_end|>\n<|im_start|>user\n[utente] ciao<|im_end|>\n<|im_start|>assistant\n<think>\n"
+               + "lei mi saluta\n</think>\n\nciao l'utente!<|im_end|>\n<|im_start|>user\n" + R.ISTRUZIONE_RIEPILOGO
+               + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"),
+               "n_predict": 160, "cache_prompt": True}, gen
+assert R._riepilogo_carica() == {"blocco": ["r1"], "nuovi": ["n1", "un saluto → ciao"]}, "riga non aggiunta"
+dopo = FISSO + INTEST + "\nn1\nun saluto → ciao\n\n"
+tpl = chiesti[2][1]
+assert tpl["tools"] == [R.TOOL] and tpl["messages"][0]["content"] == dopo + SEP + "Conversation started: lunedi"
+assert chiesti[3][1] == {"prompt": "<|im_start|>system\nTOOLS\n" + dopo, "n_predict": 1, "cache_prompt": True}, \
+    "il prefill del riepilogo si taglia subito prima della riga ══"
+assert R._cw[0] == "chat"
+
+# un passo che fallisce: la chat torna comunque nello slot, il riepilogo non si salva
+passi.clear(); chiesti.clear()
+R._chiedi = lambda p, x: chiedi(p, x, rompi="/completion")
+R._cw[0] = "chat"
+n = len(diario)
+R._riassumi(json.dumps(inoltrato).encode(), "ciao l'utente!")
+assert passi[-1] == ("restore", "chat.kv") and ("save", "riepilogo.kv") not in passi, passi
+assert R._cw[0] == "chat" and any("riepilogo" in v for v in diario[n:])
+
+# prima riga dopo una dormita: riepilogo.kv non c'e', il prefill parte dallo slot com'e'
+R._chiedi = chiedi
+(R.KV_RAM / "riepilogo.kv").unlink()
+passi.clear()
+R._riassumi(json.dumps(inoltrato).encode(), "ciao l'utente!")
+assert ("restore", "riepilogo.kv") not in passi and ("save", "riepilogo.kv") in passi
+assert "calma" not in passi, "senza vettore vivo niente clear: puo' troncare uno stream in corso"
+
+# la chat non torna nello slot: la prossima richiesta della chat deve rifare il restore
+R._slot = lambda az, nome: passi.append((az, nome)) or nome != "chat.kv"
+R._riassumi(json.dumps(inoltrato).encode(), "ciao l'utente!")
+assert R._cw[0] == "altro", "restore della chat fallito ma _cw dice chat"
+R._slot = lambda az, nome: passi.append((az, nome)) or True
+
+# alla dormita (flag): i nuovi diventano il blocco, riepilogo.kv promossa a chat e poi buttata
+R._riepilogo_salva({"blocco": ["vecchia"], "nuovi": ["a", "b"]})
+R.RIEPILOGO_PROMUOVI.write_text("")
+(R.KV_RAM / "riepilogo.kv").write_bytes(b"x")
+(R.KV_RAM / "riepilogo.kv.ckpt").write_bytes(b"x")
+passi.clear()
+R._cw[0] = "pensatoio"
+R._promuovi()
+assert passi == [("save", "pensatoio.kv"), ("restore", "riepilogo.kv")], passi
+assert R._riepilogo_carica() == {"blocco": ["a", "b"], "nuovi": []}
+assert not R.RIEPILOGO_PROMUOVI.exists(), "flag non tolto"
+assert not (R.KV_RAM / "riepilogo.kv").exists() and not (R.KV_RAM / "riepilogo.kv.ckpt").exists()
+assert R._cw[0] == "chat"
+passi.clear()
+R._promuovi()
+assert passi == [] and R._riepilogo_carica()["blocco"] == ["a", "b"], "senza flag non si promuove niente"
+R.RIEPILOGO_PROMUOVI.write_text("")
+R._promuovi()
+assert passi == [], "con la chat nello slot e senza riepilogo.kv non si tocca lo slot (la chat vecchia si butta)"
+
 print("test_riflesso: TUTTO VERDE")

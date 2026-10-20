@@ -6,6 +6,7 @@ Posizioni = PCA 3D dei vettori bge-m3 degli engrammi (vicini = senso simile); co
 /richiama?q=frase -> i 3 ricordi vincenti ricomposti (Lux.richiama); /ricordo?id=N -> il ricordo N ricomposto.
 ponytail: server della libreria standard, solo 127.0.0.1 (dentro ci sono i ricordi dell'agente); da fuori passa dalla
 pagina della notturna (:8095/lux3d/, pulsante Lux in 3D). Unit: lux3d.service"""
+import gzip
 import json
 import os
 import re
@@ -67,12 +68,13 @@ def cerca(q, quanti=20):
 def aggiorna():
     """12/10: si ricarica quando la notturna aggiunge ricordi (lux-meta.json) o il riflesso rinforza archi
     (lux-stato.npz): la pagina mostra sempre il Lux vivo"""
-    global L, DATI
+    global L, DATI, DATI_GZ
     f = tuple(os.path.getmtime(p) if os.path.exists(p) else 0 for p in (X.META, X.STATO))
     if f != _firma[0]:
         if _firma[0] is not None:
             L = X.Lux()
         DATI, _firma[0] = json.dumps(dati(), ensure_ascii=False).encode(), f
+        DATI_GZ = gzip.compress(DATI, 6)   # 20/10: dal cellulare 2,8 MB -> ~0,6 MB, la pagina lo scompatta
 
 
 aggiorna()
@@ -87,6 +89,8 @@ class H(BaseHTTPRequestHandler):
             corpo, tipo = PAGINA.replace(b"__SOGLIA__", str(X.SOGLIA_RICHIAMO).encode()).replace(b"__VERSIONE__", X.VERSIONE.encode()), "text/html; charset=utf-8"
         elif u.path == "/dati.json":
             corpo, tipo = DATI, "application/json"
+        elif u.path == "/dati.json.gz":   # niente Content-Encoding: il proxy della notturna non lo inoltrerebbe
+            corpo, tipo = DATI_GZ, "application/octet-stream"
         elif u.path == "/richiama":   # come il richiamo vero: frase -> i 3 ricordi vincenti, ricomposti
             q = urllib.parse.parse_qs(u.query).get("q", [""])[0]
             r = [{"id": n, "punti": round(float(p), 3), "testo": L.ricomponi(n)} for n, p in L.richiama(q, 3, 0)] if q.strip() else []   # la pagina esplora: mostra anche sotto soglia

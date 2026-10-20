@@ -89,6 +89,7 @@ FORMATO = re.compile(r"\*\*|__|(?<!\w)[*_](?=\S)|(?<=\S)[*_](?!\w)|`|^#+\s*", re
 
 
 VIRGOLETTE = {'"', "'", "“", "”", "«", "»", "‘", "’"}
+APICI = ("'", "’", "‘")   # 1.12.0: le virgolette semplici, che sono anche apostrofi
 
 
 PROCLITICI = {"mi", "ti", "ci", "vi", "si", "lo", "la", "li", "le", "gli", "ne"}
@@ -110,6 +111,14 @@ def legame_en(t):
     return (t.dep_ == "cc" or t.is_punct) and t.text != "/" and t.text not in VIRGOLETTE
 
 
+def apostrofo(t):
+    """1.12.0 (20/10): apostrofo vero, non apice: attaccato alla parola prima (troncamenti, accenti scritti con
+    l'apostrofo, genitivo inglese: po', perche', be', students'), cioe' subito dopo una lettera o una cifra. Un apice dopo
+    uno spazio o un segno apre una citazione, il segno dopo la chiude"""
+    p = t.doc[t.i - 1]
+    return t.text in APICI and t.i > t.sent.start and not p.whitespace_ and p.text[-1:].isalnum()
+
+
 def legame(t):
     """parole che diventano parametro dell'arco: punteggiatura, congiunzioni, "che" relativo o subordinante"""
     if t.doc.lang_ == "en":
@@ -119,6 +128,8 @@ def legame(t):
     if t.lower_ == "come":   # "come" = parametro di somiglianza (≈), tranne nelle domande (11/10):
         return t.head.pos_ not in ("VERB", "AUX")   # "come stai", "non so come fare" dipendono da un verbo
     if t.i > 0 and proclitico(t.doc[t.i - 1]):   # dopo "mi/ti/ci..." staccato e' un verbo: "mi dai"
+        return False
+    if t.lower_ in ("d'", "d’"):   # 1.12.0: d'accordo, d'altronde restano nell'engramma (come parametro: "di")
         return False
     if t.dep_ == "mark" and t.pos_ == "ADP":   # preposizione prima di un infinito: parametro anche lei ({∈}[partire])
         return parametro(t.text) is not None
@@ -213,7 +224,13 @@ def _taglia(testo, modello=None):
 
         dentro = None
         for t in sent:   # le virgolette delimitano un engramma: il citato e' un pezzo solo, le virgolette spariscono
-            if t.text in VIRGOLETTE and t.pos_ == "PUNCT":
+            doppia = dentro is not None and t.doc[dentro].text not in APICI
+            if t.text in APICI and doppia:   # 1.12.0: apice dentro "...": resta testo della citazione
+                padrone[t.i] = ("Q", dentro)
+            elif apostrofo(t) and dentro is None:   # 1.12.0: resta con la parola prima
+                padrone[t.i] = padrone[t.i - 1]
+            elif t.text in VIRGOLETTE and (t.pos_ == "PUNCT" or t.text in APICI):   # 1.12.0: un apice isolato e'
+                # sempre un apice, anche se spaCy lo prende per preposizione o verbo ('essere umano', I still 'do' it)
                 dentro = None if dentro is not None else t.i
                 padrone[t.i] = "via"
             elif dentro is not None:

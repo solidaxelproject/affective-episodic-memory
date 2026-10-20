@@ -278,6 +278,176 @@ def _salva_kv():
         pass    # lo specchio non deve MAI rompere la chat
 
 
+# --- riepilogo a catena di montaggio (l'utente 20/10, PIANO-RIEPILOGO-KV.md): dopo ogni risposta a l'utente,
+# l'agente scrive il succo dello scambio in una riga; le righe si accodano in una CW a parte (riepilogo.kv) e alla
+# dormita diventano il blocco in testa alla chat nuova. Solo la chat, mai il pensatoio (20/10).
+RIEPILOGO = Path("/data/memoria-episodica-affettiva/riepilogo.json")
+RIEPILOGO_PROMUOVI = Path("/data/memoria-episodica-affettiva/.riepilogo-promuovi")   # lo scrive dormi-esegui.sh
+RIEPILOGO_KV = "riepilogo.kv"
+RIEPILOGO_TETTO = 40_000    # token (caratteri / 3): oltre, via le righe piu' vecchie. Valore di CC
+INTESTAZIONE_RIEPILOGO = ("Ecco dov'ero rimasta, questo è il succo della conversazione fino al momento in cui mi "
+                          "sono addormentata:")
+ISTRUZIONE_RIEPILOGO = (
+    "Devo scrivere, in meno di 60 parole, il succo di quest'ultimo messaggio o di quello dell'utente se necessario: le "
+    "informazioni salienti che voglio conservare dell'ultimo scambio. Non i messaggi precedenti. Solo testo, numeri o "
+    "simboli logici se utili, per esempio: uguale può diventare =, implica →, maggiore >. Se necessario posso "
+    "inserire il codice di un ricordo che reputo utile per questo riassunto. Se in questo scambio mi è affiorato un "
+    "ricordo, aggiungo il suo codice.")
+SEPARATORE = "══"   # da questa riga in poi il system di Hermes cambia fra le sessioni (MEMORY, data)
+
+
+def _riepilogo_carica():
+    vuoto = {"blocco": [], "nuovi": []}
+    try:
+        st = json.loads(RIEPILOGO.read_text(encoding="utf-8"))
+        return {"blocco": list(st["blocco"]), "nuovi": list(st["nuovi"])}
+    except FileNotFoundError:
+        return vuoto
+    except Exception as e:
+        _diario({"riepilogo": f"riepilogo.json illeggibile, niente blocco: {e}"})
+        return vuoto
+
+
+def _riepilogo_salva(st):
+    tmp = RIEPILOGO.with_suffix(".tmp")
+    tmp.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(RIEPILOGO)
+
+
+def _blocco(righe):
+    return INTESTAZIONE_RIEPILOGO + "\n" + "\n".join(righe) + "\n\n" if righe else ""
+
+
+def _nel_tetto(righe):
+    while righe and len(_blocco(righe)) / 3 > RIEPILOGO_TETTO:
+        righe = righe[1:]
+    return righe
+
+
+def _riga_separatore(testo):
+    """dove comincia la riga ══, -1 se manca"""
+    i = testo.find(SEPARATORE)
+    return testo.rfind("\n", 0, i) + 1 if i >= 0 else -1
+
+
+def _con_blocco(system, righe):
+    """il blocco subito prima della riga ══: prima il system e' fisso fra le sessioni e la cache lo riusa"""
+    i = _riga_separatore(system)
+    if i < 0:
+        _diario({"riepilogo": "riga ══ non trovata: blocco in fondo al system"})
+        return system + "\n\n" + _blocco(righe)
+    return system[:i] + _blocco(righe) + system[i:]
+
+
+def _metti_blocco(d, righe):
+    """in place sul corpo di una richiesta della chat"""
+    msgs = d.get("messages", [])
+    if righe and msgs and msgs[0].get("role") == "system":
+        msgs[0]["content"] = _con_blocco(msgs[0]["content"], righe)
+
+
+def _deve_riassumere(corpo, esito):
+    """solo la risposta FINALE a un messaggio dell'utente nella chat: il background review e il memory flush di
+    Hermes non cominciano con "[", il pensatoio si', ma il suo flusso e' un altro"""
+    if _flusso(corpo) != "chat" or esito.get("finish") != "stop" or esito.get("tool_calls") \
+            or not (esito.get("testo") or "").strip():
+        return False
+    msgs = json.loads(corpo).get("messages", [])
+    ultimo = next((m.get("content") for m in reversed(msgs) if m.get("role") == "user"), "")
+    return isinstance(ultimo, str) and ultimo.startswith("[")
+
+
+def _chiedi(path, payload):
+    st, r = ponte.post(path, payload, timeout=600)
+    if st != 200:
+        raise RuntimeError(f"{path}: HTTP {st}")
+    return r
+
+
+def _riassumi(corpo, risposta, ragionamento=""):
+    """l'agente scrive il succo dello scambio nello slot della chat, la riga va in coda al blocco nella CW del
+    riepilogo, la chat torna nello slot. Tutto dentro i lucchetti: una richiesta della chat che arriva intanto
+    aspetta (~6 s). Gli errori vanno solo nel diario: mai bloccare la parola dell'agente."""
+    with _vettore_lock:     # niente vettori di steering nel riepilogo
+        if _vettore_vivo[0]:
+            calma()
+        with _cw_lock:
+            try:
+                if _cw[0] != "chat":
+                    _scambia("chat")
+                d = json.loads(corpo)
+                tools = d.get("tools") or []
+                # il prompt della risposta appena data, reso dal server, + la risposta + l'ISTRUZIONE a mano: un
+                # messaggio user nuovo farebbe togliere al template il <think> dei giri di tool del turno e il
+                # turno intero si riprocesserebbe (revisione 20/10)
+                resa = _chiedi("/apply-template", {k: v for k, v in d.items()
+                                                   if k in ("messages", "tools", "tool_choice",
+                                                            "chat_template_kwargs")})["prompt"]
+                if resa.endswith("<think>\n"):   # il ragionamento del server finisce gia' col suo a capo
+                    resa += ragionamento + ("" if ragionamento.endswith("\n") else "\n") + "</think>\n\n"
+                gen = _chiedi("/completion", {
+                    "prompt": resa + risposta + "<|im_end|>\n<|im_start|>user\n" + ISTRUZIONE_RIEPILOGO
+                              + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+                    "n_predict": 160, "cache_prompt": True})
+                riga = " ".join((gen.get("content") or "").split())
+                if not riga:
+                    _diario({"riepilogo": "riassunto vuoto"})
+                    return
+                st = _riepilogo_carica()
+                st["nuovi"].append(riga)
+                _riepilogo_salva(st)
+                # il system della CW del riepilogo: lo stesso della chat, col blocco delle righe di questa sessione
+                sistema = d["messages"][0]["content"].replace(_blocco(st["blocco"]), "", 1)
+                resa = _chiedi("/apply-template", {
+                    "messages": [{"role": "system", "content": _con_blocco(sistema, _nel_tetto(st["nuovi"]))},
+                                 {"role": "user", "content": "."}],   # il template vuole un user: si taglia via
+                    "tools": tools})["prompt"]
+                i = _riga_separatore(resa)
+                if i < 0:
+                    raise ValueError("riga ══ non trovata nel prompt reso")
+                if (KV_RAM / RIEPILOGO_KV).exists():
+                    _slot("restore", RIEPILOGO_KV)
+                _chiedi("/completion", {"prompt": resa[:i], "n_predict": 1, "cache_prompt": True})
+                if not _slot("save", RIEPILOGO_KV):
+                    raise RuntimeError("save di riepilogo.kv fallita")
+            except Exception as e:
+                _diario({"riepilogo": f"fallito: {e}"})
+            finally:
+                ok = False
+                try:
+                    ok = _slot("restore", KV_FLUSSO["chat"])
+                except Exception:
+                    pass
+                if not ok:      # lo slot tiene il riepilogo: la prossima richiesta della chat rifa' il restore
+                    _diario({"riepilogo": "chat non rimessa nello slot"})
+                _cw[0] = "chat" if ok else "altro"
+
+
+def _promuovi():
+    """Prima richiesta della chat dopo una dormita (flag di dormi-esegui.sh): le righe della sessione chiusa
+    diventano il blocco, riepilogo.kv (parte fissa + blocco gia' in cache) diventa la chat nuova e il riepilogo
+    riparte da una CW vuota. Solo dentro _cw_lock."""
+    if not RIEPILOGO_PROMUOVI.exists():
+        return
+    st = _riepilogo_carica()
+    blocco = _nel_tetto(st["nuovi"])
+    if len(blocco) < len(st["nuovi"]):
+        _diario({"riepilogo": f"oltre il tetto: tolte {len(st['nuovi']) - len(blocco)} righe vecchie"})
+    _riepilogo_salva({"blocco": blocco, "nuovi": []})
+    RIEPILOGO_PROMUOVI.unlink()
+    kv = KV_RAM / RIEPILOGO_KV
+    if kv.exists():
+        if _cw[0] in KV_FLUSSO and _cw[0] != "chat":
+            if _cw[0] == "pensatoio":
+                _interrompi_pensatoio()
+            _slot("save", KV_FLUSSO[_cw[0]])
+        _slot("restore", RIEPILOGO_KV)
+        _cambia_cw("chat")
+    for f in (kv, KV_RAM / (RIEPILOGO_KV + ".ckpt")):
+        f.unlink(missing_ok=True)
+    _diario({"riepilogo": f"dormita: {len(blocco)} righe nel blocco della chat nuova"})
+
+
 
 # issue #3 (18/10): l'interruttore vale solo con la sua formattazione; un "attivo: sì" scritto
 # nel testo normale o in un esempio non accende niente
@@ -773,11 +943,12 @@ STREAM_LIVE = "/tmp/stream-live.log"
 VOLO = "/tmp/chat-in-volo"
 
 
-def _tee_sse(buf, chunk, fh):
+def _tee_sse(buf, chunk, fh, esito):
     """23/07: specchio LIVE dello streaming. Estrae il testo (think e
     parola) dai chunk SSE che attraversano il proxy e lo appende su file:
     `tail -f /tmp/stream-live.log` = il 35B token per token, in diretta.
-    Mai bloccare lo stream per il tee: ogni crepa è silenziosa."""
+    Mai bloccare lo stream per il tee: ogni crepa è silenziosa.
+    20/10: raccoglie anche la parola, il finish_reason e le tool call (esito) per il riepilogo."""
     buf += chunk
     while b"\n\n" in buf:
         blocco, buf = buf.split(b"\n\n", 1)
@@ -789,9 +960,13 @@ def _tee_sse(buf, chunk, fh):
                 if "choices" in d:
                     delta = d["choices"][0].get("delta", {})
                     t = delta.get("reasoning_content") or delta.get("content") or ""
+                    esito["testo"] += delta.get("content") or ""
+                    esito["ragionamento"] += delta.get("reasoning_content") or ""
+                    esito["tool_calls"] = esito["tool_calls"] or bool(delta.get("tool_calls"))
+                    esito["finish"] = d["choices"][0].get("finish_reason") or esito["finish"]
                 else:
                     t = d.get("content", "")
-                if t:
+                if t and fh:
                     fh.write(t)
                     fh.flush()
             except Exception:
@@ -819,6 +994,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 _punto[flusso] = _orologio(flusso)
         sock = up.sock
         resp = None
+        self._inoltrato, self._esito = body, {"testo": "", "ragionamento": "", "finish": None, "tool_calls": False}
         try:
             up.putrequest(self.command, self.path)
             for k, v in self.headers.items():
@@ -850,11 +1026,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
                 self.wfile.flush()
-                if tee:
-                    try:
-                        buf = _tee_sse(buf, chunk, tee)
-                    except Exception:
-                        pass
+                try:
+                    buf = _tee_sse(buf, chunk, tee, self._esito)
+                except Exception:
+                    pass
             if tee:
                 try:
                     tee.close()
@@ -873,7 +1048,21 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         if resp is not None and resp.status == 200 and ("completion" in self.path or "/v1/chat" in self.path):
             if flusso == "chat":
                 _chat_calda[0] = time.time()
-            threading.Thread(target=_salva_kv, daemon=True).start()
+            self._salva = threading.Thread(target=_salva_kv, daemon=True)
+            self._salva.start()
+
+    def _dopo_chat(self):
+        """20/10: dopo la risposta finale a l'utente il riepilogo, quando lo specchio della chat e' gia' salvato
+        (cosi' il conteggio dei token resta quello della chat)"""
+        corpo, esito, salva = self._inoltrato, self._esito, self._salva
+        if not esito or not _deve_riassumere(corpo, esito):
+            return
+
+        def lavora():
+            if salva:
+                salva.join()
+            _riassumi(corpo, esito["testo"], esito["ragionamento"])
+        threading.Thread(target=lavora, daemon=True).start()
 
     def do_GET(self):
         self._inoltra(None)
@@ -938,6 +1127,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         return json.dumps(d).encode()
 
     def do_POST(self):
+        self._inoltrato = self._esito = self._salva = None   # la connessione keep-alive serve piu' richieste
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         chat = self.path.split("?")[0].endswith("/chat/completions")   # issue #3 punto E
         # PATTO clausola 3: la parola scritta dall'agente spegne il vettore, prima
@@ -976,6 +1166,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 _chat_in_volo[0] -= 1
                 _chat_calda[0] = time.time()
                 _segna_volo()
+                try:
+                    self._dopo_chat()
+                except Exception as e:
+                    _diario({"riepilogo": f"non avviato: {e}"})
 
     def _post_chat(self, body, chat, flusso):
         if chat:
@@ -998,6 +1192,11 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                             _nuovo_pensiero(_conversazione(json.loads(body).get("messages", [])))
                         except ValueError:
                             pass
+                    if flusso == "chat":
+                        try:
+                            _promuovi()
+                        except Exception as e:
+                            _diario({"riepilogo": f"promozione fallita: {e}"})
                     if flusso in KV_FLUSSO and flusso != _cw[0]:
                         if flusso == "chat":
                             # spec punto 4: la chat interrompe il pensiero in corso
@@ -1012,6 +1211,15 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     break
             if flusso == "pensatoio" and time.time() - inizio > 5:
                 _diario({"cw": f"pensatoio trattenuto {time.time()-inizio:.0f}s (chat calda)"})
+            if flusso == "chat":
+                try:
+                    blocco = _riepilogo_carica()["blocco"]
+                    if blocco:
+                        d = json.loads(body)
+                        _metti_blocco(d, blocco)
+                        body = json.dumps(d).encode()
+                except Exception as e:
+                    _diario({"riepilogo": f"blocco non messo: {e}"})   # mai bloccare la parola dell'agente
         coda = [PENSATOIO_DOVE] if chat else []
         avviso = None
         if chat:

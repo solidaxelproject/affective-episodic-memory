@@ -14,7 +14,7 @@ import time
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-VERSIONE = "1.11.0"
+VERSIONE = "1.12.0"
 DIR = f"/data/memoria-episodica-affettiva/engrammi/lux-{VERSIONE}"
 DB = "/data/workspace/memoria/memoria.db"
 W, H, MS = 640, 480, 90

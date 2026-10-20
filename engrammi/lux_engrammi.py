@@ -8,7 +8,8 @@ Il Lux originale (lux.npz, lux-meta.json) e memoria.db NON si toccano: si leggon
   consegna "testo"   come la consegna all'agente: richiama sopra soglia, RINFORZA gli archi, ricompone
   correggi CODICE "testo"   1.11.0: un ricordo nuovo che corregge quello di CODICE (l'originale non si tocca)
 Arco = (ricordo, posizione, engramma a, engramma b, parametri fra i due): niente errori di strada sugli engrammi condivisi.
-ponytail: modificatori dei parametri e propagazione non ancora usati nella scelta; via emotiva assente nel richiamo
+ponytail: modificatori dei parametri non ancora usati nella scelta, propagazione solo come predisposizione (1.12.0);
+via emotiva assente nel richiamo
 (la firma del messaggio richiede il 35B, GPU): le firme degli engrammi sono pronte in F."""
 import contextlib
 import fcntl
@@ -32,7 +33,7 @@ import lux as LUX   # solo le funzioni FSRS e l'orologio vissuto (lettura): il L
 # VERSIONE MAJOR.MINOR.PATCH (11/10): MAJOR = formato dei dati incompatibile (lo stato dei rinforzi non si
 # porta), MINOR = ricostruzione con regole nuove (taglio, vettori) o funzione nuova, PATCH = correzione che non
 # cambia i dati. Ogni versione ha la sua cartella: le vecchie restano.
-VERSIONE = "1.11.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
+VERSIONE = "1.12.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
 # 1.6.0 (15/10): vettori bge-m3 in float16 su disco e in RAM (misurato sul Lux dell'agente: scarto coseni max 1.4e-4,
 # richiamo identico su 94/94 indizi); il coseno si calcola a blocchi riportati in float32
 # 1.7.0 (15/10): taglio per lingua (taglia.py: le frasi inglesi sicure vanno a en_core_web_lg); costruisci()
@@ -44,8 +45,11 @@ VERSIONE = "1.11.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engr
 # 1.10.0 (16/10): fino a CONSEGNA_MAX ricordi nella stessa risposta del tool, numerati (risposta_tool)
 # 1.11.0 (16/10): correzioni (correggi): ricordi legati al ricordo corretto da un arco a posizione -1, consegnati
 # in catena (un posto solo fra i CONSEGNA_MAX), originale barrato e mai piu' rinforzato. Fasi 2 e 3: PIANO-1.11-FASI-2-3.md
+# 1.12.0 (20/10): predisposizione dopo il richiamo (predisponi): i ricordi che condividono engrammi e archi coi
+# ricordi consegnati salgono prima col prossimo indizio; apostrofi veri distinti dagli apici delle citazioni (taglia.py,
+# unisci): si ricostruisce. Piano: PIANO-1.12-PREDISPOSIZIONE.md
 DIR = f"/data/memoria-episodica-affettiva/engrammi/lux-{VERSIONE}"
-PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.10.0"   # da qui costruisci() riprende i vettori gia' calcolati
+PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.11.0"   # da qui costruisci() riprende i vettori gia' calcolati
 NPZ, META, STATO = f"{DIR}/lux.npz", f"{DIR}/lux-meta.json", f"{DIR}/lux-stato.npz"
 CRESCITA_PIENA = 100.0   # S/S0 a cui la facilita' tocca il tetto
 FACILITA_MAX = 2.0   # tetto: un ricordo richiamato spesso arriva alla soglia con un indizio fino a 2x piu' debole
@@ -57,6 +61,9 @@ CORREGGE = "corregge"   # 1.11.0: parametro dell'arco che lega una correzione al
 SOGLIA_RICHIAMO = 0.2   # sotto: nessun ricordo, nessun turno del tool (taratura_soglia.py, 11/10: negativi max 0.177, positivi giusti min 0.268)
 VTIPO = np.float16   # 1.6.0
 SOGLIA_SEM = 0.8     # coseno minimo perche' un engramma del messaggio ne accenda uno del Lux
+PREDISPOSIZIONE_EMIVITA = 21600.0   # 1.12.0 (6 ore, Cai 2016, Rashid 2016): secondi di parete, dopo i quali la spinta e' a meta'
+PREDISPOSIZIONE_MAX = 2.0   # 1.12.0: tetto del moltiplicatore del richiamo
+PESO_COPPIA = 1.0   # 1.12.0: un arco condiviso (stessa coppia di engrammi) vale quanto un engramma in piu'
 INVERSO = {}
 for _k, _v in T.PREPOSIZIONI.items():   # forma canonica: la prima della tabella (di, non d'; a, non ad; tra, non fra)
     INVERSO.setdefault(_v, _k)
@@ -122,6 +129,19 @@ def param_testo(pid, altri):
     if pid < 100:
         return INVERSO[(T.SIMBOLI[pid // 8], pid % 8)]
     return altri[pid - 100]
+
+
+def unisci(pezzi):
+    """[(tipo, testo)] -> testo. 1.12.0 (20/10): dopo un apostrofo si incolla solo l'elisione (consonante prima:
+    l', dell', c'), non po' o perche'; i pezzi inglesi che iniziano con l'apostrofo si attaccano (it's, I've, aren't).
+    ponytail: il genitivo inglese davanti a una parola ("students' books") esce attaccato"""
+    out = ""
+    for k, t in pezzi:
+        elisione = out[-1:] in ("'", "’") and out[-2:-1].isalpha() and out[-2:-1].lower() not in "aeiouàèéìòù"
+        clitico = k == "nodo" and t.startswith(("'", "’", "n't", "n’t"))
+        attacca = k == "arco" and (t in ",.;:!?)…" or t.startswith("...")) or out.endswith("(") or elisione or clitico
+        out += ("" if attacca or not out else " ") + t
+    return out
 
 
 def _inserisci(righe, eid, testi, firme_e, tab, A, par_lista, ricordi):
@@ -294,11 +314,15 @@ class Lux:
         self.vivi = self.A[:, 1] >= 0   # 1.11.0: posizione -1 = legame fra ricordi, fuori da ricomposizione e richiamo
         self.per_ricordo = {}
         self.per_engramma = {}
+        self.coppie = {}   # 1.12.0: coppia di engrammi (non ordinata) -> ricordi che hanno quell'arco
         for j in np.nonzero(self.vivi)[0].tolist():
             r, _, a, b = self.A[j, :4].tolist()
             self.per_ricordo.setdefault(r, []).append(j)
             self.per_engramma.setdefault(a, set()).add(j)
             self.per_engramma.setdefault(b, set()).add(j)
+            self.coppie.setdefault((min(a, b), max(a, b)), set()).add(r)
+        self.pronti = {}   # 1.12.0: ricordo -> (spinta, ora) lasciata dalle consegne. ponytail: solo RAM, si perde al
+        # riavvio del servizio (effetto di ore); su disco se servira' sopravvivere ai riavvii
         self.corregge, self.corretto_da = {}, {}   # correzione -> ricordo corretto, e al contrario
         for j in np.nonzero(~self.vivi)[0].tolist():
             r, _, _, _, p0, n = self.A[j].tolist()
@@ -354,14 +378,37 @@ class Lux:
         self.U[js] = oggi
         self.salva_stato()
 
-    def consegna(self, testo, quanti=CONSEGNA_MAX, oggi=None, esclusi=()):
+    def spinta(self, r, ora):
+        """1.12.0: predisposizione del ricordo r all'ora (secondi di parete), dimezzata ogni PREDISPOSIZIONE_EMIVITA"""
+        s, t = self.pronti.get(r, (0.0, ora))
+        return s * 0.5 ** (max(0.0, ora - t) / PREDISPOSIZIONE_EMIVITA)
+
+    def predisponi(self, nids, ora=None):
+        """1.12.0: dopo una consegna, ogni ricordo che condivide engrammi (peso 1/(altri ricordi che li usano), effetto
+        ventaglio di Anderson 1974) o archi (stessa coppia di engrammi, x PESO_COPPIA) coi ricordi consegnati riceve una
+        spinta, divisa per sqrt(engrammi del ricordo) come in richiama; si somma a quella residua"""
+        ora = time.time() if ora is None else ora
+        spinte = {}
+        for x in nids:
+            js = self.per_ricordo.get(x, [])
+            gruppi = [(1.0, {int(self.A[j, 0]) for j in self.per_engramma[e]}) for e in {int(v) for j in js for v in self.A[j, 2:4]}]
+            gruppi += [(PESO_COPPIA, self.coppie[c]) for c in {tuple(sorted(int(v) for v in self.A[j, 2:4])) for j in js}
+                       if c[0] != c[1]]   # l'arco su se stesso dei ricordi di un engramma solo non e' una relazione
+            for peso, ric in gruppi:
+                for r in ric:
+                    spinte[r] = spinte.get(r, 0) + peso / max(1, len(ric) - 1)
+        for r, s in spinte.items():
+            if r not in nids:
+                self.pronti[r] = (self.spinta(r, ora) + s / np.sqrt(self.ricordi[r]["n"]), ora)
+
+    def consegna(self, testo, quanti=CONSEGNA_MAX, oggi=None, esclusi=(), ora=None):
         """L'UNICA porta per dare ricordi all'agente (richiamo automatico, 11/10): richiama, rinforza gli archi dei
         ricordi consegnati, restituisce [(id, testo ricomposto)]. Lista vuota = nessun turno del tool.
         esclusi = codici dei ricordi gia' consegnati nella conversazione: si passa al successivo sopra soglia.
         La pagina 3D e le prove usano richiama(), che non rinforza."""
         via = {self.da_codice[c] for c in esclusi if c in self.da_codice}   # gia' nel contesto della conversazione
         catene = []   # 1.11.0: un ricordo con le sue correzioni occupa un posto solo
-        for nid, _ in self.richiama(testo, len(self.ricordi), oggi=oggi):
+        for nid, _ in self.richiama(testo, len(self.ricordi), oggi=oggi, ora=ora):
             k = self.catena(nid)
             if len(catene) == quanti:
                 break
@@ -371,6 +418,7 @@ class Lux:
         for nid in scelti:
             if nid not in self.errati:   # un ricordo corretto non si rinforza piu'
                 self.rinforza(nid, oggi)
+        self.predisponi(scelti, ora)
         return [(nid, self.ricordi[nid]["codice"], self.ricomponi(nid)) for nid in scelti]
 
     def catena(self, nid):
@@ -411,11 +459,7 @@ class Lux:
             pezzi += [("arco", param_testo(int(p), self.altri)) for p in self.P[p0:p0 + n]]
             pezzi.append(("nodo", self.testi[b]))
         pezzi += [("arco", param_testo(p, self.altri)) for p in info["coda"]]
-        out = ""
-        for k, t in pezzi:
-            attacca = k == "arco" and (t in ",.;:!?)…" or t.startswith("...")) or out.endswith(("(", "'", "’"))
-            out += ("" if attacca or not out else " ") + t
-        return out
+        return unisci(pezzi)
 
     def accendi(self, testo):
         """innesco: via testuale (stesso engramma = 1) e via semantica (bge-m3, coseno sopra soglia riscalato 0-1)"""
@@ -433,18 +477,21 @@ class Lux:
                 att[int(i)] = max(att.get(int(i), 0), float((row[i] - SOGLIA_SEM) / (1 - SOGLIA_SEM)))
         return att
 
-    def richiama(self, testo, quanti=3, soglia=SOGLIA_RICHIAMO, oggi=None):
+    def richiama(self, testo, quanti=3, soglia=SOGLIA_RICHIAMO, oggi=None, ora=None):
         """scelta: per ogni indice di ricordo la somma delle attivazioni dei suoi engrammi, pesate 1/log(1+ricordi che
         usano l'engramma) (gli engrammi comuni contano poco) e divise per sqrt(engrammi del ricordo) (i lunghi non vincono
-        sempre), poi moltiplicate per la facilita' del ricordo (archi vivi). Tarato l'11/10 su 40 indizi: soglia 0.8, nessuna propagazione nella scelta (abbassava da 35 a 30)."""
+        sempre), poi moltiplicate per la facilita' del ricordo (archi vivi). Tarato l'11/10 su 40 indizi: soglia 0.8, nessuna propagazione nella scelta (abbassava da 35 a 30).
+        1.12.0: poi per la predisposizione lasciata dalle consegne (1 + spinta, fino a PREDISPOSIZIONE_MAX), solo sui
+        ricordi che l'indizio ha gia' acceso."""
         punti = {}
         for i, a in self.accendi(testo).items():
             ric = {int(self.A[j, 0]) for j in self.per_engramma.get(i, ())}
             for r in ric:
                 punti[r] = punti.get(r, 0) + a / np.log(1 + len(ric))
         fac = self.facilita(oggi)
+        ora = time.time() if ora is None else ora
         for r in punti:
-            punti[r] *= fac[r] / np.sqrt(self.ricordi[r]["n"])
+            punti[r] *= fac[r] / np.sqrt(self.ricordi[r]["n"]) * min(PREDISPOSIZIONE_MAX, 1 + self.spinta(r, ora))
         return [x for x in sorted(punti.items(), key=lambda x: -x[1])[:quanti] if x[1] >= soglia]
 
 

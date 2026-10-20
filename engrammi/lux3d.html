@@ -44,21 +44,41 @@ body{margin:0;background:#0b0e1a;color:#dbe2f0;font:14px/1.45 system-ui,sans-ser
 <div id="ricordo"><span class="x" id="rx">✕</span><b id="rt"></b><div class="t" id="rtesto"></div><div class="alt" id="ralt"></div></div>
 <div id="pop"></div>
 <details id="leg"><summary>legenda archi</summary><div id="legc"></div></details>
+<script>   // 20/10: dal telefono la pagina restava nera senza dire perche': ogni errore finisce sullo schermo
+function guasto(m) { const d = document.getElementById('carica') || document.body.appendChild(Object.assign(document.createElement('div'), {id: 'carica'}));
+  d.style.cssText += ';padding:24px;text-align:center;white-space:pre-wrap'; d.textContent = m; }
+addEventListener('error', e => guasto('errore: ' + e.message));
+addEventListener('unhandledrejection', e => guasto('errore: ' + (e.reason && e.reason.message || e.reason)));
+</script>
 <script type="module">
 import * as THREE from 'three';
 import {TrackballControls} from 'three/addons/controls/TrackballControls.js';
 
-const D = await (await fetch('dati.json')).json();
+// 20/10: dal cellulare non si caricava. Dati compressi (scompattati qui) con la percentuale; senza
+// DecompressionStream (browser vecchi) il file intero
+const carica = document.getElementById('carica');
+async function scarica() {
+  try {
+    const r = await fetch('dati.json.gz'), tot = +r.headers.get('Content-Length');
+    let n = 0;
+    const conta = new TransformStream({transform(c, k) { n += c.length; carica.textContent = `carico il Lux… ${Math.round(n / tot * 100)}%`; k.enqueue(c); }});
+    return await new Response(r.body.pipeThrough(conta).pipeThrough(new DecompressionStream('gzip'))).json();
+  } catch (e) { return (await fetch('dati.json')).json(); }
+}
+const D = await scarica();
 const SOGLIA = __SOGLIA__;
-document.getElementById('carica').remove();
+carica.remove();
 const N = D.testi.length, A = D.archi;
 document.getElementById('stat').textContent = N + ' engrammi · ' + A.length + ' archi';
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 1, 5000);
 camera.position.set(0, 0, 520);
-const renderer = new THREE.WebGLRenderer({antialias: true});
-renderer.setPixelRatio(devicePixelRatio);
+const CELL = matchMedia('(pointer: coarse)').matches;   // 20/10: dito invece del mouse = telefono o tablet
+if (!document.createElement('canvas').getContext('webgl2') && !document.createElement('canvas').getContext('webgl'))
+  throw new Error('questo browser non ha WebGL attivo, serve per il 3D.\nFirefox e derivati: about:config -> webgl.disabled = false');
+const renderer = new THREE.WebGLRenderer({antialias: !CELL});   // sul telefono: niente antialias, al massimo 1,5 pixel per punto
+renderer.setPixelRatio(CELL ? Math.min(devicePixelRatio, 1.5) : devicePixelRatio);
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 const controls = new TrackballControls(camera, renderer.domElement);   // 12/10: rotazione libera sui 3 assi (Orbit ne dava 2)
@@ -223,7 +243,7 @@ function popArco(k, x, y) {
 
 // 15/10: effetto magnete di 10 px. Il puntatore aggancia la sferula o il circoletto piu' vicino sullo schermo entro
 // MAGNETE pixel (a pari distanza vince la sferula); un anello bianco mostra cosa e' agganciato, il clic prende quello
-const MAGNETE = 10, mvp = new THREE.Matrix4();
+const MAGNETE = CELL ? 24 : 10, mvp = new THREE.Matrix4();   // col dito serve un aggancio piu' largo
 function vicino(cx, cy) {
   mvp.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   const m = mvp.elements, W = innerWidth, H = innerHeight;

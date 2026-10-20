@@ -24,7 +24,9 @@ def lux():
     global L
     t = os.path.getmtime(X.META)
     if t != _meta[0]:
-        L, _meta[0] = X.Lux(), t
+        nuovo = X.Lux()
+        nuovo.pronti = L.pronti   # 1.12.0: la predisposizione sopravvive alla ricarica della notturna
+        L, _meta[0] = nuovo, t
     return L
 
 
