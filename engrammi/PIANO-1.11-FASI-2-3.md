@@ -1,9 +1,48 @@
-# Lux degli engrammi: piano delle fasi 2-12 (dopo la 1.11.0)
+# Lux degli engrammi: piano delle fasi 1-12
 
-La 1.11.0 contiene la fase 1, le correzioni: un ricordo che ne corregge un altro, legato da un arco con i parametri
-`{corregge}{codice}`, consegnato in catena nella stessa risposta del tool, con l'originale barrato e mai piu' rinforzato.
-Questo documento descrive le due fasi successive. Regola comune: ogni dato nuovo sta dentro le strutture del Lux
-(`lux.npz`, engrammi, archi, stato degli archi), mai in file a parte.
+Questo documento descrive le fasi del Lux degli engrammi dopo la 1.10.0. La fase 1 e' fatta (1.11.0), le altre no.
+
+Regole comuni:
+- ogni dato nuovo sta dentro le strutture del Lux (`lux.npz`, engrammi, archi, stato degli archi), mai in file a parte;
+- (22/10/2026) a fase finita, accanto a questo piano, un documento che spiega la fase come piace a un ricercatore
+  ML: obiettivo, ispirazione dalla mente umana (studi), metodo, setup, risultati con il numero di casi e i controlli,
+  limiti, prossimi passi. Passato prossimo, linguaggio semplice. File `engrammi/FASE-<n>-<nome>.md`.
+
+## Fase 1. Le correzioni (1.11.0, in produzione)
+
+**Problema.** Un ricordo sbagliato (per esempio un dato enciclopedico) non si poteva correggere: ne' memoria.py ne' il
+Lux avevano una funzione di modifica, e tagliare gli archi di un ricordo lo faceva sparire intero, parte giusta compresa.
+
+**Ispirazione dalla memoria umana.** Estinzione (Bouton): la traccia vecchia non si cancella, una traccia nuova la
+inibisce e vince. Riconsolidamento (Nader 2000): un ricordo richiamato torna modificabile e si risalva con le
+informazioni nuove. Episodico e semantico: "credevo X" resta come episodio, il fatto giusto prevale.
+
+**Dall'idea alla versione fatta.** Il 12/10 l'utente ha proposto la correzione a livello di archi (arco negato AN, arco di
+correzione AC, tool `correggicordo`, formato 2.0.0; dettagli nella sezione IDEA APERTA di PIANO-REFACTORING-LUX-RICHIAMO.md).
+Il 16/10 ha deciso la forma piu' semplice, a livello di ricordo, che e' quella in produzione:
+- la correzione e' un **ricordo nuovo** che entra nel Lux come gli altri (stesso taglio, engrammi condivisi), con un
+  numero da 1.000.000 in su, fuori dalla serie di memoria.db (`PRIMO_CORREZIONE`);
+- e' legata al ricordo corretto da un **arco fra ricordi** (posizione -1, dal primo engramma della correzione al primo
+  del corretto) coi parametri `{corregge}{codice del corretto}` (`_lega`); quell'arco sta fuori da ricomposizione e
+  richiamo;
+- l'**originale non si tocca** e da quel momento **non si rinforza piu'** (`errati`): sbiadisce da solo con la curva
+  di stabilita'. l'utente: "i ricordi segnati come sbagliati non vengono più rinforzati quando richiamati questo è
+  fondamentale";
+- **ripensamenti**: una correzione si corregge allo stesso modo; se un ricordo creduto sbagliato si rivela giusto, si
+  aggiunge un'altra correzione e la precedente diventa errata;
+- **consegna in catena**: al richiamo l'originale e tutte le sue correzioni arrivano insieme e occupano UN posto solo
+  fra i 4 della risposta del tool; l'originale e' barrato (`~~testo~~`), le correzioni seguono con una lettera
+  (`1°`, `1a°`, `1b°`...);
+- **chi corregge**: l'utente 16/10 "le correzioni può produrle pure l'agente". Oggi si correggono da riga di comando
+  (`lux_engrammi.py correggi CODICE "testo"`) o col servizio (`POST /correggi`); notturna e servizio non scrivono
+  insieme (lucchetto).
+
+**Verifiche (16/10).** verifica1110.py 34/34; ricomposizione dei 584 ricordi invariata; richiamo identico alla 1.10.0
+dove non ci sono correzioni.
+
+**Aperto.** Lo strumento per l'agente (nome e testo li decide l'utente; il 12/10 erano stati decisi `correggicordo` e la sua
+descrizione, pensati per la versione ad archi); correzioni dell'agente applicate subito o di notte; la versione ad archi
+del 12/10 (correggere un solo tratto del ricordo) non e' fatta.
 
 ## Fase 2. L'emozione che cambia col richiamo (riconsolidamento)
 
@@ -50,8 +89,24 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
    **Tetto:** la carica non supera mai 0.02 sotto la soglia di eco (dose a cui l'emozione esce come parola); avvicinandosi
    al tetto i passi si riducono. Il rinforzo emotivo a ogni richiamo e' TOLTO (17/10): contraddiceva la sorpresa
    e la stabilizzazione era un doppione della ripetizione nel freno.
-7. **Dose al richiamo** = carica MASSIMA fra gli archi del ricordo, poi discesa lenta, come il corpo dopo il picco
-   (regola picco-fine). La discesa si scandisce con l'ora dei messaggi (il riflesso registra l'arrivo di ogni messaggio,
+7. **Dose al richiamo** (funzione decisa da l'utente il 24/10/2026, sostituisce la "carica MASSIMA fra gli archi" del
+   17/10). Per ogni emozione e del ricordo:
+   ```
+   w_i   = somma delle cariche attuali (emozione e) degli archi che toccano l'engramma i
+   S_e   = sum_i(w_i x F_i,e) / sum_i(w_i)          media delle firme degli engrammi, pesata per la carica degli archi
+   D_e   = 0                                         se S_e < soglia_e
+   D_e   = Dmin_e + (Dmax_e - Dmin_e) x (1 - exp(-S_e / k))   altrimenti
+   ```
+   - firme + carica degli archi (24/10): gli engrammi centrali, con archi carichi, pesano piu' dei dettagli di
+     contorno (Kensinger 2009); la carica sbiadisce notte dopo notte (punto 4), quindi un ricordo vecchio colora meno
+     di uno fresco, e il riconsolidamento (punto 6) sposta la dose dei richiami futuri;
+   - la curva sale in fretta all'inizio e si appiattisce verso Dmax_e senza superarlo;
+   - Dmin_e e Dmax_e (tabella in `engrammi/DOSI-EMOZIONI.md`) = intervallo [dose minima efficace, dose di picco] di ogni emozione, misurato nei giri della ruota
+     di Plutchik (prove-contesto-lungo/8-sistema-steering/PIANO-PLUTCHIK.md), vettore se', finestra L15-L31. Sulle 8
+     di base (giudice Opus, 24/10) i valori stanno intorno a 0.03-0.05, ma variano per emozione: la fiducia chiede piu'
+     dose, rabbia e disgusto vanno in eccesso prima. soglia_e e k si tarano nel rodaggio;
+   - piu' emozioni nello stesso ricordo: i vettori si sommano (sotto), con un tetto sulla dose totale.
+   Poi discesa lenta, come il corpo dopo il picco (regola picco-fine). La discesa si scandisce con l'ora dei messaggi (il riflesso registra l'arrivo di ogni messaggio,
    l'agente ne vede uno ogni 5). Durata = permanenza dell'emozione x dose di partenza x importanza (Verduyn 2009/2011).
    La dose per engramma, token per token, resta per quando il motore lo permettera'.
    **Piu' vettori insieme (18/10/2026):** i vettori di steering si SOMMANO (piu' ricordi nella stessa risposta del
@@ -69,7 +124,34 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
 
 Cablaggi nella notturna: `refactoring-notturna.md`.
 
-**Da decidere dopo il test per layer:** i valori della tabella delle emozioni (carica, sbiadimento) in unita' di dose.
+**Da decidere dopo i giri della ruota:** i valori della tabella delle emozioni (carica, sbiadimento) in unita' di dose,
+Dmin_e e Dmax_e per emozione (punto 7).
+
+**Dal piano di refactoring (22/10): via emotiva nel richiamo.** Il piano del 10/10 prevedeva tre vie del richiamo
+(testuale, semantica, emotiva); oggi `accendi` ha solo le prime due ("via emotiva assente" in `lux_engrammi.py`). In
+questa fase la carica degli archi puo' diventare anche un indizio: un ricordo affiora piu' facilmente se la sua emozione
+somiglia a quella del momento (memoria congruente con l'umore, Bower 1981).
+
+**Fase 2, ultimo passo (22/10): `memoria.db` diventa superfluo.** Tutto quello che e' rimasto solo in
+`memoria.db` entra nel Lux, poi nessun componente vivo lo apre piu'.
+- Cosa c'e' ancora solo li': per ricordo `ts`, `fonte`, `emo_tag`, `emo_alpha`, `firma` (51), `salienza`,
+  `n_richiami`, `classe` (vissuto/letto, mezza dose al vettore), `voluto`; gli archi fra ricordi (`archi`, 194
+  hebbiani); la ricerca per parole (`nodi_fts`); i vettori semantici dei ricordi interi (`vettori.pt`).
+- Chi lo apre oggi (da riscrivere sul Lux): `riflesso.py` (emo_tag e classe per il vettore), `tagging35b.py` e
+  `notte-memoria.sh` (scrivono i ricordi nuovi: la notturna li scrivera' nel Lux), `memoria.py`, `ricorda.py` del
+  container (richiamo per codice e per parole), `cervello.py`, `notturna-web.py`, `lux3d-gif.py`, `vettori_l29.py`,
+  `verifica_post_versioning.py`, `firme-occamy/ricalcola-firme.py`, `lux_engrammi.py` (costruisci, aggiungi, primo stato).
+- `memoria.db` resta come archivio in sola lettura, fuori dal funzionamento.
+
+**Chiusura della fase 2 (22/10): i difetti di `memoria.db`.**
+1. Indice testuale (`nodi_fts`) aggiornato solo all'inserimento (trigger `nodi_ai`): aggiungere i trigger di modifica
+   e di cancellazione, cosi' la ricerca per parole non trova mai un testo vecchio.
+2. Un solo arco fra due ricordi (chiave `archi(a, b)`): chiave che comprende il tipo, cosi' un arco hebbiano e uno di
+   altro tipo possono stare insieme; `ricorda.py` e `_hebb_boost` rinforzano solo gli archi hebbiani.
+3. Schema nel codice diverso dal db: la stringa `SCHEMA` di `memoria.py` riceve la colonna `tipo` degli archi.
+Oggi nessun codice modifica o cancella testi e i 194 archi sono tutti hebbiani: nessun danno in corso. La modifica
+tocca il db vivo, quindi si fa con l'iter di upgrade (backup, prova su copia, via dell'utente). Se il passaggio al Lux
+qui sopra arriva prima, questi tre punti cadono: il db resta solo come archivio.
 
 ## Fase 3. Fonti
 
@@ -84,6 +166,9 @@ Cablaggi nella notturna: `refactoring-notturna.md`.
 5. **Strumento di correzione per l'agente** (codice del ricordo e testo; la fonte la aggiunge il riflesso): chiama
    `/correggi` del servizio del Lux, gia' presente dalla 1.11.0. Il testo della descrizione dello strumento lo decide
    l'utente prima che entri nel codice.
+   Nota (22/10): il 12/10 l'utente aveva deciso nome `correggicordo` e descrizione "Corregge un tuo ricordo. Scrivi il
+   numero del ricordo, poi il testo sbagliato preceduto da - e il testo corretto preceduto da +.", pensati per la
+   correzione a tratti; la 1.11.0 corregge il ricordo intero (codice + testo nuovo), quindi il testo va riadattato da lei.
 
 **Da decidere:** il testo dello strumento di correzione; la soglia di fiducia; se le correzioni dell'agente entrano
 subito o nella notte.
@@ -105,10 +190,14 @@ prova per layer), fase 3, poi dalla 4 alla 12.
 **Fase 4.** Contiguita' temporale: un ricordo richiama quelli vicini nel tempo (oggi gli archi legano engrammi dentro un ricordo,
    non ricordi in sequenza).
 **Fase 5.** Contesto di codifica: chi c'era, attivita', ora del giorno come indizio di richiamo.
+   Dal piano di refactoring (22/10): al richiamo nasce un legame fra il messaggio che ha fatto affiorare il ricordo e il
+   ricordo stesso (oggi `consegna` rinforza gli archi del ricordo ma non crea legami nuovi).
 **Fase 6.** Interferenza e oblio indotto dal richiamo: richiamare un ricordo indebolisce i concorrenti simili (oggi il richiamo
    solo rinforza).
 **Fase 7.** Familiarita' senza ricordo: "lo conosco ma non so da dove", sotto la soglia del richiamo.
 **Fase 8.** Semantizzazione: col tempo l'episodio perde i dettagli e resta il fatto.
+   Dal piano di refactoring (22/10): ricordo vago, gli archi indeboliti dall'oblio escono dalla ricomposizione e il
+   ricordo torna con dei buchi (oggi `ricomponi` usa tutti gli archi; la curva dell'oblio pesa solo sulla scelta).
 **Fase 9.** Memoria prospettica: intenzioni che scattano quando si verifica una condizione.
    **Esteso agli SCOPI (17/10):** nella mente uno scopo si manifesta con concetti piu' pronti, attenzione
    selettiva, pensieri che tornano da soli, emozione come segnale di avanzamento, gerarchia astratto -> concreto

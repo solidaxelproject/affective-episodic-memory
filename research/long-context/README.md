@@ -1,6 +1,6 @@
 # Long-context tests: J-lens and emotional steering up to ~140k tokens
 
-Five tests on the 35B model (Occamy-1.0) with long contexts, started in October 2026. They check whether the
+Tests on the 35B model (Occamy-1.0) with long contexts, started in October 2026. They check whether the
 tools the memory system relies on (the Jacobian lens at L29 and the emotional steering vectors) still work when
 the model is deep inside a long conversation, and they re-calibrate the 51 emotion vectors per layer.
 
@@ -20,6 +20,9 @@ Launcher: `lancia.sh` (`./lancia.sh` = tests 1 and 2, `./lancia.sh taratura`, `.
 | `3-taratura/` | **Server-side calibration.** `prova_prefill.py` checks the coloured prefill of the reflex (the vector is on only while the recalled memory is prefilled; the answer reuses the cache). `tara_emozioni.py` calibrates dose and 3-layer window for the 51 emotions on the server. |
 | `4-steering-per-layer/` | **Every emotion on every layer** (the current test procedure, see below). `steering_layer.py` measures, `analizza_layer.py` writes one card per emotion and a summary page (`pagina-emozioni.html`, served by the dashboard at `/emozioni/`). |
 | `5-vettori-italiani/` | **Italian emotion vectors.** Contrastive vectors from an Italian diary-style dataset (~300 texts per emotion, without the emotion's own word): mean of the emotion's texts minus the mean of the other 50, raw residual states, layers L15-L32. They replace vectors built on the English emotion word. `pagina_vettori.py` draws the process (text cloud per layer, class separation per layer, vector similarity, distance from the English vectors) for the dashboard page `/vettori/`. |
+| `6-template-lens/` | **Vectors with the workspace paper's method.** J-lens for the emotions whose word is one token, template lens on Italian first-person passages (`passaggi/`) for the others (`estrai_vettori.py`); the dashboard page `/vettori/` draws them. |
+| `7-codici/` | **Memory codes.** Checks whether the model handles the 16-character memory codes the recall tool puts in the first line, or alters or invents them (`prova_codici.py`), and what it answers when asked for a code and its content (`prova_domanda.py`). |
+| `8-sistema-steering/` | **The steering system.** Vectors from paired scenes (same facts, different emotion) plus the direction of the self, injected on L15-L31 while the model reasons (`sistema.py`); blind judges (`giudica_sistema.py`, an external 4B model; later Opus agents); per-emotion dose calibration (`catena-dosi-*.sh`, `prepara_lotti_dosi.py`) and the dashboard pages `/protocollo/` and `/dosi/`. |
 
 ## Test procedure for per-layer steering
 

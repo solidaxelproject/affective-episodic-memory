@@ -194,7 +194,7 @@ Le strutture risultanti fungono da:
 | `persistenza.py` + `sincronizza-richiami.py` | Persistenza: curva dell'oblio in tempo vissuto, stabilità che cresce col richiamo distanziato, eco dei messaggi quotidiani ripetuti, abitudini che nascono dalla frequenza |
 | `cervello.py` | Vista d'insieme: grafo, Lux, stato, richiami |
 
-**Smoke test e utilità**: `lux-demo.py`, gli script `finestra-*` per le finestre GPU sicure.
+**Smoke test e utilità**: `lux-demo.py`.
 
 ## Risultati chiave
 

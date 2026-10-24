@@ -194,7 +194,7 @@ The resulting structures act as:
 | `persistenza.py` + `sincronizza-richiami.py` | Persistence: lived-time forgetting curve, stability that grows with spaced recall, echoes of repeated everyday messages, habits born from frequency |
 | `cervello.py` | Overview: graph, Lux, state, recalls |
 
-**Smoke tests and utilities**: `lux-demo.py`, the `finestra-*` scripts for safe GPU windows.
+**Smoke tests and utilities**: `lux-demo.py`.
 
 ## Key results
 

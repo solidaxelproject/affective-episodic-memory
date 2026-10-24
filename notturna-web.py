@@ -7,6 +7,7 @@
 # slot con un turno in volo; conferma esplicita lato pagina per la VRAM.
 # Solo stdlib. Uso: notturna -web [porta]   (default 8095, solo 127.0.0.1)
 import datetime
+import glob
 import json
 import os
 import re
@@ -397,7 +398,9 @@ document.addEventListener("DOMContentLoaded",disegnaTema);
     <button onclick="finestra('/')">🧠 stream del reasoning</button>
     <button onclick="finestra('/diario')">📖 diario del riflesso</button>
     <button onclick="location.href='/lux3d/'">✨ Lux in 3D</button>
-    <button onclick="location.href='/emozioni/'">🎭 emozioni per layer</button>
+    <button onclick="location.href='/emozioni/'">🎭 test inefficace</button>
+    <button onclick="location.href='/protocollo/'">🧪 protocollo steering</button>
+    <button onclick="location.href='/dosi/'">💉 dosi steering</button>
     <button onclick="location.href='/vettori/'">🧭 vettori emotivi</button>
   </div>
 </section>
@@ -603,6 +606,8 @@ giro(); setInterval(giro,3000);
 
 EMOZIONI = "/data/memoria-episodica-affettiva/research/long-context/4-steering-per-layer/emozioni-layer"
 VETTORI = "/data/memoria-episodica-affettiva/research/long-context/6-template-lens/vettori-pagina"   # 12/10 sera: vettori col metodo del paper (prima 5-vettori-italiani)
+PROTOCOLLO = "/data/memoria-episodica-affettiva/research/long-context/8-sistema-steering/pagina-protocollo"   # 22/10: prove del protocollo di steering
+DOSI = "/data/memoria-episodica-affettiva/research/long-context/8-sistema-steering/pagina-dosi"   # 24/10: curve di efficacia per dose
 
 class H(BaseHTTPRequestHandler):
     def _manda(self, corpo, tipo):
@@ -658,6 +663,47 @@ class H(BaseHTTPRequestHandler):
             tipo = {".html": "text/html; charset=utf-8", ".json": "application/json",
                     ".md": "text/plain; charset=utf-8"}.get(os.path.splitext(f)[1], "application/octet-stream")
             self._manda(open(f, "rb").read(), tipo)
+        elif self.path == "/protocollo":
+            self.send_response(301)
+            self.send_header("Location", "/protocollo/")
+            self.end_headers()
+        elif self.path.startswith("/protocollo/"):   # 22/10: una tab per prova (8-sistema-steering/pagina_protocollo.py)
+            nome = self.path[len("/protocollo/"):].split("?")[0] or "index.html"
+            cartella = PROTOCOLLO.rsplit("/", 1)[0]
+            pagina = PROTOCOLLO + "/index.html"
+            if nome == "index.html" and (not os.path.exists(pagina) or any(
+                    os.path.exists(s) and os.path.getmtime(s) > os.path.getmtime(pagina)
+                    for s in (cartella + "/prova-frase.jsonl", cartella + "/giudizi-prova-frase.jsonl"))):
+                try:
+                    subprocess.run(["python3", cartella + "/pagina_protocollo.py"], capture_output=True, timeout=120)
+                except subprocess.TimeoutExpired:
+                    pass   # si serve la pagina di prima
+            f = os.path.realpath(os.path.join(PROTOCOLLO, nome))
+            if not f.startswith(PROTOCOLLO + "/") or not os.path.isfile(f):
+                self.send_error(404)
+                return
+            self._manda(open(f, "rb").read(), "application/json" if f.endswith(".json") else "text/html; charset=utf-8")
+        elif self.path == "/dosi":
+            self.send_response(301)
+            self.send_header("Location", "/dosi/")
+            self.end_headers()
+        elif self.path.startswith("/dosi/"):   # 24/10: una riga per emozione, curva per dose (8-sistema-steering/pagina_dosi.py)
+            nome = self.path[len("/dosi/"):].split("?")[0] or "index.html"
+            cartella = DOSI.rsplit("/", 1)[0]
+            dati_d = DOSI + "/dati.json"
+            sorgenti_d = [cartella + "/prova-dosi-medio.jsonl", cartella + "/prova-dosi-fini.jsonl", cartella + "/prova-dosi-giri.jsonl",
+                          "/data/memoria-episodica-affettiva/engrammi/DOSI-EMOZIONI.md"] + glob.glob(cartella + "/giudizio-dosi/uscite/*.jsonl")
+            if nome in ("index.html", "dati.json") and (not os.path.exists(dati_d) or any(
+                    os.path.exists(x) and os.path.getmtime(x) > os.path.getmtime(dati_d) for x in sorgenti_d)):
+                try:
+                    subprocess.run(["python3", cartella + "/pagina_dosi.py"], capture_output=True, timeout=120)
+                except subprocess.TimeoutExpired:
+                    pass   # si servono i dati di prima
+            f = os.path.realpath(os.path.join(DOSI, nome))
+            if not f.startswith(DOSI + "/") or not os.path.isfile(f):
+                self.send_error(404)
+                return
+            self._manda(open(f, "rb").read(), "application/json" if f.endswith(".json") else "text/html; charset=utf-8")
         else:
             self.send_error(404)
 
