@@ -22,7 +22,6 @@ Launcher: `lancia.sh` (`./lancia.sh` = tests 1 and 2, `./lancia.sh taratura`, `.
 | `5-vettori-italiani/` | **Italian emotion vectors.** Contrastive vectors from an Italian diary-style dataset (~300 texts per emotion, without the emotion's own word): mean of the emotion's texts minus the mean of the other 50, raw residual states, layers L15-L32. They replace vectors built on the English emotion word. `pagina_vettori.py` draws the process (text cloud per layer, class separation per layer, vector similarity, distance from the English vectors) for the dashboard page `/vettori/`. |
 | `6-template-lens/` | **Vectors with the workspace paper's method.** J-lens for the emotions whose word is one token, template lens on Italian first-person passages (`passaggi/`) for the others (`estrai_vettori.py`); the dashboard page `/vettori/` draws them. |
 | `7-codici/` | **Memory codes.** Checks whether the model handles the 16-character memory codes the recall tool puts in the first line, or alters or invents them (`prova_codici.py`), and what it answers when asked for a code and its content (`prova_domanda.py`). |
-| `8-sistema-steering/` | **The steering system.** Vectors from paired scenes (same facts, different emotion) plus the direction of the self, injected on L15-L31 while the model reasons (`sistema.py`); blind judges (`giudica_sistema.py`, an external 4B model; later Opus agents); per-emotion dose calibration (`catena-dosi-*.sh`, `prepara_lotti_dosi.py`) and the dashboard pages `/protocollo/` and `/dosi/`. |
 
 ## Test procedure for per-layer steering
 

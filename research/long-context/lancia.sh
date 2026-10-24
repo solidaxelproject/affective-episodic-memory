@@ -8,7 +8,6 @@
 # 51 emozioni (tara_emozioni.py), server -c 143360. "layer" = steering_layer.py (ogni emozione su ogni layer
 # L15-L32, 14 contesti fino a 140k, cache dei prefissi in slot/) poi analizza_layer.py (schede e pagina).
 # "emovec" = vettori emotivi italiani contrastivi sul dataset diaristico (5-vettori-italiani/emovec_it.py).
-# "sistema-leggi" / "sistema-prova [k...]" = 8-sistema-steering/sistema.py (21/10); "sistema-leggi-se" = scene "altro" per la direzione del sé.
 # "paper" = vettori col metodo del paper workspace: J-lens per le parole di un token, template lens per le altre (6-template-lens/).
 set -u
 D=/data/memoria-episodica-affettiva/research/long-context; cd $D
@@ -74,13 +73,6 @@ server 143360
 HF_HOME=/data/jspace/hf HF_HUB_OFFLINE=1 $PY -u 3-taratura/prova_prefill.py 2>&1 | tee 3-taratura/log-prefill.txt
 $PY -u 3-taratura/tara_emozioni.py 2>&1 | tee 3-taratura/log-taratura.txt
 echo "== fine $(date +%T): $D/3-taratura/taratura-emozioni.json, /data/jspace/out-occamy/emo-cvec-v3.npz"
-exit 0
-fi
-if [[ $FASI == sistema-* ]]; then
-echo "== sistema di steering: ${FASI#sistema-} $(date +%T)"
-server $([[ $FASI == sistema-leggi* ]] && echo 8192 || echo 143360)
-HF_HOME=/data/jspace/hf HF_HUB_OFFLINE=1 $PY -u 8-sistema-steering/sistema.py ${FASI#sistema-} "${@:2}" 2>&1 | tee -a 8-sistema-steering/log-${FASI#sistema-}.txt
-echo "== fine $(date +%T)"
 exit 0
 fi
 [[ $FASI == *steering* ]] || exit 0
