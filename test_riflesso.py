@@ -64,6 +64,16 @@ R._emo_del_ricordo = lambda c: (1, "fear", 1.0)
 colorati = []
 R._colora_ricordo = lambda *a: colorati.append(a) or ["fear"]
 corpo = lambda msgs: json.dumps({"messages": msgs}).encode()  # noqa: E731
+# 25/10: col 35B spento (cron di Hermes) nessun ricordo, ne' chiesto al Lux ne' salvato fra le consegne
+assert not R._sam_accesa(("127.0.0.1", 9)), "porta chiusa vista come l'agente accesa"
+R._sam_accesa = lambda *a: False
+chiesti = []
+lux = R._lux_consegna
+R._lux_consegna = lambda testo, esclusi: chiesti.append(testo) or lux(testo, esclusi)
+spenta = corpo([m("user", "[IMPORTANT: You are running as a scheduled cron job.] backup")])
+assert R.Proxy._memoria(None, spenta) == spenta and not chiesti and not R.CONSEGNE.exists(), "ricordo all'agente spenta"
+R._sam_accesa = lambda *a: True
+R._lux_consegna = lux
 R.Proxy._memoria(None, corpo([m("user", "guarda il mare"), m("assistant", "vectreflexstop"),
                               m("user", "e adesso?")]))
 assert not colorati, "colorato con vectreflexstop negli ultimi messaggi"
@@ -305,5 +315,24 @@ assert passi == [] and R._riepilogo_carica()["blocco"] == ["a", "b"], "senza fla
 R.RIEPILOGO_PROMUOVI.write_text("")
 R._promuovi()
 assert passi == [], "con la chat nello slot e senza riepilogo.kv non si tocca lo slot (la chat vecchia si butta)"
+
+# 24/10: stato dell'agente nel nome della chat. La fase va in R.FASE: legge, pensa, scrive, tool, vuoto = ferma
+R.FASE = str(R.Path(tempfile.mkdtemp()) / "fase")
+fase = lambda: R.Path(R.FASE).read_text()
+es = {"testo": "", "ragionamento": "", "finish": None, "tool_calls": False, "chat": True}
+sse = lambda delta, fine=None: ("data: " + R.json.dumps({"choices": [{"delta": delta, "finish_reason": fine}]}) + "\n\n").encode()
+R._segna_fase("legge")
+assert fase() == "legge"
+R._tee_sse(b"", sse({"reasoning_content": "hm"}), None, es)
+assert fase() == "pensa", fase()
+R._tee_sse(b"", sse({"content": "Ciao"}), None, es)
+assert fase() == "scrive", fase()
+R._tee_sse(b"", sse({"tool_calls": [{"index": 0}]}), None, es)
+assert fase() == "tool", fase()
+R._tee_sse(b"", b"data: {rotto\n\n", None, es)
+assert fase() == "tool", "un chunk rotto ha cambiato la fase"
+es["chat"] = False
+R._tee_sse(b"", sse({"content": "x"}), None, es)
+assert fase() == "tool", "una richiesta che non e' della chat ha cambiato la fase"
 
 print("test_riflesso: TUTTO VERDE")

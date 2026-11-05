@@ -1,0 +1,15 @@
+[Unit]
+Description=Firma subito (B6, PIANO-FIRMA-ENGRAMMI.md): i messaggi del riflesso diventano ricordi senza aspettare la notte
+After=network.target embedder-sem.service lux-engrammi.service
+Wants=embedder-sem.service
+
+[Service]
+WorkingDirectory=/data/memoria-episodica-affettiva/engrammi
+ExecStart=/data/jspace/venv/bin/python firma_subito.py servizio
+Environment=HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+Nice=10
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -109,6 +109,47 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
    Poi discesa lenta, come il corpo dopo il picco (regola picco-fine). La discesa si scandisce con l'ora dei messaggi (il riflesso registra l'arrivo di ogni messaggio,
    l'agente ne vede uno ogni 5). Durata = permanenza dell'emozione x dose di partenza x importanza (Verduyn 2009/2011).
    La dose per engramma, token per token, resta per quando il motore lo permettera'.
+   **Steering attenuato nella risposta (30/10/2026):** il vettore non si spegne a `</think>`: resta acceso
+   attenuato anche nella risposta, con una riduzione che simula quella umana, legata al contesto e al tipo di emozione
+   (stessa permanenza della discesa qui sopra). Prova da fare: dose attenuata nella risposta sui 5 contesti di controllo,
+   per trovare fino a che dose regge la tool call (col vettore pieno su tutta la risposta: 0 valide su 44, RELAZIONE E5).
+   **Composizione del mix dei ricordi consegnati insieme (31/10/2026).** I ricordi di una consegna (fino a 4)
+   partecipano tutti allo steering, ma la firma predominante si seleziona: di emozioni insieme se ne provano davvero
+   poche, e le emozioni forti scacciano le altre. Servono tre funzioni:
+   1. un FRENO che rallenti la variazione dell'intensita' di un'emozione da un turno all'altro (inerzia emotiva,
+      Kuppens 2010): l'emozione gia' accesa ha un piccolo vantaggio per restarlo, cosi' due emozioni quasi alla pari non
+      fanno saltare l'agente dall'una all'altra;
+   2. una funzione che POTENZI LA DOMINANZA delle emozioni intense rispetto alle medie e alle lievi: ogni emozione del
+      mix si indebolisce in proporzione a quanto la sovrasta la piu' forte (normalizzazione divisiva, restringimento
+      dell'attenzione sotto un'emozione intensa, Easterbrook 1959), con un aumento del contrasto per le emozioni di forza
+      intermedia (curva a S: si decidono in fretta, salgono o scendono); chi scende sotto soglia sparisce;
+   3. una GERARCHIA fra le emozioni, che le fa prevalere o le depotenzia in base al tipo di emozione e alla carica degli
+      archi del ricordo (la carica dice anche l'intensita' delle emozioni degli engrammi che quegli archi connettono).
+   Piu' i due tetti: sul numero di emozioni che passano (2-3, come nelle persone) e sulla dose totale (prova di accumulo).
+   **DIADI COME VETTORI PURI (l'utente 02/11/2026, supera il paragrafo del 31/10 qui sotto).** Si sviluppano i vettori
+   puri di tutte le diadi che si possono fare (come l'amore dalle scene proprie, E31). La diade si inietta quando:
+   - due dei ricordi richiamati hanno emozioni diverse e VICINE IN INTENSITA', sia rispetto al range di iniezione di
+     ognuna sia come posizione nel petalo della ruota (intense con intense, medie con medie);
+   - quei due ricordi sono stati richiamati PIU' VOLTE INSIEME;
+   - e sono SUFFICIENTEMENTE VICINI: piu' engrammi soggetto condivisi (stessa persona, stesso cane, stesso argomento).
+   Allora, al posto dell'emozione piu' forte fra i 4 ricordi, si inietta il vettore puro della diade di quelle due
+   emozioni. Quando la diade si attiva, i due ricordi vengono COLLEGATI e da li' in poi si richiamano insieme. A ogni
+   richiamo la dose del vettore della diade CRESCE di un tanto, sempre dentro il range efficace che non rompe il testo.
+   Passaggio dalla diade composta alla pura (02/11/2026), con a e b le due emozioni e c il vettore puro della diade:
+   - richiamo x: la diade si inietta coi 2 vettori a + b; la diade si attiva e i due ricordi si legano;
+   - richiamo x+1: a e b a dose leggermente piu' bassa, piu' c a dose bassa, che compensa la riduzione di a e b;
+   - richiamo x+n: la diade composta (a + b) si riduce in percentuale secondo la sua rilevanza rispetto alla diade
+     pura, e c cresce;
+   - a ogni richiamo successivo l'effetto complessivo dei vettori deve AUMENTARE.
+       x     a ##############  b #############
+       x+1   a #########       b ########       c ###
+       x+2   a ########        b #######        c #####
+   Servono quindi i range utili delle coppie composte (a + b) E dei vettori puri delle diadi (c), e il comportamento
+   dei tre insieme (come la prova amore puro + estasi + ammirazione del 02/11, RELAZIONE E31).
+   (Superato dal 02/11, tenuto per storia:) Le DIADI non si iniettano come voci a se': la diade (amore = estasi +
+   ammirazione, ...) nasce dalla fusione delle sue componenti nel profilo; la proporzione fra le componenti la danno i
+   loro assi nella firma, la zona utile della diade (griglie di PIANO-PLUTCHIK, sezione "diadi fra le intense" della
+   pagina delle dosi) e' il limite da rispettare.
    **Piu' vettori insieme (18/10/2026):** i vettori di steering si SOMMANO (piu' ricordi nella stessa risposta del
    tool, o un vettore nuovo mentre un altro sta scendendo). Il modo di sommarli si stabilisce in questa fase. Base: test
    multivettore del 18/10, fino a 12 emozioni insieme o in differita, testo mai rotto, ogni emozione conserva circa la
@@ -119,6 +160,9 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
     70%, poi 100%. Data di partenza in `lux.npz`. Copia dello stato prima di ogni notte.
 10. **Errori.** Se un passo della notte fallisce la notturna prosegue. Il vettore del riflesso usa l'`emo_tag` di
     memoria.db finche' non si decide altrimenti.
+    **DA FARE QUI (l'utente 31/10, D7 di PIANO-FIRMA-ENGRAMMI.md):** il riflesso alla consegna smette di usare `emo_tag` e i
+    vettori vecchi `emo-cvec-v2.npz` (`riflesso.py:537`, `ponte.dirs_emozione`) e inietta coi vettori sé, alla dose
+    della funzione del punto 7, dalle cariche degli archi (firma nuova sui 24 assi; diadi e mix come componenti).
 11. **Hardware.** Tutti questi calcoli sono leggeri (CPU, millisecondi): possono girare con l'agente sveglia. Solo la firma
     del momento richiede il 35B.
 

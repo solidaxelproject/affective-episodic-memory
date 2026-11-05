@@ -38,6 +38,7 @@ ARMATA_FILE = "/data/memoria-episodica-affettiva/.notturna-armata"
 PENS_KV = "/dev/shm/agente-kv/pensatoio.kv"
 LLAMA = "http://127.0.0.1:8090"
 LUX3D = "http://127.0.0.1:8131"
+CONFRONTO = "http://127.0.0.1:8097"   # 30/10: confronto steering/non steering (8-sistema-steering/confronto/)
 
 
 def _pgrep(pat):
@@ -401,6 +402,7 @@ document.addEventListener("DOMContentLoaded",disegnaTema);
     <button onclick="location.href='/emozioni/'">🎭 test inefficace</button>
     <button onclick="location.href='/protocollo/'">🧪 protocollo steering</button>
     <button onclick="location.href='/dosi/'">💉 dosi steering</button>
+    <button onclick="location.href='/confronto/'">👥 confronto steering</button>
     <button onclick="location.href='/vettori/'">🧭 vettori emotivi</button>
   </div>
 </section>
@@ -610,6 +612,41 @@ PROTOCOLLO = "/data/memoria-episodica-affettiva/research/long-context/8-sistema-
 DOSI = "/data/memoria-episodica-affettiva/research/long-context/8-sistema-steering/pagina-dosi"   # 24/10: curve di efficacia per dose
 
 class H(BaseHTTPRequestHandler):
+    def _confronto(self, corpo=None):
+        """30/10: inoltra /confronto/ al suo server; il testo generato passa a pezzi mentre arriva"""
+        r = urllib.request.Request(CONFRONTO + self.path[len("/confronto"):], corpo,
+                                   {"Content-Type": "application/json"} if corpo is not None else {})
+        try:
+            risp = urlopen(r, timeout=3600)
+        except urllib.error.HTTPError as e:
+            risp = e
+        except Exception as e:
+            self._manda(f"confronto non raggiungibile ({e}): systemctl --user status confronto-steering".encode(),
+                        "text/plain; charset=utf-8")
+            return
+        tipo = risp.headers.get("Content-Type", "application/octet-stream")
+        if not tipo.startswith("text/event-stream"):
+            self.send_response(risp.status)
+            corpo = risp.read()
+            self.send_header("Content-Type", tipo)
+            self.send_header("Content-Length", str(len(corpo)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(corpo)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", tipo)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            while pezzo := risp.read1(65536):
+                self.wfile.write(pezzo)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            risp.close()
+
     def _manda(self, corpo, tipo):
         self.send_response(200)
         self.send_header("Content-Type", tipo)
@@ -683,6 +720,12 @@ class H(BaseHTTPRequestHandler):
                 self.send_error(404)
                 return
             self._manda(open(f, "rb").read(), "application/json" if f.endswith(".json") else "text/html; charset=utf-8")
+        elif self.path == "/confronto":
+            self.send_response(301)
+            self.send_header("Location", "/confronto/")
+            self.end_headers()
+        elif self.path.startswith("/confronto/"):
+            self._confronto()
         elif self.path == "/dosi":
             self.send_response(301)
             self.send_header("Location", "/dosi/")
@@ -708,6 +751,20 @@ class H(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        if self.path.startswith("/confronto/"):
+            self._confronto(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+            return
+        if self.path == "/dosi/didascalie":   # 28/10: le didascalie dei grafici si modificano dalla pagina
+            try:
+                testo = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))["testo"]
+                f = DOSI + "/didascalie.txt"
+                open(f + ".tmp", "w").write(testo)
+                os.replace(f + ".tmp", f)
+                ok, msg = True, "salvato"
+            except Exception as e:
+                ok, msg = False, str(e)
+            self._manda(json.dumps({"ok": ok, "msg": msg}).encode(), "application/json")
+            return
         if self.path != "/azione":
             self.send_error(404)
             return

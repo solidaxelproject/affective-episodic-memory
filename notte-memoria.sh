@@ -50,11 +50,19 @@ if [ ! -s "$J" ]; then
   exit 0
 fi
 # PERSISTENZA (30/09, PIANO-PERSISTENZA-LUX.md): i richiami del giorno passano dal
-# grafo; qui, PRIMA del tagging (che pota Lux), diventano riattivazioni dei neuroni.
+# grafo; qui, PRIMA del tagging, diventano rinforzi degli archi del Lux degli engrammi
+# (B5 01/11: attraverso il suo servizio; il vecchio Lux e' in archivio).
 /data/jspace/venv/bin/python sincronizza-richiami.py \
   || echo "$(date -Iseconds) sincronia richiami FALLITA (non critico: la prossima notte li riprende)"
-bash run-tagging.sh "$J" \
-  || { echo "$(date -Iseconds) tagging FALLITO: marker fermo, la prossima notte rimedia"; exit 1; }
+# B6 (01/11, engrammi/PIANO-FIRMA-ENGRAMMI.md): niente piu' tagging col 35B spento, i ricordi li fa firma-subito
+# durante il giorno. Qui: in coda i messaggi che il riflesso non ha passato (e ricorda-ora), coda svuotata, poi
+# persistenza sugli scartati e omeostato dai ricordi nati dal marker in poi
+DA=$(stat -c %Y "$MARKER" 2>/dev/null || echo 0)
+FS="/data/jspace/venv/bin/python /data/memoria-episodica-affettiva/engrammi/firma_subito.py"
+$FS recupera "$J" > /data/memoria-episodica-affettiva/tagging.log 2>&1 \
+  || { echo "$(date -Iseconds) recupero FALLITO (35B spento o firma-subito fermo): marker fermo, la prossima notte rimedia"; exit 1; }
+$FS notte "$DA" >> /data/memoria-episodica-affettiva/tagging.log 2>&1 \
+  || { echo "$(date -Iseconds) persistenza/omeostato FALLITI: marker fermo, la prossima notte rimedia"; exit 1; }
 touch "$MARKER"
 # un giorno VISSUTO in piu' per l'oblio di Lux: solo a notturna riuscita con
 # messaggi veri (una notte senza chat, o da spento, non fa dimenticare)
@@ -75,9 +83,7 @@ touch /data/workspace/memoria/.ultima-notturna
 /data/venv-spacy/bin/python /data/memoria-episodica-affettiva/engrammi/lux_engrammi.py aggiungi \
   || echo "$(date -Iseconds) Lux degli engrammi NON aggiornato (non critico, ritenta domani)"
 
-# sentinella anti-amnesia: Lux DEVE essere stata aggiornata dal tagging
-LUX=/data/workspace/memoria/lux.npz
-if [ -z "$(find "$LUX" -mmin -60 2>/dev/null)" ]; then
-  echo "CRITICO: lux.npz NON aggiornata stanotte: l'agente rischia amnesia parziale." \
-       "Il grafo ha i nodi: backfill con lux-demo.py. Controllare tagging.log."
-fi
+# sentinella anti-amnesia (B5 01/11, P6): ogni ricordo di memoria.db DEVE stare nel Lux degli engrammi
+(cd /data/memoria-episodica-affettiva/engrammi && /data/venv-spacy/bin/python sentinella_lux.py) \
+  || echo "CRITICO: ricordi di memoria.db fuori dal Lux degli engrammi: l'agente non li richiama." \
+          "Rimedio: venv-spacy/bin/python engrammi/lux_engrammi.py aggiungi. Controllare tagging.log."

@@ -3,7 +3,9 @@
 #        + tag emozione dominante + alpha calibrato.
 # Archi hebbiani: ogni co-richiamo rinforza; il recupero ne tiene conto.
 # CPU-only: gli indirizzi vengono calcolati altrove (tagging35b.py, GPU).
+import fcntl
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -13,6 +15,8 @@ import torch
 DIR = Path("/data/workspace/memoria")  # condiviso col container (=/workspace/memoria)
 DB = DIR / "memoria.db"
 VEC = DIR / "vettori.pt"
+# B7 (01/11, P3 di PIANO-FIRMA-ENGRAMMI.md): un solo ordine dei 51 assi, quello di emozioni.json
+EMOZIONI = json.load(open("/data/memoria-episodica-affettiva/emozioni.json"))
 HEBB_GAIN = 0.1     # rinforzo per co-richiamo
 HEBB_BLEND = 0.25   # peso degli archi nel punteggio di recupero
 
@@ -46,6 +50,9 @@ def _conn():
     DIR.mkdir(exist_ok=True)
     c = sqlite3.connect(DB)
     c.executescript(SCHEMA)
+    if "cattura" not in {r[1] for r in c.execute("PRAGMA table_info(nodi)")}:   # B6 (01/11 sera): S0 del trascinato
+        c.execute("ALTER TABLE nodi ADD COLUMN cattura REAL")
+        c.commit()
     return c
 
 
@@ -56,36 +63,64 @@ def _load_vec():
 
 
 def _save_vec(d):
-    torch.save(d, VEC)
+    # B6 (01/11): file temporaneo e poi os.replace, uno stop a meta' scrittura non corrompe vettori.pt
+    torch.save(d, f"{VEC}.tmp")
+    os.replace(f"{VEC}.tmp", VEC)
+
+
+def addr_emo(firma):
+    """B7: la firma (dict) come vettore dei 51 assi nell'ordine di emozioni.json, zero fuori dalla firma"""
+    return torch.tensor([float(firma.get(e["en"], 0.0)) for e in EMOZIONI])
+
+
+def migra_addr_emo():
+    """B7: addr_emo di tutti i nodi riscritta dalla firma di memoria.db (prima: ordine alfabetico delle chiavi)"""
+    with open(f"{DB}.lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        c = _conn()
+        firme = dict(c.execute("SELECT id, firma FROM nodi"))
+        c.close()
+        v = _load_vec()
+        for nid in v:
+            if firme.get(nid):
+                v[nid]["addr_emo"] = addr_emo(json.loads(firme[nid]))
+        _save_vec(v)
+        return len(v)
 
 
 def add_node(testo, firma, addr_sem, emo_tag, emo_alpha, salienza,
-             fonte="", ts=None, classe="vissuto", voluto=0):
+             fonte="", ts=None, classe="vissuto", voluto=0, cattura=None):
     """Aggiunge un ricordo. firma: dict {emo: z}; addr_sem: tensor [d].
     classe: 'vissuto' (esperienza) o 'letto' (contenuto web, regola 2)."""
-    c = _conn()
-    # INVARIANTE ANTI-DOPPIONE (20/07): stesso testo = stesso ricordo. Finora
-    # l'UNICA difesa era la finestra temporale dell'estrazione: una finestra
-    # sovrapposta (ri-run, marker sbagliato) ri-taggava gli stessi messaggi e
-    # nascevano nodi gemelli. Qui la porta si chiude alla radice: se il testo
-    # esiste già, si ritorna il suo id e non si crea nulla.
-    esistente = c.execute("SELECT id FROM nodi WHERE testo=? LIMIT 1", (testo,)).fetchone()
-    if esistente:
-        c.close()
-        return esistente[0]
-    cur = c.execute(
-        "INSERT INTO nodi (ts, testo, fonte, emo_tag, emo_alpha, firma, salienza, classe, voluto)"
-        " VALUES (?,?,?,?,?,?,?,?,?)",
-        (ts or time.time(), testo, fonte, emo_tag, emo_alpha,
-         json.dumps(firma, ensure_ascii=False), salienza, classe, int(voluto)))
-    nid = cur.lastrowid
-    c.commit()
-    c.close()
-    v = _load_vec()
-    v[nid] = {"addr_sem": addr_sem.float().cpu(),
-              "addr_emo": torch.tensor([firma[e] for e in sorted(firma)])}
-    _save_vec(v)
-    return nid
+    # B6 (01/11): firma-subito (di giorno) e la persistenza della notturna scrivono insieme: un lucchetto attorno
+    # a controllo, insert e vettori.pt
+    with open(f"{DB}.lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        c = _conn()
+        # INVARIANTE ANTI-DOPPIONE (20/07): stesso testo = stesso ricordo. Finora
+        # l'UNICA difesa era la finestra temporale dell'estrazione: una finestra
+        # sovrapposta (ri-run, marker sbagliato) ri-taggava gli stessi messaggi e
+        # nascevano nodi gemelli. Qui la porta si chiude alla radice: se il testo
+        # esiste già, si ritorna il suo id e non si crea nulla.
+        esistente = c.execute("SELECT id FROM nodi WHERE testo=? LIMIT 1", (testo,)).fetchone()
+        if esistente:
+            c.close()
+            nid = esistente[0]
+        else:
+            cur = c.execute(
+                "INSERT INTO nodi (ts, testo, fonte, emo_tag, emo_alpha, firma, salienza, classe, voluto, cattura)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (ts or time.time(), testo, fonte, emo_tag, emo_alpha,
+                 json.dumps(firma, ensure_ascii=False), salienza, classe, int(voluto), cattura))
+            nid = cur.lastrowid
+            c.commit()
+            c.close()
+        v = _load_vec()
+        if nid not in v:   # B6: anche un nodo rimasto senza vettori da un crash fra il commit e vettori.pt
+            v[nid] = {"addr_sem": addr_sem.float().cpu(),
+                      "addr_emo": addr_emo(firma)}
+            _save_vec(v)
+        return nid
 
 
 def _hebb_boost(c, scores):
@@ -135,11 +170,9 @@ def recall(query, mode="emotiva", k=3, update_hebb=True):
         mat = torch.stack([v[i][key] / (v[i][key].norm() + 1e-9) for i in ids])
         if torch.is_tensor(query):
             q = query.float()
-        else:  # nome di emozione -> one-hot nello spazio firma
-            emos = sorted(json.loads(c.execute(
-                "SELECT firma FROM nodi LIMIT 1").fetchone()[0]))
-            q = torch.zeros(len(emos))
-            q[emos.index(query)] = 1.0
+        else:  # nome di emozione (inglese o italiano) -> one-hot nell'ordine di emozioni.json (B7)
+            q = torch.zeros(len(EMOZIONI))
+            q[next(i for i, e in enumerate(EMOZIONI) if query in (e["en"], e["it"]))] = 1.0
         q = q / (q.norm() + 1e-9)
         sims = mat @ q
         scores = {ids[i]: sims[i].item() for i in range(len(ids))}
@@ -195,18 +228,23 @@ def consolida_notte(fattore=0.8, pavimento=0.02):
 
 
 if __name__ == "__main__":
+    import sys
+    if sys.argv[1:] == ["migra-addr-emo"]:   # B7
+        print("addr_emo riscritte:", migra_addr_emo())
+        sys.exit(0)
     # ponytail: self-check minimo su db temporaneo
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         DB, VEC, DIR = Path(td) / "t.db", Path(td) / "t.pt", Path(td)
-        firma = {f"e{i}": 0.0 for i in range(51)}
-        f1 = dict(firma, e0=3.0)
-        f2 = dict(firma, e0=2.5)
-        f3 = dict(firma, e7=3.0)
+        firma = {e["en"]: 0.0 for e in EMOZIONI[:24]}
+        f1 = dict(firma, joy=3.0)
+        f2 = dict(firma, joy=2.5)
+        f3 = dict(firma, fear=3.0)
         for i, f in enumerate((f1, f2, f3)):
-            add_node(f"ricordo {i}", f, torch.randn(2048), "e0", 0.16, 2.0)
-        r = recall("e0", mode="emotiva", k=2)
+            add_node(f"ricordo {i}", f, torch.randn(2048), "joy", None, 2.0)
+        r = recall("joy", mode="emotiva", k=2)
         assert [x["id"] for x in r] == [1, 2], r
+        assert [x["id"] for x in recall("gioia", mode="emotiva", k=2, update_hebb=False)] == [1, 2]   # anche in italiano
         r = recall("ricordo", mode="testo", k=1)
         assert r and r[0]["id"] in (1, 2, 3)
         # testo libero con punteggiatura: e' testo, non sintassi FTS5
@@ -215,7 +253,7 @@ if __name__ == "__main__":
         assert recall("l'ultimo ricordo", mode="testo") == []
         assert stats()["nodi"] == 3
         # invariante anti-doppione: ri-aggiungere lo stesso testo NON crea un nodo
-        dup = add_node("ricordo 0", f1, torch.randn(2048), "e0", 0.16, 2.0)
+        dup = add_node("ricordo 0", f1, torch.randn(2048), "joy", None, 2.0)
         assert dup == 1, dup
         assert stats()["nodi"] == 3, "il doppione è stato creato!"
         print("self-check OK")

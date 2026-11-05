@@ -34,9 +34,10 @@ def rango(x, base):
     return float((base < x).mean() + 0.5 * (base == x).mean()) if len(base) else 0.5
 
 
-def stabilita_iniziale(firma, dist, se, s_base):
-    """firma = vettore dei 51 assi (o None), dist e se' = ranghi 0-1"""
-    E = float(np.clip(np.max(firma) / 1.8, 1, 3)) if firma is not None else 1.0
+def stabilita_iniziale(firma, dist, se, s_base, soglia=1.8):
+    """firma = vettore dei 51 assi (o None), dist e se' = ranghi 0-1; soglia = quella della firma (B6: 1.532 coi
+    vettori se', lux_engrammi.SOGLIA_FIRMA)"""
+    E = float(np.clip(np.max(firma) / soglia, 1, 3)) if firma is not None else 1.0
     h = lambda x: max(0.0, 2 * x - 1)
     M = (1 + .5 * h(dist) * (E - 1) / 2) * (1 + .5 * h(se))
     return s_base * (E + (3 - E) * (1 - 1 / M))

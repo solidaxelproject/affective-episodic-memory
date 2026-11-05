@@ -1,32 +1,35 @@
 # Persistenza, fasi 2-3 (30/09, PIANO-PERSISTENZA-LUX.md): cosa succede di notte ai messaggi
-# che il tagging SCARTA (salienza sotto soglia). CPU pura, niente GPU: gli stati li ha gia' letti
-# il tagger. Criterio dei valori (scelta di progetto, 30/09): avvicinarsi il piu' possibile alla memoria umana.
+# che il tagging SCARTA (salienza sotto soglia). CPU pura, niente GPU. Criterio dei valori (l'utente, 30/09):
+# avvicinarsi il piu' possibile alla memoria umana.
+# B5 (01/11, PIANO-FIRMA-ENGRAMMI.md, D6 dell'utente: "il vecchio lux si archivi e non venga piu' usato"): eco e temi
+# lavorano sul Lux degli engrammi, attraverso il suo servizio (:8132, unico che scrive lo stato), e su bge-m3 (:8094).
 #
-# ECO. Un messaggio scartato che e' "di nuovo la stessa cosa" di un neurone esistente lo
-#   riattiva: la stabilita' cresce (Lux.rinforza) con peso PESO_ECO, traccia e firma restano
-#   ferme. E' il riconoscimento: il quotidiano si stabilizza anche se ogni volta e' banale.
-#   SOGLIA_ECO = 0.85: sulle 169k coppie di ricordi veri (L29-lente, Occamy) e' il quantile che
-#   tiene sotto il 5% la probabilita' di un'eco falsa per messaggio contro 450 neuroni; letto a
-#   mano, sopra 0.85 ci sono ripetizioni vere ("Buongiorno, come stai oggi?" / "Ciao, come stai?").
+# ECO. Un messaggio scartato che e' "di nuovo la stessa cosa" di un ricordo lo riattiva: i suoi archi crescono
+#   (POST /rinforza) con peso PESO_ECO. E' il riconoscimento: il quotidiano si stabilizza anche se ogni volta e' banale.
+#   SOGLIA_ECO = 1.35 sul punteggio del richiamo (POST /richiama: senza predisposizione), stesso criterio del 30/09:
+#   sui 644 ricordi veri, il punteggio massimo di un ricordo contro gli ALTRI supera 1.35 nel 5% dei casi
+#   (taratura_persistenza.py, 01/11: mediana 0.42). Prima 0.85 sul coseno delle tracce L29 del vecchio Lux.
 #   PESO_ECO = 0.5: rivedere passivamente consolida meno che richiamare attivamente
 #   (testing effect, Roediger & Karpicke 2006).
 #
-# ABITUDINI. Un messaggio scartato senza neurone vicino entra in un TEMA candidato (centroide,
-#   firma media, testo piu' centrale, giorni in cui e' apparso, stabilita'). Ogni ritorno in un
-#   giorno vissuto diverso e' un'esposizione: la stabilita' del tema cresce con la stessa
-#   formula FSRS di Lux, con peso PESO_ECO. Quando raggiunge la stabilita' con cui nasce un
-#   episodio emotivamente fortissimo (S_BASE * AROUSAL_MAX) il tema diventa un ricordo: la
-#   frequenza fa le veci dell'intensita'. Un tema che smette di tornare sbiadisce con la stessa
-#   curva dell'oblio e, sotto R_MIN, esce dal buffer.
-#   Niente N e W scelti a mano: numero di ritorni e finestra escono dalla curva dell'oblio.
+# ABITUDINI. Un messaggio scartato senza ricordo vicino entra in un TEMA candidato (centroide bge-m3 del messaggio
+#   intero, firma media, testo piu' centrale, giorni in cui e' apparso, stabilita'). SOGLIA_TEMA = 0.84: coseno bge-m3
+#   con lo stesso criterio (taratura del 01/11, mediana 0.70). Ogni ritorno in un giorno vissuto diverso e'
+#   un'esposizione: la stabilita' del tema cresce con la stessa formula FSRS di Lux, con peso PESO_ECO. Quando
+#   raggiunge la stabilita' con cui nasce un episodio emotivamente fortissimo (S_BASE * AROUSAL_MAX) il tema diventa
+#   un ricordo (fonte "abitudine": lux_engrammi lo fa nascere con S0 >= S_ABITUDINE): la frequenza fa le veci
+#   dell'intensita'. Un tema che smette di tornare sbiadisce con la stessa curva dell'oblio e, sotto
+#   R_RICONOSCIMENTO, esce dal buffer. Niente N e W scelti a mano: numero di ritorni e finestra escono dalla curva.
 import json
+import urllib.request
 from pathlib import Path
 
 import numpy as np
 
-import lux as L
+import lux as L   # solo FSRS e orologio vissuto
 
-SOGLIA_ECO = 0.85
+SOGLIA_ECO = 1.35
+SOGLIA_TEMA = 0.84
 PESO_ECO = 0.5
 S_ABITUDINE = L.S_BASE * L.AROUSAL_MAX
 # un'esposizione casuale non e' un ricordo appreso, ma il riconoscimento di cio' che si e' visto
@@ -36,10 +39,44 @@ S_ABITUDINE = L.S_BASE * L.AROUSAL_MAX
 # Con S = 1.18 un tema che non torna esce in ~15 giorni vissuti (una cosa settimanale regge).
 S_ESPOSIZIONE = 1.18385
 R_RICONOSCIMENTO = 0.5
+SERVIZIO = "http://127.0.0.1:8132"
+EMBEDDER = "http://127.0.0.1:8094/v1/embeddings"
+MAX_CAR = 6000   # bge-m3 (:8094) legge al massimo 2048 token: per riconoscere un tema basta l'inizio
+D_TEMA = 1024
+
+
+def _post(url, corpo, timeout=600):
+    r = urllib.request.Request(url, json.dumps(corpo).encode(), {"Content-Type": "application/json"})
+    with urllib.request.urlopen(r, timeout=timeout) as f:
+        return json.load(f)
+
+
+def vettore(testi):
+    """bge-m3 dei messaggi interi (primi MAX_CAR caratteri), unitari"""
+    out = []
+    for i in range(0, len(testi), 64):
+        out += [d["embedding"] for d in _post(EMBEDDER, {"input": [t[:MAX_CAR] for t in testi[i:i + 64]]})["data"]]
+    v = np.asarray(out, np.float32).reshape(-1, D_TEMA)
+    return v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-9)
+
+
+def richiama(testo):
+    """(ricordo, punteggio) del ricordo piu' vicino nel Lux degli engrammi, o None"""
+    r = _post(f"{SERVIZIO}/richiama", {"testo": testo, "quanti": 1})["ricordi"]
+    return (int(r[0][0]), float(r[0][1])) if r else None
+
+
+def rinforza(nid, peso):
+    return _post(f"{SERVIZIO}/rinforza", {"nid": int(nid), "peso": peso})["rinforzato"]
 
 
 def _file_temi():
-    return L.FILE.parent / "temi-candidati.npz"
+    return L.FILE.parent / "temi-engrammi.npz"   # accanto a tempo-vissuto.json (anche nei test)
+
+
+def _media(a, b, n):
+    """firma media (dict) dopo n esposizioni: a e' la media delle n-1 precedenti"""
+    return {e: round((a.get(e, 0.0) * (n - 1) + b.get(e, 0.0)) / n, 3) for e in a.keys() | b.keys()}
 
 
 class Temi:
@@ -50,7 +87,7 @@ class Temi:
         if f.exists():
             z = np.load(f, allow_pickle=False)
             self.centri = z["centri"].astype(np.float32)
-            self.firme = z["firme"]
+            self.firme = [json.loads(x) for x in z["firme"]]
             self.n = z["n"]
             self.giorni = [json.loads(x) for x in z["giorni"]]
             self.stab = z["stab"]
@@ -58,47 +95,44 @@ class Temi:
             self.testi = [str(x) for x in z["testi"]]
             self.ts = z["ts"]
             self.dist = z["dist"]           # distanza del testo rappresentante dal centro
-            self.rappr = z["rappr"].astype(np.float32)   # stato grezzo del rappresentante (per il nodo)
         else:
-            self.centri = np.zeros((0, L.D_TRACCIA), np.float32)
-            self.firme = np.zeros((0, 51), np.float32)
+            self.centri = np.zeros((0, D_TEMA), np.float32)
+            self.firme, self.giorni, self.testi = [], [], []
             self.n = np.zeros(0, np.int32)
-            self.giorni, self.testi = [], []
             self.stab = np.zeros(0, np.float32)
             self.ultimo = np.zeros(0, np.float64)
             self.ts = np.zeros(0, np.float64)
             self.dist = np.zeros(0, np.float32)
-            self.rappr = np.zeros((0, L.D_TRACCIA), np.float32)
 
     def salva(self):
         tmp = _file_temi().with_suffix(".tmp.npz")
-        np.savez_compressed(tmp, centri=self.centri.astype(np.float16), firme=self.firme, n=self.n,
-                            giorni=np.array([json.dumps(g) for g in self.giorni]),
-                            stab=self.stab, ultimo=self.ultimo, testi=np.array(self.testi),
-                            ts=self.ts, dist=self.dist, rappr=self.rappr.astype(np.float16))
+        np.savez_compressed(tmp, centri=self.centri.astype(np.float16),
+                            firme=np.array([json.dumps(f) for f in self.firme], dtype=str), n=self.n,
+                            giorni=np.array([json.dumps(g) for g in self.giorni], dtype=str),
+                            stab=self.stab, ultimo=self.ultimo, testi=np.array(self.testi, dtype=str),
+                            ts=self.ts, dist=self.dist)
         tmp.replace(_file_temi())
 
     def _tieni(self, keep):
-        for a in ("centri", "firme", "n", "stab", "ultimo", "ts", "dist", "rappr"):
+        for a in ("centri", "n", "stab", "ultimo", "ts", "dist"):
             setattr(self, a, getattr(self, a)[keep])
-        self.giorni = [g for g, k in zip(self.giorni, keep) if k]
-        self.testi = [t for t, k in zip(self.testi, keep) if k]
+        for a in ("firme", "giorni", "testi"):
+            setattr(self, a, [x for x, k in zip(getattr(self, a), keep) if k])
 
-    def esponi(self, t, stato, firma, testo, ts, oggi):
-        """t: traccia codificata (Lux.encode), stato: lo stesso grezzo. Ritorna l'indice del tema."""
+    def esponi(self, t, firma, testo, ts, oggi):
+        """t: vettore bge-m3 unitario del messaggio, firma: dict {emozione: z}. Ritorna l'indice del tema."""
         if len(self.centri):
             sims = self.centri @ t
             i = int(sims.argmax())
-            if sims[i] >= SOGLIA_ECO:
+            if sims[i] >= SOGLIA_TEMA:
                 n = int(self.n[i]) + 1
                 c = self.centri[i] * (n - 1) / n + t / n
                 self.centri[i] = c / (np.linalg.norm(c) + 1e-9)
-                self.firme[i] = self.firme[i] * (n - 1) / n + firma / n
+                self.firme[i] = _media(self.firme[i], firma, n)
                 self.n[i] = n
                 d = 1 - float(self.centri[i] @ t)
                 if d < self.dist[i]:          # rappresentante = il messaggio vero piu' centrale
                     self.testi[i], self.ts[i], self.dist[i] = testo, ts, d
-                    self.rappr[i] = stato
                 if oggi not in self.giorni[i]:  # esposizione in un giorno vissuto NUOVO
                     r = L.curva(oggi - float(self.ultimo[i]), float(self.stab[i]))
                     self.stab[i] = L.cresci(float(self.stab[i]), r, PESO_ECO)
@@ -106,7 +140,7 @@ class Temi:
                     self.ultimo[i] = oggi
                 return i
         self.centri = np.vstack([self.centri, t[None].astype(np.float32)])
-        self.firme = np.vstack([self.firme, np.asarray(firma, np.float32)[None]])
+        self.firme.append(dict(firma))
         self.n = np.append(self.n, np.int32(1))
         self.giorni.append([oggi])
         self.stab = np.append(self.stab, np.float32(S_ESPOSIZIONE))
@@ -114,7 +148,6 @@ class Temi:
         self.testi.append(testo)
         self.ts = np.append(self.ts, float(ts))
         self.dist = np.append(self.dist, np.float32(0))
-        self.rappr = np.vstack([self.rappr, np.asarray(stato, np.float32)[None]])
         return len(self.centri) - 1
 
     def maturi(self):
@@ -127,111 +160,51 @@ class Temi:
         return int((~keep).sum())
 
 
-def notte(organo, scartati, oggi=None, promuovi=None):
-    """scartati: [(stato 2048 grezzo, firma 51 (z), testo, ts)] dei messaggi 'vissuti' sotto soglia.
-    promuovi(testo, firma, stato grezzo, ts, giorni) -> nodo_id: crea il nodo nel grafo (lo passa il
-    tagger, che conosce memoria.py e le alpha); None = nessuna promozione (collaudi).
-    Salva Lux e il buffer, ritorna il resoconto."""
+def notte(scartati, oggi=None, promuovi=None):
+    """scartati: [(testo, firma dict {emozione: z}, ts)] dei messaggi 'vissuti' sotto soglia.
+    promuovi(testo, firma, vettore bge-m3, ts, giorni) -> nodo_id: crea il nodo in memoria.db (lo passa il tagger,
+    che conosce memoria.py); il ricordo entra nel Lux degli engrammi con `lux_engrammi.py aggiungi`, nella notturna.
+    None = nessuna promozione (collaudi). Servizio del Lux giu' = eccezione: il buffer non si salva, eco e temi
+    saltano una notte. Salva il buffer, ritorna il resoconto."""
     oggi = L.orologio() if oggi is None else oggi
     temi = Temi()
     eco_per = {}
     nuovi_temi = 0
-    for stato, firma, testo, ts in scartati:
-        t = organo.encode(stato)        # stati gia' passati dalla guardia del tagger
-        if len(organo.tracce):
-            sims = organo.tracce @ t
-            i = int(sims.argmax())
-            if sims[i] >= SOGLIA_ECO:
-                if i not in eco_per:            # al massimo un'eco per neurone per notte
-                    organo.rinforza(i, peso=PESO_ECO, oggi=oggi)
-                    organo.echi[i] += 1
-                eco_per[i] = eco_per.get(i, 0) + 1
-                continue
+    vettori = vettore([t for t, _, _ in scartati]) if scartati else np.zeros((0, D_TEMA), np.float32)
+    for (testo, firma, ts), t in zip(scartati, vettori):
+        r = richiama(testo)
+        if r and r[1] >= SOGLIA_ECO:
+            if r[0] not in eco_per:            # al massimo un'eco per ricordo per notte
+                rinforza(r[0], PESO_ECO)
+            eco_per[r[0]] = eco_per.get(r[0], 0) + 1
+            continue
         prima = len(temi.centri)
-        temi.esponi(t, np.asarray(stato, np.float32), np.asarray(firma, np.float32), testo, ts, oggi)
+        temi.esponi(t, firma, testo, ts, oggi)
         nuovi_temi += len(temi.centri) > prima
     promossi = []
     maturi = temi.maturi() if promuovi else []
     for i in maturi:
-        nid = promuovi(temi.testi[i], temi.firme[i], temi.rappr[i], float(temi.ts[i]), temi.giorni[i])
-        j, _ = organo.esperisci(temi.rappr[i], temi.firme[i], nodo_id=nid)
-        organo.stabilita[j] = max(float(organo.stabilita[j]), float(temi.stab[i]))
-        organo.ultimo_vissuto[j] = float(oggi)
+        nid = promuovi(temi.testi[i], temi.firme[i], temi.centri[i], float(temi.ts[i]), temi.giorni[i])
         promossi.append((temi.testi[i], nid))
     temi._tieni(~np.isin(np.arange(len(temi.centri)), maturi))
     dimenticati = temi.dimentica(oggi)
-    potati = organo.pota(oggi)
-    organo.salva()
     temi.salva()
-    return {"eco": sum(eco_per.values()), "neuroni_eco": len(eco_per),
+    return {"eco": sum(eco_per.values()), "ricordi_eco": len(eco_per),
             "temi_nuovi": nuovi_temi, "temi": len(temi.centri), "promossi": promossi,
-            "temi_dimenticati": dimenticati, "potati": potati}
+            "temi_dimenticati": dimenticati}
 
 
-if __name__ == "__main__":
-    # collaudo su una Lux sintetica in una cartella temporanea (mai la produzione)
-    import tempfile
-    _td = tempfile.TemporaryDirectory()
-    L.FILE = Path(_td.name) / "lux.npz"
-    L.META = Path(_td.name) / "lux-meta.json"
-    rng = np.random.default_rng(3)
-    D = L.D_TRACCIA
-
-    def vicino(b, rumore=0.02):
-        return b + rumore * rng.normal(size=D).astype(np.float32) * np.linalg.norm(b) / np.sqrt(D)
-
-    g = L.Lux()
-    base_a, base_h, base_x = (rng.normal(size=D).astype(np.float32) for _ in range(3))
-    firma = np.zeros(51, np.float32)
-    firma[0] = 2.5
-    g.esperisci(base_a, firma, nodo_id=1)
-    traccia_a = g.tracce[0].copy()
-    s0 = float(g.stabilita[0])
-    # 1. ECO: tre ripetizioni di A nella stessa notte -> una sola crescita, traccia ferma
-    r = notte(g, [(vicino(base_a), firma, "ciao, come stai?", 1.0)] * 3, oggi=0)
-    assert r["eco"] == 3 and r["neuroni_eco"] == 1, r
-    assert abs(float(g.stabilita[0]) - s0) < 1e-6, "stesso giorno: nessuna crescita"
-    assert np.allclose(g.tracce[0], traccia_a), "l'eco non deve spostare la traccia"
-    # ...e a giorni distanziati la stabilita' cresce, meno di un richiamo vero (PESO_ECO)
-    g2 = L.Lux()
-    for giorno in (5, 12, 20):
-        notte(g2, [(vicino(base_a), firma, "ciao, come stai?", 2.0)], oggi=giorno)
-    s_eco = float(L.Lux().stabilita[0])
-    assert s_eco > s0 * 2, (s0, s_eco)
-    # 2. ABITUDINE: un tema nuovo che torna in giorni diversi diventa un ricordo
-    creati = []
-
-    def promuovi(testo, firma_, stato, ts, giorni):
-        creati.append((testo, sorted(giorni)))
-        return 100 + len(creati)
-
-    giorni_serviti = None
-    for giorno in range(21, 21 + 60, 2):          # un giorno si', uno no
-        rr = notte(L.Lux(), [(vicino(base_h), firma * 0.3, f"faccio la spesa ({giorno})", float(giorno))],
-                   oggi=giorno, promuovi=promuovi)
-        if rr["promossi"]:
-            giorni_serviti = (giorno - 21) // 2 + 1
-            break
-    assert giorni_serviti and creati and creati[0][0].startswith("faccio la spesa"), creati
-    gg = L.Lux()
-    assert len(gg.tracce) == 2 and float(gg.stabilita[1]) >= S_ABITUDINE, (len(gg.tracce), gg.stabilita)
-    assert len(Temi().centri) == 0, "il tema promosso esce dal buffer"
-    # 2b. anche una cosa SETTIMANALE diventa abitudine (piu' lentamente)
-    base_w = rng.normal(size=D).astype(np.float32)
-    settimane = None
-    for k, giorno in enumerate(range(200, 200 + 7 * 20, 7)):
-        rr = notte(L.Lux(), [(vicino(base_w), firma * 0.3, "pranzo della domenica", float(giorno))],
-                   oggi=giorno, promuovi=promuovi)
-        if rr["promossi"]:
-            settimane = k + 1
-            break
-    assert settimane, "il settimanale non diventa mai abitudine"
-    # 3. un tema visto una volta sola non diventa abitudine e prima o poi si dimentica
-    notte(L.Lux(), [(vicino(base_x), firma * 0.3, "una volta sola", 99.0)], oggi=500)
-    assert len(Temi().centri) == 1
-    giorni_oblio = int(np.ceil(S_ESPOSIZIONE * (R_RICONOSCIMENTO ** (1 / L.DECAY) - 1) / L.F_CURVA)) + 1
-    rr = notte(L.Lux(), [], oggi=500 + giorni_oblio)
-    assert rr["temi_dimenticati"] == 1 and len(Temi().centri) == 0, rr
-    print(f"collaudo persistenza OK: eco ammassate 1 crescita e traccia ferma; eco distanziate S {s0:.1f}->{s_eco:.1f}; "
-          f"abitudine promossa dopo {giorni_serviti} ritorni a giorni alterni, settimanale dopo {settimane} settimane; "
-          f"tema isolato dimenticato dopo {giorni_oblio} giorni vissuti")
+def migra(vecchio):
+    """B5, una volta: i temi del vecchio buffer (spazio L29 del vecchio Lux) -> temi-engrammi.npz. Centro = bge-m3 del
+    testo rappresentante; firma, n, giorni, stabilita', ultimo giorno e ts restano"""
+    z = np.load(vecchio, allow_pickle=False)
+    emos = sorted(json.load(open("/data/memoria-episodica-affettiva/emozioni.json")), key=lambda e: e["en"])
+    t = Temi.__new__(Temi)
+    t.testi = [str(x) for x in z["testi"]]
+    t.centri = vettore(t.testi)
+    t.firme = [{e["en"]: round(float(x), 3) for e, x in zip(emos, f)} for f in z["firme"]]   # ordine sorted del tagger
+    t.n, t.stab, t.ultimo, t.ts = z["n"], z["stab"], z["ultimo"], z["ts"]
+    t.giorni = [json.loads(x) for x in z["giorni"]]
+    t.dist = 1 - np.einsum("ij,ij->i", t.centri, t.centri)   # il centro e' il rappresentante
+    t.salva()
+    return len(t.testi)

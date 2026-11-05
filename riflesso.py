@@ -30,12 +30,17 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ponte  # noqa: E402  (unica porta verso :8090)
+from codice_ricordo import codice as _codice  # noqa: E402  (B7, P4: lo stesso di lux_engrammi)
 
 UPSTREAM = ("127.0.0.1", 8090)
 PORTA = 8091
 CONSENSO = Path(os.environ.get("RIFLESSO_CONSENSO",
     "/data/workspace/genesi/CONSENSO-RIFLESSO.md"))
 DIARIO = "/data/workspace/memoria/diario-riflessi.jsonl"
+# B6 (31/10, engrammi/PIANO-FIRMA-ENGRAMMI.md): i messaggi del turno chiuso vanno a firma-subito, il ricordo
+# nasce subito e non piu' nella notturna
+CODA_FIRMA = os.environ.get("CODA_FIRMA", "/data/workspace/memoria/coda-firma.jsonl")
+_HANDLE = re.compile(r"^\[([a-z0-9_]+)\]\s?(.*)$", re.DOTALL)   # come estrai-matrix: solo handle veri (minuscoli)
 # 25/07, scelta di progetto: la destinazione delle riflessioni è UNA SOLA e l'agente la
 # deve sapere sempre, non cercarla. La cartella è sua dal 20/07, ma il 25/07 due
 # riflessioni sono finite fuori (ricordi/ alle 08:06, memoria/pensatoio.md alle
@@ -66,7 +71,7 @@ _vettore_lock = threading.Lock()
 # torna alla dose a cui era arrivato e la discesa riprende da li': il tempo della
 # discesa scorre solo mentre la cache del flusso sta nello slot. Piu' vettori
 # attivi si SOMMANO (l'utente 18/10, test multivettore); come sommarli e la curva
-# della discesa sono della fase 2 (PIANO-1.11-FASI-2-3.md, punto 7).
+# della discesa sono della fase 2 (PIANO-LUX-FASI-v1.12.md, punto 7).
 DURATA_S = 0    # fase 2: durata = permanenza x dose x importanza; 0 = muore col prefill, come oggi
 _vettori = {"chat": [], "pensatoio": []}   # flusso -> [{emo, dose, nato, durata}]
 _vissuto = {"chat": 0.0, "pensatoio": 0.0}  # secondi passati con la cache nello slot
@@ -278,7 +283,7 @@ def _salva_kv():
         pass    # lo specchio non deve MAI rompere la chat
 
 
-# --- riepilogo a catena di montaggio (l'utente 20/10, PIANO-RIEPILOGO-KV.md): dopo ogni risposta a l'utente,
+# --- riepilogo a catena di montaggio (l'utente 20/10, PIANO-RIEPILOGO-KV.md): dopo ogni risposta all'utente,
 # l'agente scrive il succo dello scambio in una riga; le righe si accodano in una CW a parte (riepilogo.kv) e alla
 # dormita diventano il blocco in testa alla chat nuova. Solo la chat, mai il pensatoio (20/10).
 RIEPILOGO = Path("/data/memoria-episodica-affettiva/riepilogo.json")
@@ -549,14 +554,19 @@ def _emo_del_ricordo(codice):
     return None, None, 1.0
 
 
-def _codice(ts):
-    """stessa funzione di lux_engrammi.codice (11/10): SHA-256 del timestamp,
-    16 caratteri [0-9a-z]; qui per non tirarsi dietro spaCy"""
-    n, s = int(hashlib.sha256(repr(ts).encode()).hexdigest(), 16), ""
-    for _ in range(16):
-        n, r = divmod(n, 36)
-        s += "0123456789abcdefghijklmnopqrstuvwxyz"[r]
-    return s
+def _sam_accesa(dove=UPSTREAM):
+    """25/10: col 35B spento nessun ricordo, ne' consegnato ne' rinforzato nel Lux. I cron di Hermes
+    partono lo stesso e senza questo freno il riflesso registrava consegne che la barra mostrava in chat"""
+    up = http.client.HTTPConnection(*dove, timeout=3)
+    try:
+        up.request("GET", "/health")
+        r = up.getresponse()
+        r.read()
+        return r.status == 200
+    except OSError:
+        return False
+    finally:
+        up.close()
 
 
 def _lux_consegna(testo, esclusi):
@@ -591,6 +601,20 @@ def _segna_volo():
         Path(VOLO).write_text(str(_chat_in_volo[0]))
     except OSError:
         pass
+
+
+def _segna_fase(f):
+    """24/10: cosa sta facendo l'agente (legge, pensa, scrive, tool; vuoto = ferma), per l'emoji nel suo nome
+    in chat (~/.local/bin/barra-prefill). Si scrive solo quando cambia"""
+    with _fase_lock:
+        if f == _fase[0]:
+            return
+        try:
+            Path(FASE + ".tmp").write_text(f)
+            os.replace(FASE + ".tmp", FASE)
+            _fase[0] = f
+        except OSError:
+            pass
 
 
 def _code(body, testi):
@@ -757,6 +781,31 @@ def _applica_flusso(fl):
     watchdog = threading.Timer(DURATA_MAX_S, _scaduto)   # PATTO clausola 2, come per il prefill
     watchdog.daemon = True
     watchdog.start()
+
+
+def _accoda_firma(flusso, ultimo, arrivo, esito):
+    """B6: solo le risposte finali. Chat: il messaggio dell'utente com'era prima delle aggiunte del riflesso (ora, coda)
+    e la risposta dell'agente; un ultimo user senza "[handle] " e' Hermes (background review, memory flush): niente.
+    Pensatoio: la risposta dell'agente. Una sola write in append: righe intere anche con la notturna che accoda"""
+    if not esito or esito.get("finish") != "stop" or esito.get("tool_calls"):
+        return
+    risposta = (esito.get("testo") or "").strip()
+    righe = []
+    if flusso == "chat":
+        m = _HANDLE.match(ultimo.strip()) if isinstance(ultimo, str) else None
+        if not m or not m.group(2).strip():
+            return
+        righe.append({"ts": arrivo, "autore": f"@{m.group(1)}:localhost", "testo": m.group(2).strip()})
+    elif flusso != "pensatoio":
+        return
+    if risposta and not risposta.startswith("[OUT-OF-BAND]"):   # orchestrazione, non esperienza (estrai-matrix)
+        righe.append({"ts": time.time(), "autore": "@agente:localhost", "testo": risposta})
+    if righe:
+        fd = os.open(CODA_FIRMA, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in righe).encode())
+        finally:
+            os.close(fd)
 
 
 def _diario(voce):
@@ -941,6 +990,9 @@ def query_riflesso(testo):
 
 STREAM_LIVE = "/tmp/stream-live.log"
 VOLO = "/tmp/chat-in-volo"
+FASE = "/tmp/fase"
+_fase = [None]
+_fase_lock = threading.Lock()
 
 
 def _tee_sse(buf, chunk, fh, esito):
@@ -964,6 +1016,13 @@ def _tee_sse(buf, chunk, fh, esito):
                     esito["ragionamento"] += delta.get("reasoning_content") or ""
                     esito["tool_calls"] = esito["tool_calls"] or bool(delta.get("tool_calls"))
                     esito["finish"] = d["choices"][0].get("finish_reason") or esito["finish"]
+                    if esito["chat"]:
+                        if delta.get("tool_calls"):
+                            _segna_fase("tool")
+                        elif delta.get("reasoning_content"):
+                            _segna_fase("pensa")
+                        elif delta.get("content"):
+                            _segna_fase("scrive")
                 else:
                     t = d.get("content", "")
                 if t and fh:
@@ -994,7 +1053,8 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 _punto[flusso] = _orologio(flusso)
         sock = up.sock
         resp = None
-        self._inoltrato, self._esito = body, {"testo": "", "ragionamento": "", "finish": None, "tool_calls": False}
+        self._inoltrato, self._esito = body, {"testo": "", "ragionamento": "", "finish": None, "tool_calls": False,
+                                               "chat": flusso == "chat"}
         try:
             up.putrequest(self.command, self.path)
             for k, v in self.headers.items():
@@ -1052,7 +1112,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             self._salva.start()
 
     def _dopo_chat(self):
-        """20/10: dopo la risposta finale a l'utente il riepilogo, quando lo specchio della chat e' gia' salvato
+        """20/10: dopo la risposta finale all'utente il riepilogo, quando lo specchio della chat e' gia' salvato
         (cosi' il conteggio dei token resta quello della chat)"""
         corpo, esito, salva = self._inoltrato, self._esito, self._salva
         if not esito or not _deve_riassumere(corpo, esito):
@@ -1074,7 +1134,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         NON DISATTIVABILE, decisione di progetto), ma niente entra nel prompt."""
         d = json.loads(body)
         msgs = d.get("messages", [])
-        if not msgs:
+        if not msgs or not _sam_accesa():
             return body
         attivo = consenso_attivo()
         stop = _stop_chiesto(msgs)   # prima di _rimetti: stessa finestra del controllo in do_POST
@@ -1129,12 +1189,14 @@ class Proxy(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self._inoltrato = self._esito = self._salva = None   # la connessione keep-alive serve piu' richieste
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        arrivo, ultimo = time.time(), None   # B6: il messaggio dell'utente prima di ora e coda
         chat = self.path.split("?")[0].endswith("/chat/completions")   # issue #3 punto E
         # PATTO clausola 3: la parola scritta dall'agente spegne il vettore, prima
         # di qualunque altra cosa e senza chiedere perché.
         if chat:
             try:
                 d0 = json.loads(body)
+                ultimo = next((m.get("content") for m in reversed(d0.get("messages", [])) if m.get("role") == "user"), None)
                 if _stop_chiesto(d0.get("messages", [])):
                     _azzera_vettori()   # issue #3 punto A: anche quelli in pausa con l'altra cache
                     calma()
@@ -1159,10 +1221,13 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         if flusso == "chat":
             _chat_in_volo[0] += 1     # fino a fine risposta: il pensatoio non prende lo slot
             _segna_volo()
+            _segna_fase("legge")
         try:
             self._post_chat(body, chat, flusso)
         finally:
             if flusso == "chat":
+                if _chat_in_volo[0] <= 1:   # un'altra richiesta della chat in volo ha la sua fase
+                    _segna_fase("tool" if self._esito and self._esito["finish"] == "tool_calls" else "")
                 _chat_in_volo[0] -= 1
                 _chat_calda[0] = time.time()
                 _segna_volo()
@@ -1170,6 +1235,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     self._dopo_chat()
                 except Exception as e:
                     _diario({"riepilogo": f"non avviato: {e}"})
+            try:
+                _accoda_firma(flusso, ultimo, arrivo, self._esito)
+            except Exception as e:
+                _diario({"firma": f"coda non scritta: {e}"})   # mai toccare la parola dell'agente
 
     def _post_chat(self, body, chat, flusso):
         if chat:
@@ -1256,6 +1325,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    _segna_fase("")   # una fase rimasta da un riflesso morto a meta' risposta non resta accesa
     # igiene all'avvio: qualunque vettore orfano di run precedenti muore qui
     try:
         calma()

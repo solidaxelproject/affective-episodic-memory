@@ -1,43 +1,55 @@
-# Richiami del giorno -> Lux (30/09, PIANO-PERSISTENZA-LUX.md, fase 1, punto F).
-# I richiami della vita quotidiana passano dal GRAFO (riflesso.richiama, runtime/ricorda.py),
-# non da Lux: senza questo passaggio nessun ricordo richiamato di giorno stabilizzerebbe il suo
-# neurone, e l'oblio di Lux vedrebbe solo il tagging. Qui ogni richiamo del giorno diventa una
-# riattivazione vissuta del neurone che contiene quel nodo (mappa nodo -> neurone di lux-meta.json):
-# attivazioni +1, ultimo_uso = ora del richiamo, rinforza() (stabilita' secondo la spaziatura).
-# Fonti: diario-richiami.jsonl (ricorda.py, campo "risultati") e diario-riflessi.jsonl (riflesso,
-# campo "nid", scritto dal 30/09; le righe piu' vecchie hanno solo il testo e si saltano).
-# Un marcatore evita di contare due volte lo stesso richiamo. Primo giro senza marcatore: si parte
-# da ADESSO (la storia di luglio e' gia' dentro le attivazioni e nella stabilita' iniziale).
+# Richiami del giorno -> Lux degli engrammi (30/09, PIANO-PERSISTENZA-LUX.md, fase 1, punto F; B5 del 01/11,
+# PIANO-FIRMA-ENGRAMMI.md: il vecchio Lux e' in archivio).
+# I richiami che l'agente fa da sola con ricorda.py passano dal GRAFO, non dal Lux: senza questo passaggio nessuno di
+# quei ricordi stabilizzerebbe i suoi archi. Qui ogni ricordo richiamato nel giorno diventa un rinforzo vissuto di
+# tutti i suoi archi (POST /rinforza del servizio del Lux, peso 1: il servizio resta l'unico che scrive lo stato).
+# Fonte: diario-richiami.jsonl (ricorda.py, campo "risultati"). I ricordi consegnati dal riflesso NO: li rinforza
+# gia' la consegna (/consegna), e un secondo rinforzo nello stesso giorno vissuto non cresce.
+# Un marcatore evita di contare due volte lo stesso richiamo; avanza solo a lavoro finito (servizio giu' = errore,
+# la notte dopo rimedia; un ripasso nello stesso giorno vissuto non cresce comunque). Primo giro senza marcatore:
+# si parte da ADESSO.
 # Uso (notte-memoria.sh, PRIMA del tagging): venv/bin/python sincronizza-richiami.py [--dry]
 import argparse
 import json
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, "/data/memoria-episodica-affettiva")
-import lux as L  # noqa: E402
-
 MEM = Path("/data/workspace/memoria")
-DIARI = ((MEM / "diario-richiami.jsonl", "risultati"), (MEM / "diario-riflessi.jsonl", "nid"))
+DIARIO = MEM / "diario-richiami.jsonl"
 MARCATORE = MEM / ".ultima-sincronia-richiami"
+SERVIZIO = "http://127.0.0.1:8132"
 
 
 def richiami_dal(t0):
-    """[(ts, [nodi])] di tutti i diari dopo t0, in ordine di tempo"""
+    """[(ts, [nodi])] del diario dopo t0, in ordine di tempo"""
     out = []
-    for path, campo in DIARI:
-        if not path.exists():
+    if not DIARIO.exists():
+        return out
+    for riga in open(DIARIO, encoding="utf-8"):
+        try:
+            d = json.loads(riga)
+        except ValueError:
             continue
-        for riga in open(path, encoding="utf-8"):
-            try:
-                d = json.loads(riga)
-            except ValueError:
-                continue
-            nodi = d.get(campo)
-            if d.get("ts", 0) > t0 and isinstance(nodi, list) and nodi:
-                out.append((float(d["ts"]), [int(n) for n in nodi]))
+        nodi = d.get("risultati")
+        if d.get("ts", 0) > t0 and isinstance(nodi, list) and nodi:
+            out.append((float(d["ts"]), [int(n) for n in nodi]))
     return sorted(out)
+
+
+def rinforza(nid):
+    """True rinforzato, False corretto (non si rinforza), None non e' nel Lux; servizio giu' = eccezione"""
+    r = urllib.request.Request(f"{SERVIZIO}/rinforza", json.dumps({"nid": nid, "peso": 1.0}).encode(),
+                               {"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(r, timeout=60) as f:
+            return json.load(f)["rinforzato"]
+    except urllib.error.HTTPError as e:
+        if e.code == 400:
+            return None
+        raise
 
 
 def main():
@@ -51,38 +63,24 @@ def main():
         t0 = adesso
         print("primo giro: nessun marcatore, parto da adesso")
     eventi = richiami_dal(t0)
-    g = L.Lux()
-    neurone_di = {}
-    for uid, nodi in g.nodi.items():
-        for n in nodi:
-            neurone_di[int(n)] = uid
-    riga = {str(u): i for i, u in enumerate(g.ids)}
-    toccati, senza = {}, 0
-    for ts, nodi in eventi:
+    conta = {}
+    for _, nodi in eventi:
         for n in set(nodi):
-            uid = neurone_di.get(n)
-            if uid is None or uid not in riga:
-                senza += 1          # nodo "letto" o mai entrato in Lux
-                continue
-            i = riga[uid]
-            g.attivazioni[i] += 1
-            g.ultimo_uso[i] = max(g.ultimo_uso[i], ts)
-            toccati[i] = toccati.get(i, 0) + 1
-    s_prima = {i: float(g.stabilita[i]) for i in toccati}
-    for i in toccati:               # una riattivazione vissuta per neurone per notte
-        g.rinforza(i)
+            conta[n] = conta.get(n, 0) + 1
     print(f"richiami dal {time.strftime('%d/%m %H:%M', time.localtime(t0))}: {len(eventi)} eventi, "
-          f"{len(toccati)} neuroni rinforzati, {senza} nodi senza neurone")
-    for i in sorted(toccati, key=lambda j: -toccati[j])[:10]:
-        print(f"  neurone {g.ids[i]}: {toccati[i]} richiami, S {s_prima[i]:.1f} -> {g.stabilita[i]:.1f}")
+          f"{len(conta)} ricordi")
     if a.dry:
+        for n in sorted(conta, key=lambda k: -conta[k])[:10]:
+            print(f"  ricordo {n}: {conta[n]} richiami")
         print("DRY: niente scritto")
         return
-    if toccati:
-        g.salva()
+    esiti = {True: 0, False: 0, None: 0}
+    for n in sorted(conta):            # un rinforzo vissuto per ricordo per notte
+        esiti[rinforza(n)] += 1
+    print(f"{esiti[True]} ricordi rinforzati, {esiti[False]} corretti (non si rinforzano), {esiti[None]} non nel Lux")
     MARCATORE.write_text(f"{adesso}\n")
     print("SINCRONIA-COMPLETA")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -9,7 +9,7 @@ memoria.consolida_notte() -> lux_engrammi.py aggiungi.
 - Le funzioni attuali (fusione in schemi `lux.consolida()`, potatura `lux.pota()`, `memoria.consolida_notte()`)
   potrebbero non essere coerenti col funzionamento della memoria umana e andare deprecate. Per ora restano.
 
-## Da aggiungere (fase 2 della 1.11, PIANO-1.11-FASI-2-3.md)
+## Da aggiungere (fase 2 della 1.11, PIANO-LUX-FASI-v1.12.md)
 1. ~~Frequenza di richiamo~~ TOLTA (l'utente 17/10, doppione di R). Resta per ricordo l'**ultimo richiamo**
    `[g/m/aaaa|h:mm]`, scritto alla consegna (non di notte).
 2. **Sbiadimento per arco** (`sbiadisci`, dopo `aggiungi`): carica_domani = carica_oggi x (1 - sbiadimento x freno),

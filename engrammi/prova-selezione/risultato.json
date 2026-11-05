@@ -1,0 +1,197 @@
+{
+ "messaggi": 1583,
+ "esiti": {
+  "nodo": 617,
+  "trascinato": 574,
+  "corto": 75,
+  "scartato": 312,
+  "doppione": 5
+ },
+ "firmati": 1503,
+ "quota_nodi": 0.41051230871590155,
+ "quota_ricordi": 0.7924151696606786,
+ "forzati": 18,
+ "durata_s": 7128.511584997177,
+ "s_a_firma": 4.742855345972839,
+ "per_giorno": {
+  "2026-06-24": {
+   "nodo": 4,
+   "trascinato": 1
+  },
+  "2026-06-25": {
+   "corto": 2,
+   "nodo": 7,
+   "trascinato": 1,
+   "scartato": 5
+  },
+  "2026-06-26": {
+   "corto": 8,
+   "nodo": 29,
+   "trascinato": 21,
+   "scartato": 15
+  },
+  "2026-06-27": {
+   "scartato": 16,
+   "nodo": 7
+  },
+  "2026-06-28": {
+   "corto": 2,
+   "nodo": 5,
+   "trascinato": 2
+  },
+  "2026-06-29": {
+   "trascinato": 1,
+   "nodo": 20,
+   "corto": 3,
+   "scartato": 27
+  },
+  "2026-06-30": {
+   "nodo": 13,
+   "scartato": 5,
+   "corto": 2,
+   "trascinato": 5
+  },
+  "2026-07-01": {
+   "corto": 3,
+   "scartato": 4,
+   "nodo": 1
+  },
+  "2026-07-03": {
+   "corto": 2,
+   "nodo": 1
+  },
+  "2026-07-05": {
+   "nodo": 17,
+   "trascinato": 23,
+   "corto": 1
+  },
+  "2026-07-06": {
+   "corto": 7,
+   "nodo": 27,
+   "trascinato": 27,
+   "scartato": 3
+  },
+  "2026-07-09": {
+   "nodo": 17,
+   "trascinato": 19,
+   "corto": 4,
+   "scartato": 13
+  },
+  "2026-07-10": {
+   "nodo": 20,
+   "corto": 4,
+   "trascinato": 9,
+   "scartato": 14
+  },
+  "2026-07-11": {
+   "corto": 6,
+   "nodo": 50,
+   "trascinato": 59,
+   "scartato": 12,
+   "doppione": 2
+  },
+  "2026-07-12": {
+   "nodo": 50,
+   "trascinato": 61,
+   "scartato": 16,
+   "corto": 4,
+   "doppione": 1
+  },
+  "2026-07-13": {
+   "trascinato": 9,
+   "nodo": 12,
+   "corto": 1,
+   "scartato": 4
+  },
+  "2026-07-14": {
+   "trascinato": 31,
+   "corto": 3,
+   "nodo": 22
+  },
+  "2026-07-15": {
+   "nodo": 22,
+   "scartato": 20,
+   "corto": 3,
+   "doppione": 1,
+   "trascinato": 8
+  },
+  "2026-07-16": {
+   "nodo": 2,
+   "corto": 1,
+   "trascinato": 1
+  },
+  "2026-07-17": {
+   "trascinato": 40,
+   "nodo": 26,
+   "scartato": 7
+  },
+  "2026-07-18": {
+   "scartato": 39,
+   "nodo": 27,
+   "trascinato": 15,
+   "corto": 1
+  },
+  "2026-07-19": {
+   "nodo": 45,
+   "corto": 6,
+   "scartato": 9,
+   "doppione": 1,
+   "trascinato": 58
+  },
+  "2026-07-20": {
+   "scartato": 14,
+   "trascinato": 22,
+   "nodo": 22,
+   "corto": 2
+  },
+  "2026-07-21": {
+   "trascinato": 13,
+   "nodo": 10,
+   "scartato": 7,
+   "corto": 1
+  },
+  "2026-07-22": {
+   "scartato": 31,
+   "nodo": 32,
+   "trascinato": 25,
+   "corto": 3
+  },
+  "2026-07-23": {
+   "scartato": 15,
+   "nodo": 51,
+   "trascinato": 39,
+   "corto": 3
+  },
+  "2026-07-24": {
+   "trascinato": 26,
+   "nodo": 21,
+   "scartato": 11
+  },
+  "2026-07-25": {
+   "scartato": 17,
+   "nodo": 16,
+   "trascinato": 9,
+   "corto": 1
+  },
+  "2026-07-26": {
+   "trascinato": 6,
+   "nodo": 7,
+   "scartato": 7
+  },
+  "2026-10-19": {
+   "corto": 1,
+   "nodo": 5,
+   "trascinato": 4
+  },
+  "2026-10-20": {
+   "trascinato": 12,
+   "nodo": 6,
+   "corto": 1
+  },
+  "2026-10-24": {
+   "nodo": 23,
+   "trascinato": 27,
+   "scartato": 1
+  }
+ }
+}

@@ -1,5 +1,5 @@
 # Tagger notturno v2 (28/07, registro del refactoring: decisioni 1, 2, 5-bis, 8).
-# Messaggi JSONL -> nodi del grafo + esperienze in Lux + impronta sull'omeostato.
+# Messaggi JSONL -> nodi del grafo + impronta sull'omeostato + persistenza degli scartati (B5: niente vecchio Lux).
 #
 # Cosa cambia dalla v1:
 #   - lettura a L29 in COORDINATE LENTE (decisioni 1-2), mai piu' L34 grezzo
@@ -12,7 +12,7 @@
 #     {layer, lente, versione} dentro il file: mai piu' veleno anonimo
 #   - niente rete nel rito: la base e' la mu di popolazione gia' su disco
 #   - dominante su TUTTE le 51 (il vecchio filtro 41/51 non serve piu'),
-#     alpha = centro misurato da emo-cvec-v2
+#     (alpha da emo-cvec-v2: tolto in B7, P2)
 #   - il bug storico: sqlite3 ora e' importato (la via semantica si aggiorna)
 #   - fix: anche i nodi FORZATI imprimono l'omeostato
 #
@@ -23,7 +23,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import sys
 import time
 
@@ -48,14 +47,14 @@ LAYER = ponte.LAYER_SONDA
 OUT = os.environ.get("OUT_35B", "/data/jspace/out-35b")   # 29/09: out-occamy per Occamy
 LENTE_PT = f"{OUT}/lente35b-18layer.pt"
 MU_NPY = "/data/memoria-episodica-affettiva/base-L29-lente.npy"   # mu di popolazione
-CVEC = "/data/memoria-episodica-affettiva/emo-cvec-v2.npz"
 EMOVEC18 = f"{OUT}/emovec-18.pt"
 STATS = "/data/memoria-episodica-affettiva/stats-emo-v2.pt"
 CODA = "/data/workspace/memoria/da-ricordare.jsonl"
 CTX_MAX = 1200        # caratteri di contesto per la lettura differenziale
 
 ARTEFATTI = ("Cronjob Response:", "⚡ Interrupting", "📚 Reading skill",
-             "* 📚", "⚠", "```")
+             "* 📚", "⚠", "```",
+             "[CONTEXT COMPACTION", "Operation interrupted:")   # 01/11: riassunto e interruzioni di Hermes
 _MARCATORE = re.compile(r"\[ricordare\]\s*(?:\{([^}]*)\})?", re.IGNORECASE)
 
 
@@ -231,12 +230,16 @@ def aggiorna_stats(R, dry=False):
 
 # ---------- inserimento ----------
 
-def inserisci(validi, isolati, Z, emos, cvec, soglia, dry):
+def firma_di(Z, i, emos):
+    """B7 (P5): la firma del messaggio i come dict {asse: z a 3 decimali}, un solo posto"""
+    return {e: round(Z[i, j].item(), 3) for j, e in enumerate(emos)}
+
+
+def inserisci(validi, isolati, Z, emos, soglia, dry):
     """nodi nel grafo; ritorna {indice: (nid, classe)} e le firme salvate"""
-    nomi_cv = [str(x) for x in cvec["nomi"]]
     creati, firme_salvate, salvati, scartati = {}, [], 0, []
     for i, m in enumerate(validi):
-        firma = {e: round(Z[i, j].item(), 3) for j, e in enumerate(emos)}
+        firma = firma_di(Z, i, emos)
         salienza = max(firma.values())
         testo = m["testo"]
         if salienza < soglia and not m.get("forzato"):
@@ -244,13 +247,11 @@ def inserisci(validi, isolati, Z, emos, cvec, soglia, dry):
             scartati.append(i)
             continue
         dominante = max(firma, key=firma.get)
-        alpha = float(cvec["centro"][nomi_cv.index(dominante)])
         # Regola 2 del contratto di navigazione (11/07): URL = "letto"
         classe = "letto" if re.search(r"https?://|www\.", testo) else "vissuto"
-        log.info("NODO-%s (z=%.2f, %s@%.3f) %s", classe.upper(), salienza,
-                 dominante, alpha, testo[:60])
+        log.info("NODO-%s (z=%.2f, %s) %s", classe.upper(), salienza, dominante, testo[:60])
         if not dry:
-            nid = memoria.add_node(testo, firma, isolati[i], dominante, alpha,
+            nid = memoria.add_node(testo, firma, isolati[i], dominante, None,   # B7 (P2): emo_alpha non si calcola piu'
                                    salienza, fonte=m.get("autore", ""),
                                    ts=m.get("ts"), classe=classe,
                                    voluto=1 if m.get("forzato") else 0)
@@ -262,46 +263,19 @@ def inserisci(validi, isolati, Z, emos, cvec, soglia, dry):
     return creati, firme_salvate, scartati
 
 
-def alimenta_lux(creati, validi, isolati, Z, emos):
-    """le esperienze vissute entrano nell'organo; il grafo resta la verita'"""
-    try:
-        import numpy as np
-        from lux import Lux
-        organo = Lux()
-        n_nati = 0
-        for i, (nid, classe) in creati.items():
-            if classe != "vissuto":
-                continue
-            firma = {e: round(Z[i, j].item(), 3) for j, e in enumerate(emos)}
-            f51 = np.array([firma[e] for e in sorted(firma)], np.float32)
-            _, esito = organo.esperisci(isolati[i].numpy(), f51, nodo_id=nid)
-            n_nati += esito == "nato"
-        fusioni = organo.consolida()
-        potati = organo.pota()
-        log.info("Lux: %s (+%d neuroni, %d fusioni, %d potati)",
-                 organo.stats(), n_nati, fusioni, potati)
-    except Exception:
-        log.exception("CRITICO: Lux non ha ricevuto le esperienze (il grafo "
-                      "le ha; backfill con lux-demo.py)")
-
-
-def persistenza_notte(scartati, validi, isolati, Z, emos, cvec):
+def persistenza_notte(scartati, validi, Z, emos):
     """Fasi 2-3 della persistenza (30/09, PIANO-PERSISTENZA-LUX.md): i messaggi
-    scartati non spariscono. Se sono di nuovo la stessa cosa di un neurone, lo
+    scartati non spariscono. Se sono di nuovo la stessa cosa di un ricordo, lo
     stabilizzano (eco); se no alimentano un tema, che diventa ricordo quando
-    torna abbastanza (abitudine). Ritorna i nodi promossi."""
+    torna abbastanza (abitudine). B5 (01/11): sul Lux degli engrammi, il vecchio
+    Lux e' in archivio. Ritorna i nodi promossi."""
     try:
         import persistenza
-        from lux import Lux
-        nomi_cv = [str(x) for x in cvec["nomi"]]
-        ordine = sorted(emos)                    # l'ordine delle firme in Lux
-        col = [emos.index(e) for e in ordine]
 
-        def promuovi(testo, f51, stato, ts, giorni):
-            firma = {e: round(float(x), 3) for e, x in zip(ordine, f51)}
+        def promuovi(testo, firma, vettore, ts, giorni):
+            # addr_sem = bge-m3 del testo: la via semantica L29 non esiste piu' (P1 del piano della firma)
             dominante = max(firma, key=firma.get)
-            alpha = float(cvec["centro"][nomi_cv.index(dominante)])
-            return memoria.add_node(testo, firma, torch.tensor(stato), dominante, alpha,
+            return memoria.add_node(testo, firma, torch.tensor(vettore), dominante, None,
                                     max(firma.values()), fonte="abitudine", ts=ts,
                                     classe="vissuto")
 
@@ -310,12 +284,12 @@ def persistenza_notte(scartati, validi, isolati, Z, emos, cvec):
             testo = validi[i]["testo"]
             if re.search(r"https?://|www\.", testo):   # regola 2: il "letto" non entra
                 continue
-            sc.append((isolati[i].numpy(), Z[i, col].numpy(), testo,
+            sc.append((testo, firma_di(Z, i, emos),
                        validi[i].get("ts") or time.time()))
-        esito = persistenza.notte(Lux(), sc, promuovi=promuovi)
-        log.info("PERSISTENZA: eco %d su %d neuroni, temi %d (+%d, -%d), promossi %d, potati %d",
-                 esito["eco"], esito["neuroni_eco"], esito["temi"], esito["temi_nuovi"],
-                 esito["temi_dimenticati"], len(esito["promossi"]), esito["potati"])
+        esito = persistenza.notte(sc, promuovi=promuovi)
+        log.info("PERSISTENZA: eco %d su %d ricordi, temi %d (+%d, -%d), promossi %d",
+                 esito["eco"], esito["ricordi_eco"], esito["temi"], esito["temi_nuovi"],
+                 esito["temi_dimenticati"], len(esito["promossi"]))
         for testo, nid in esito["promossi"]:
             log.info("ABITUDINE -> nodo %s: %s", nid, testo[:60])
         return esito["promossi"]
@@ -330,29 +304,6 @@ def imprimi_omeostato(firme_salvate):
     import stato as omeostato
     omeostato.imprimi(firme_salvate)
     log.info("stato impresso dalla giornata: %s", omeostato.descrivi())
-
-
-def aggiorna_sidecar(mu):
-    """addr-sem.npz per la via semantica del riflesso: M normalizzate su mu.
-    (il bug v1: sqlite3 mai importato, il sidecar restava fermo in silenzio)"""
-    import numpy as np
-    vec = torch.load("/data/workspace/memoria/vettori.pt",
-                     weights_only=True)
-    db = sqlite3.connect("/data/workspace/memoria/memoria.db")
-    vissuti = {r[0] for r in db.execute(
-        "SELECT id FROM nodi WHERE classe='vissuto'")}
-    db.close()
-    ids = sorted(i for i in vec if i in vissuti)
-    Mx = np.stack([vec[i]["addr_sem"].float().numpy() for i in ids])
-    Mx = Mx - mu.numpy()
-    Mx = (Mx / (np.linalg.norm(Mx, axis=1, keepdims=True) + 1e-9)).astype(np.float32)
-    np.savez("/data/workspace/memoria/.addr-sem-tmp",
-             ids=np.array(ids, np.int64), M=Mx,
-             base=mu.numpy().astype(np.float32))
-    os.replace("/data/workspace/memoria/.addr-sem-tmp.npz",
-               "/data/workspace/memoria/addr-sem.npz")
-    log.info("sidecar addr-sem.npz aggiornato: %d nodi (spazio lente L%d)",
-             len(ids), LAYER)
 
 
 # ---------- rito ----------
@@ -387,26 +338,18 @@ def main():
     mean, sd = aggiorna_stats(R, dry=args.dry)
     Z = (R - mean) / (sd + 1e-6)
 
-    cvec = np.load(CVEC)
-    creati, firme, scartati = inserisci(validi, isolati, Z, emos, cvec,
-                                        args.soglia, args.dry)
+    creati, firme, scartati = inserisci(validi, isolati, Z, emos, args.soglia, args.dry)
     if args.dry:
         return
     if creati:
         if os.path.exists(CODA):
             os.remove(CODA)
             log.info("coda ricorda-ora svuotata")
-        alimenta_lux(creati, validi, isolati, Z, emos)
         imprimi_omeostato(firme)
-    # anche nelle notti senza nodi nuovi: eco, temi e oblio vanno avanti
-    promossi = persistenza_notte(scartati, validi, isolati, Z, emos, cvec)
-    if not (creati or promossi):
-        return
-    try:
-        aggiorna_sidecar(mu)
-    except Exception:
-        log.exception("sidecar addr-sem NON aggiornato "
-                      "(la via semantica resta sui nodi vecchi)")
+    # anche nelle notti senza nodi nuovi: eco, temi e oblio vanno avanti.
+    # B5 (01/11): niente piu' vecchio Lux (alimenta_lux) ne' sidecar addr-sem (P1): i ricordi nuovi entrano nel Lux
+    # degli engrammi con `lux_engrammi.py aggiungi`, nella notturna
+    persistenza_notte(scartati, validi, Z, emos)
 
 
 if __name__ == "__main__":
