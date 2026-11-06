@@ -146,6 +146,7 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
        x+2   a ########        b #######        c #####
    Servono quindi i range utili delle coppie composte (a + b) E dei vettori puri delle diadi (c), e il comportamento
    dei tre insieme (come la prova amore puro + estasi + ammirazione del 02/11, RELAZIONE E31).
+   ⛔ PASSO OBBLIGATO PRIMA DEL CABLAGGIO (06/11/2026: "mettilo come obbligato, altrimenti me ne dimentico"): la diade fiducia + tristezza (sentimentality) si chiama NOSTALGIA, non tenerezza (tenerezza in italiano sta vicino all'affetto). Nello steering il nome è già cambiato (sistema.py, confronto.py); in emozioni.json e nel Lux non ancora. Prima di cablare le diadi nel Lux: backup, poi in /data/memoria-episodica-affettiva/emozioni.json "it": "tenerezza" diventa "nostalgia" (tag TEN, en sentimentality ed emoji restano o li decide l'utente), migrazione dei nomi nei lux-meta.json delle versioni in uso e di wikilux-meta.json, costruisci-emozioni.py, poi grep di "tenerezza" in riflesso, tagger, avatar e pagine; la radice "nostalg" non è più della malinconia.
    (Superato dal 02/11, tenuto per storia:) Le DIADI non si iniettano come voci a se': la diade (amore = estasi +
    ammirazione, ...) nasce dalla fusione delle sue componenti nel profilo; la proporzione fra le componenti la danno i
    loro assi nella firma, la zona utile della diade (griglie di PIANO-PLUTCHIK, sezione "diadi fra le intense" della
