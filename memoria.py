@@ -16,7 +16,7 @@ DIR = Path("/data/workspace/memoria")  # condiviso col container (=/workspace/me
 DB = DIR / "memoria.db"
 VEC = DIR / "vettori.pt"
 # B7 (01/11, P3 di PIANO-FIRMA-ENGRAMMI.md): un solo ordine dei 51 assi, quello di emozioni.json
-EMOZIONI = json.load(open("/data/memoria-episodica-affettiva/emozioni.json"))
+EMOZIONI = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "emozioni.json")))
 HEBB_GAIN = 0.1     # rinforzo per co-richiamo
 HEBB_BLEND = 0.25   # peso degli archi nel punteggio di recupero
 
