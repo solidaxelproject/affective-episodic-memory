@@ -126,6 +126,22 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
    3. una GERARCHIA fra le emozioni, che le fa prevalere o le depotenzia in base al tipo di emozione e alla carica degli
       archi del ricordo (la carica dice anche l'intensita' delle emozioni degli engrammi che quegli archi connettono).
    Piu' i due tetti: sul numero di emozioni che passano (2-3, come nelle persone) e sulla dose totale (prova di accumulo).
+   **RICORDI IN CATENA NEL RAGIONAMENTO: PROTOCOLLO PER LA PRODUZIONE (l'utente 08/11/2026, "questo sistema entra in
+   produzione").** Sostituisce la somma dei vettori dei ricordi e i range delle coppie, che cadono.
+   - I ricordi della consegna (da 1 a 4, quanti ne da' il Lux) arrivano tutti insieme nella risposta del tool
+     memorinvolontaria, prima del ragionamento, e il modello li legge SENZA vettore. Il vettore nel prefill del ricordo
+     (modo lettura, come fa oggi `_colora_ricordo` del riflesso 1.10.0) e' SCARTATO: due ricordi di gioia al 100% non
+     hanno portato la gioia, e il ricordo e' diventato estraneo ("contenuti che non mi appartengono"; RELAZIONE E57).
+   - Nel ragionamento i vettori vanno in catena, nell'ordine dei ricordi: il vettore del primo ricordo acceso per 2 frasi
+     chiuse, poi quello del secondo per 2 frasi, e cosi' fino all'ultimo; dopo, il resto del ragionamento e la risposta
+     senza vettore. Dose di ogni vettore = la sua (funzione del punto 7 qui sotto, fra Dmin e Dmax).
+   - Il token `</think>` e' VIETATO (logit_bias) finche' l'ultimo vettore non ha fatto le sue 2 frasi: coi vettori il
+     ragionamento si accorcia e senza divieto la catena si fermava al secondo o terzo ricordo. E' memoria involontaria:
+     il modello attraversa tutti i ricordi consegnati (l'utente: "e perche' sarebbe un problema?").
+   - Aperto: in un test (ordine inverso) la generazione si e' fermata con un altro token di fine (probabilmente
+     `<|im_end|>`): da registrare e, se serve, vietare insieme a `</think>`. Il cablaggio nel riflesso si fa con l'iter
+     di upgrade, dopo il passo obbligato della nostalgia qui sotto.
+   - 08/11 sera, l'utente: la via delle diadi bivettore (a + b -> c, qui sotto) e' ABBANDONATA.
    **DIADI COME VETTORI PURI (l'utente 02/11/2026, supera il paragrafo del 31/10 qui sotto).** Si sviluppano i vettori
    puri di tutte le diadi che si possono fare (come l'amore dalle scene proprie, E31). La diade si inietta quando:
    - due dei ricordi richiamati hanno emozioni diverse e VICINE IN INTENSITA', sia rispetto al range di iniezione di
