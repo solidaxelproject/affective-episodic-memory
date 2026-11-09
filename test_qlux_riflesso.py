@@ -129,7 +129,7 @@ R.CONSENSO.write_text("[attivo: *sì*]\n", encoding="utf-8")
 # il plugin di Hermes contro questo riflesso: stessi testi, argomenti estranei tolti
 import importlib.util  # noqa: E402
 os.environ["MEMORINVOLONTARIA_URL"] = URL
-spec = importlib.util.spec_from_file_location("plugin_mi", "/data/memoria-episodica-affettiva/hermes-plugin/memorinvolontaria/__init__.py")
+spec = importlib.util.spec_from_file_location("plugin_mi", os.path.join(os.path.dirname(os.path.abspath(__file__)), "hermes-plugin/memorinvolontaria/__init__.py"))
 P = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(P)
 assert P.memorinvolontaria({"qlux": "il mare", "altro": 1}) == "1°\ncccccccccccccccc\ntrovato"
