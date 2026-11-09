@@ -227,8 +227,9 @@ pulisci_coda()
 FS.accoda([voce(T0, f"B6uno forte e felice Z={FORTE - 1.1:.2f}"),
            voce(T0 + 20000, "B6due debole e piatto Z=0.5"),
            voce(T0 + 20100, "B6due debole e piatto Z=0.5"),
-           voce(T0 + 40000, "testo intorno [ricordare]{B6tre voglio tenerlo Z=0.1} fine"),
-           voce(T0 + 40100, "[ricordare]{B6q}"),
+           voce(T0 + 40000, "B6tre voglio tenerlo Z=0.1", forzato=True),
+           voce(T0 + 40100, "B6q", forzato=True),
+           voce(T0 + 30000, "[ricordare]{B6vecchio marcatore Z=0.1}"),   # 09/11: il marcatore non forza piu'
            voce(T0 + 40200, "corto Z=9"),
            voce(T0 + 40300, "B6cinque parla di https://esempio.it molto Z=3.0")])
 assert passo_finto() == "pronto"
@@ -236,11 +237,12 @@ e = esiti()
 assert e[f"B6uno forte e felice Z={FORTE - 1.1:.2f}"] == "nodo", e
 assert esito_a(T0 + 20000) == "scartato" and esito_a(T0 + 20100) == "doppione"   # stesso autore e stesso inizio
 assert e["B6tre voglio tenerlo Z=0.1"] == "nodo" and e["B6q"] == "nodo" and e["corto Z=9"] == "corto"
+assert e["[ricordare]{B6vecchio marcatore Z=0.1}"] == "scartato", e
 uno, = nodi_con("B6uno")
 assert uno[2] == "@agente:localhost" and uno[4] == "vissuto" and uno[3] == 0
 assert not nodi_con("B6due")
 tre, = nodi_con("B6tre")
-assert tre[1] == "B6tre voglio tenerlo Z=0.1" and tre[3] == 1   # le graffe sono il ricordo, voluto
+assert tre[1] == "B6tre voglio tenerlo Z=0.1" and tre[3] == 1   # forzato (ricorda-ora), voluto
 q, = nodi_con("B6q")
 assert q[3] == 1                                               # forzato corto: entra lo stesso
 cinque, = nodi_con("B6cinque")
@@ -457,20 +459,20 @@ print("13. recupera: solo i mancanti, ricorda-ora, uscita 1 a servizio fermo, ni
 proc.kill()
 proc.wait()
 t13 = T0 + 770000
-FS.accoda([voce(t13 - 5000, "[ricordare]{B6dodici col marcatore Z=0.1}")])   # passato dal riflesso
+FS.accoda([voce(t13 - 5000, "B6dodici forzato Z=0.1", forzato=True)])   # passato dal servizio
 proc = servizio()
 aspetta_vuota()
 proc.kill()
 proc.wait()
 FS.accoda([voce(t13, "B6pendente in coda Z=0.2"),    # in coda, non ancora elaborato (servizio fermo)
-           voce(t13 + 1, "[ricordare]{B6marcato pendente Z=0.1}")])
+           voce(t13 + 1, "B6forzato pendente Z=0.1", forzato=True)])
 J = f"{TMP}/notte.jsonl"
 with open(J, "w") as fh:
     for m in [voce(T0 + 760000, "B6insieme 03 Z=2.0"),           # gia' nel registro (altro ts, stesse 24 ore)
               voce(t13 + 5, "B6pendente in coda Z=0.2"),          # gia' in coda
               voce(t13 + 10, "B6nuovo dalla notte Z=0.2"),
-              voce(t13 + 12, "prima [ricordare]{B6dodici col marcatore Z=0.1} dopo"),   # gia' passato col marcatore
-              voce(t13 + 14, "[ricordare]{B6marcato pendente Z=0.1}"),                # col marcatore, gia' in coda
+              voce(t13 + 12, "B6dodici forzato Z=0.1"),   # gia' passato
+              voce(t13 + 14, "B6forzato pendente Z=0.1"),                # gia' in coda
               voce(t13 + 16, "B6uno forte e felice Z=1.63"),   # come un messaggio di 9 giorni fa: non e' un doppione
               voce(t13 + 20, "💭 **Reasoning:**\n```\npensieri\n```")]:   # vuoto dopo pulisci
         fh.write(json.dumps(m, ensure_ascii=False) + "\n")
@@ -480,7 +482,7 @@ FS.FERMA_MAX = 2
 assert FS.recupera(J) == 1
 assert os.path.exists(FS.FORZATE + ".in-coda") and not os.path.exists(FS.FORZATE)
 nuove = [json.loads(r)["testo"] for r in open(FS.CODA, encoding="utf-8").readlines()[-5:]]
-assert nuove == ["B6pendente in coda Z=0.2", "[ricordare]{B6marcato pendente Z=0.1}", "B6nuovo dalla notte Z=0.2",
+assert nuove == ["B6pendente in coda Z=0.2", "B6forzato pendente Z=0.1", "B6nuovo dalla notte Z=0.2",
                  "B6uno forte e felice Z=1.63", "B6sera"], nuove
 n_prima = len(open(FS.CODA).readlines())
 proc = servizio()
@@ -492,7 +494,7 @@ sera, = nodi_con("B6sera")
 assert sera[3] == 1
 assert esiti()["B6nuovo dalla notte Z=0.2"] == "scartato"
 assert esito_a(t13 + 16) == "nodo"   # entrato e firmato: il dedup guarda solo le 24 ore prima
-assert sum(v["testo"] == "B6dodici col marcatore Z=0.1" for v in FS.registro().values()) == 1
+assert sum(v["testo"] == "B6dodici forzato Z=0.1" for v in FS.registro().values()) == 1
 
 # ---------- 14. notte ----------
 print("14. notte: persistenza solo sugli scartati, omeostato dai nodi", flush=True)

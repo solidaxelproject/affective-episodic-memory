@@ -4,6 +4,8 @@
        -> {"codici": [...], "risposta": "1°\\n<codice>\\n<testo>\\n2°..."} da mettere nel tool memorinvolontaria,
        oppure {} = niente. Fino a X.CONSEGNA_MAX ricordi (1.10.0), o catene di correzioni (1.11.0). Rinforza gli archi
        dei ricordi consegnati, tranne quelli corretti
+       qlux (09/11): facoltativi "quanti" (il riflesso ne chiede 1), "soglia" (0 = il piu' vicino), "da"/"a"
+       (finestra sul momento del ricordo, secondi epoch)
   POST /correggi  {"codice": "...", "testo": "..."} -> {"codice": codice della correzione} (1.11.0) (lux-<VERSIONE>/lux-stato.npz).
   POST /rinforza  {"nid": 123, "peso": 1.0} -> {"rinforzato": true} (B5: sincronizza-richiami a peso 1, eco della
        persistenza a 0.5); un ricordo corretto non si rinforza ({"rinforzato": false}), nid sconosciuto = 400
@@ -90,7 +92,9 @@ class H(BaseHTTPRequestHandler):
                     return
                 self.rispondi({"codice": X.correggi(d["codice"], str(d["testo"]))})
                 return
-            c = lux().consegna(str(d.get("testo", "")), esclusi=d.get("esclusi", []))
+            fin = {"da": float(d["da"]), "a": float(d["a"])} if d.get("da") is not None else {}   # qlux (09/11)
+            c = lux().consegna(str(d.get("testo", "")), int(d.get("quanti", X.CONSEGNA_MAX)), esclusi=d.get("esclusi", []),
+                               soglia=float(d.get("soglia", X.SOGLIA_RICHIAMO)), **fin)
         except Exception as e:   # il riflesso non deve mai fermarsi per il Lux: errore = nessun ricordo
             self.rispondi({"errore": repr(e)}, 500)
             return

@@ -26,7 +26,7 @@ sys.path.insert(0, "/data/memoria-episodica-affettiva/engrammi")
 import firma_se as F  # noqa: E402
 import memoria  # noqa: E402
 import persistenza  # noqa: E402  (vettore = bge-m3 del messaggio intero, come le abitudini di B5)
-import tagging35b as T  # noqa: E402  (pulisci, applica_marcatore, contesto_di: gli stessi del tagging)
+import tagging35b as T  # noqa: E402  (pulisci, contesto_di: gli stessi del tagging)
 
 QUI = os.path.dirname(os.path.abspath(__file__))
 MEM = os.environ.get("MEM_SAM", "/data/workspace/memoria")   # MEM_SAM: copia per i test
@@ -211,9 +211,8 @@ def elabora(m, reg):
         return False
     forzato = bool(m.get("forzato"))
     testo = T.pulisci(m["testo"])
-    if testo is not None:
-        m = T.applica_marcatore([dict(m, testo=testo.strip())])[0]
-        forzato = forzato or bool(m.get("forzato"))
+    if testo is not None:   # 09/11: tolto il marcatore [ricordare]; restano i forzati di ricorda-ora
+        m = dict(m, testo=testo.strip())
     if testo is None or (len(m["testo"]) < 15 and not forzato):
         _annota(reg, dict(m, esito="corto"))
         return False
@@ -347,9 +346,9 @@ def accoda(voci):
 
 
 def _pronto(m):
-    """chiave di dedup del messaggio com'e' nel registro (pulito, marcatore tolto); None = niente da firmare"""
+    """chiave di dedup del messaggio com'e' nel registro (pulito); None = niente da firmare"""
     t = T.pulisci(m["testo"])
-    return None if t is None else _dedup(T.applica_marcatore([dict(m, testo=t.strip())])[0])
+    return None if t is None else _dedup(dict(m, testo=t.strip()))
 
 
 def recupera(jsonl):

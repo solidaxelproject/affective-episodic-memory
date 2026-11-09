@@ -1,0 +1,7 @@
+name: memorinvolontaria
+version: 1.0.0
+description: "Memoria dell'agente (09/11/2026): +lux aggiunge un ricordo al Lux, qlux cerca un ricordo. Passa dal riflesso (host.docker.internal:8091/memorinvolontaria)."
+author: l'utente
+kind: standalone
+provides_tools:
+  - memorinvolontaria

@@ -55,7 +55,6 @@ CTX_MAX = 1200        # caratteri di contesto per la lettura differenziale
 ARTEFATTI = ("Cronjob Response:", "⚡ Interrupting", "📚 Reading skill",
              "* 📚", "⚠", "```",
              "[CONTEXT COMPACTION", "Operation interrupted:")   # 01/11: riassunto e interruzioni di Hermes
-_MARCATORE = re.compile(r"\[ricordare\]\s*(?:\{([^}]*)\})?", re.IGNORECASE)
 
 
 # ---------- preparazione messaggi (pura, testabile senza GPU) ----------
@@ -93,20 +92,6 @@ def dedup(msgs):
     if len(uniq) < len(msgs):
         log.info("dedup: %d messaggi ripetuti collassati", len(msgs) - len(uniq))
     return uniq
-
-
-def applica_marcatore(msgs):
-    """[ricordare]{...} (decisione del 22-23/07): forza il nodo, le graffe SONO il ricordo."""
-    for m in msgs:
-        if m.get("autore") == "user":
-            continue
-        mm = _MARCATORE.search(m.get("testo", ""))
-        if mm:
-            m["forzato"] = True
-            dentro = (mm.group(1) or "").strip()
-            m["testo"] = dentro if dentro else _MARCATORE.sub("", m["testo"]).strip()
-            log.info("MARCATORE [ricordare]: forzato %s", m["testo"][:60])
-    return msgs
 
 
 def contesto_di(precedenti):
@@ -315,7 +300,7 @@ def main():
     p.add_argument("--dry", action="store_true", help="mostra senza salvare")
     args = p.parse_args()
 
-    msgs = applica_marcatore(dedup(carica_messaggi(args.jsonl)))
+    msgs = dedup(carica_messaggi(args.jsonl))   # 09/11: tolto il marcatore [ricordare]
     if not args.dry and os.path.exists(CODA):
         forzati = [json.loads(r) for r in open(CODA, encoding="utf-8")
                    if r.strip()]

@@ -188,8 +188,7 @@ def _inserisci(righe, eid, testi, C, tab, A, par_lista, ricordi):
             legami.append(attesa)
             attesa = []
         ricordi[nid] = {"classe": classe, "codice": codice(ts), "n": len(nodi), "testa": legami[0] if legami else [], "coda": attesa}
-        if classe == "correzione":   # non sta in memoria.db: il momento serve a ricostruire lo stesso codice
-            ricordi[nid]["ts"] = ts
+        ricordi[nid]["ts"] = ts   # qlux (09/11): il momento per tutti, per la ricerca per data (prima solo correzioni)
         for p in range(1, len(nodi)):
             A.append((nid, p, nodi[p - 1], nodi[p], len(par_lista), len(legami[p])))
             C.append(f)
@@ -457,14 +456,22 @@ class Lux:
             if r not in nids:
                 self.pronti[r] = (self.spinta(r, ora) + s / np.sqrt(self.ricordi[r]["n"]), ora)
 
-    def consegna(self, testo, quanti=CONSEGNA_MAX, oggi=None, esclusi=(), ora=None):
+    def consegna(self, testo, quanti=CONSEGNA_MAX, oggi=None, esclusi=(), ora=None, soglia=SOGLIA_RICHIAMO, da=None, a=None):
         """L'UNICA porta per dare ricordi all'agente (richiamo automatico, 11/10): richiama, rinforza gli archi dei
         ricordi consegnati, restituisce [(id, testo ricomposto)]. Lista vuota = nessun turno del tool.
         esclusi = codici dei ricordi gia' consegnati nella conversazione: si passa al successivo sopra soglia.
-        La pagina 3D e le prove usano richiama(), che non rinforza."""
+        La pagina 3D e le prove usano richiama(), che non rinforza.
+        qlux (09/11): soglia (0 = il piu' vicino), finestra [da, a) sul momento del ricordo; con la finestra e
+        nessun ricordo acceso dal testo, quelli della finestra in ordine di facilita'."""
         via = {self.da_codice[c] for c in esclusi if c in self.da_codice}   # gia' nel contesto della conversazione
         catene = []   # 1.11.0: un ricordo con le sue correzioni occupa un posto solo
-        for nid, _ in self.richiama(testo, len(self.ricordi), oggi=oggi, ora=ora):
+        scelta = [n for n, _ in self.richiama(testo, len(self.ricordi), soglia, oggi=oggi, ora=ora)]
+        if da is not None:
+            nella = {n for n, r in self.ricordi.items() if da <= r.get("ts", -1) < a}
+            fac = self.facilita(oggi)
+            accesi = [n for n in scelta if n in nella]   # poi, in coda, il resto della finestra (gli esclusi li salta il giro sotto)
+            scelta = accesi + sorted(nella - set(accesi), key=lambda n: -fac.get(n, 0))
+        for nid in scelta:
             k = self.catena(nid)
             if len(catene) == quanti:
                 break

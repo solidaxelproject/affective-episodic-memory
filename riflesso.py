@@ -572,12 +572,142 @@ def _sam_accesa(dove=UPSTREAM):
 def _lux_consegna(testo, esclusi):
     """{codici, risposta} oppure {} = nessun ricordo. Mai bloccare la parola dell'agente."""
     try:
-        req = urllib.request.Request(LUX, json.dumps({"testo": testo, "esclusi": esclusi}).encode(),
+        req = urllib.request.Request(LUX, json.dumps({"testo": testo, "esclusi": esclusi, "quanti": 1}).encode(),   # 09/11: uno per volta
                                      {"Content-Type": "application/json"})
         return json.load(urllib.request.urlopen(req, timeout=30))
     except Exception as e:
         _diario({"lux": f"consegna fallita: {e}"})
         return {}
+
+
+# +lux e qlux (l'utente 09/11, PIANO-MEMORINVOLONTARIA-LUX.md): il plugin memorinvolontaria di Hermes chiama
+# POST /memorinvolontaria con gli argomenti dell'agente; +lux = ricordo forzato nella coda di firma-subito (entra nel Lux in
+# pochi secondi), qlux = ricerca volontaria, il ricordo piu' vicino, uno per volta. Risposte approvate dall'utente 09/11.
+R_AGGIUNTO = "Aggiunto alla tua memoria."
+R_VUOTO = "Scrivi il ricordo da tenere."
+R_NESSUNO = "Nessun ricordo trovato."
+R_GIU = "La memoria non risponde, riprova più tardi."
+R_SENZA = "Usa +lux per aggiungere un ricordo o qlux per cercarne uno."
+_esclusi_chat = [set()]   # codici nell'ultima richiesta della chat, piu' quelli dati da qlux dopo
+_esclusi_lock = threading.Lock()
+MESI = {m: i for i, m in enumerate(("gennaio febbraio marzo aprile maggio giugno luglio agosto settembre ottobre "
+                                     "novembre dicembre").split(), 1)}
+_PRIMA = r"(?:\b(?:il|l'|a|ad|del|dell'|nel|nell'|di|da|dal|dall')\s*)?"
+_DATE = [re.compile(_PRIMA + r, re.I) for r in (
+    r"\b(?P<g>\d{1,2})/(?P<m>\d{1,2})(?:/(?P<a>\d{4}|\d{2}))?\b",
+    r"\b(?P<g>\d{1,2}°?|primo)\s+(?P<mese>" + "|".join(MESI) + r")(?:\s+(?P<a>\d{4}))?\b",
+    r"\b(?P<mese>" + "|".join(MESI) + r")(?:\s+(?P<a>\d{4}))?\b",
+    r"\b(?P<rel>l'altro ieri|ieri|oggi)\b")]
+
+
+def _data(testo, adesso=None):
+    """(testo senza la data, da, a): la prima data riconosciuta nella ricerca diventa una finestra [da, a) sul momento
+    del ricordo (un giorno o un mese); anno mancante = il piu' recente passato. Nessuna data: (testo, None, None)"""
+    adesso = time.time() if adesso is None else adesso
+    oggi = time.localtime(adesso)
+    trovate = [x for rx in _DATE for x in [rx.search(testo)] if x]
+    x = min(trovate, key=lambda x: (x.start(), -x.end()), default=None)   # la prima nel testo, la piu' lunga
+    if x:
+        g = x.groupdict()
+        if g.get("rel"):
+            indietro = {"oggi": 0, "ieri": 1, "l'altro ieri": 2}[g["rel"].lower()]
+            t = time.localtime(time.mktime((oggi.tm_year, oggi.tm_mon, oggi.tm_mday - indietro, 12, 0, 0, 0, 0, -1)))
+            a, m, gg = t.tm_year, t.tm_mon, t.tm_mday
+        else:
+            m = int(g["m"]) if g.get("m") else MESI[g["mese"].lower()]
+            gg = (1 if g["g"].lower() == "primo" else int(g["g"].rstrip("°"))) if g.get("g") else None
+            a = (int(g["a"]) + (2000 if len(g["a"]) == 2 else 0)) if g.get("a") else oggi.tm_year
+            if not g.get("a") and (m, gg or 1) > (oggi.tm_mon, oggi.tm_mday):
+                a -= 1
+        try:
+            if not 1 <= m <= 12:
+                raise ValueError
+            da = time.mktime((a, m, gg or 1, 0, 0, 0, 0, 0, -1))
+            if gg and time.localtime(da)[:3] != (a, m, gg):   # 30/2 e simili
+                raise ValueError
+        except (ValueError, OverflowError):   # 30/2, 29 febbraio non bisestile: nessuna data, resta testo
+            return testo, None, None
+        fine = (a, m, gg + 1) if gg else ((a + 1, 1, 1) if m == 12 else (a, m + 1, 1))
+        resto = " ".join((testo[:x.start()] + " " + testo[x.end():]).split())
+        return resto, da, time.mktime((*fine, 0, 0, 0, 0, 0, -1))
+    return testo, None, None
+
+
+_CODICE_TOOL = re.compile(r"^\d+[a-z]?°\n([0-9a-z]{16})$", re.M)
+
+
+def _ids_ricordo(msgs):
+    """id delle chiamate a memorinvolontaria (le finte del riflesso e quelle vere dell'agente, che hanno l'id del server)"""
+    return {tc.get("id") for m in msgs if m.get("role") == "assistant" for tc in (m.get("tool_calls") or [])
+            if (tc.get("function") or {}).get("name") == TOOL_RICORDO}
+
+
+def _e_ricordo(m, ids):
+    """un messaggio tool che e' la risposta di memorinvolontaria"""
+    i = str(m.get("tool_call_id", ""))
+    return m.get("role") == "tool" and (i.startswith(TOOL_RICORDO) or i in ids or m.get("name") == TOOL_RICORDO)
+
+
+def _codici_nei_messaggi(msgs):
+    ids = _ids_ricordo(msgs)
+    return {c for m in msgs if _e_ricordo(m, ids) and isinstance(m.get("content"), str)
+            for c in _CODICE_TOOL.findall(m["content"])}
+
+
+def _ammesso(ip):
+    """/memorinvolontaria solo dal PC e dalla rete docker (il riflesso ascolta su 0.0.0.0: niente ricordi alla LAN)"""
+    p = ip.split(".")
+    return ip == "127.0.0.1" or (len(p) == 4 and p[0] == "172" and p[1].isdigit() and 16 <= int(p[1]) <= 31)
+
+
+def _lux_cerca(testo, esclusi):
+    """qlux: {codici, risposta} o {} = niente; un errore del Lux si alza (R_GIU, mai confuso con "nessun ricordo")"""
+    resto, da, a = _data(testo)
+    corpo = {"testo": resto, "esclusi": sorted(esclusi), "quanti": 1, "soglia": 0}
+    if da is not None:
+        corpo.update(da=da, a=a)
+    req = urllib.request.Request(LUX, json.dumps(corpo).encode(), {"Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=30))
+
+
+def _accoda_forzato(testo):
+    fd = os.open(CODA_FIRMA, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:   # una sola write: righe intere anche con la chat che accoda
+        os.write(fd, (json.dumps({"ts": time.time(), "autore": "@agente:localhost", "testo": testo,
+                                  "forzato": True}, ensure_ascii=False) + "\n").encode())
+    finally:
+        os.close(fd)
+
+
+def memorinvolontaria(args):
+    """la risposta che l'agente riceve dal plugin; a consenso spento niente entra e niente si scrive (patto di sempre)"""
+    aggiungi, cerca = args.get("+lux"), args.get("qlux")
+    if aggiungi is None and cerca is None:
+        return R_SENZA
+    if not consenso_attivo():
+        return R_GIU
+    parti = []
+    if aggiungi is not None:
+        t = str(aggiungi).strip()
+        if t:
+            _accoda_forzato(t)
+            _diario({"+lux": t[:80]})
+        parti.append(R_AGGIUNTO if t else R_VUOTO)
+    if cerca is not None:
+        with _esclusi_lock:
+            esclusi = set(_esclusi_chat[0])
+        try:
+            r = _lux_cerca(str(cerca), esclusi)
+        except Exception as e:
+            _diario({"qlux": f"fallito: {e}"})
+            parti.append(R_GIU)
+        else:
+            if r.get("codici"):
+                with _esclusi_lock:
+                    _esclusi_chat[0] |= set(r["codici"])
+                _diario({"qlux": r["codici"]})
+            parti.append(r.get("risposta") or R_NESSUNO)
+    return "\n\n".join(parti)
 
 
 def _ora_corta(t):
@@ -622,7 +752,7 @@ def _code(body, testi):
     memoria involontaria (il ricordo resta nudo: si riprova alla richiesta dopo)"""
     d = json.loads(body)
     msgs = d.get("messages", [])
-    if not msgs or not testi or str(msgs[-1].get("tool_call_id", "")).startswith(TOOL_RICORDO):
+    if not msgs or not testi or _e_ricordo(msgs[-1], _ids_ricordo(msgs)):
         return body, False
     for t in testi:
         _in_coda(msgs, t)
@@ -962,6 +1092,7 @@ def _fonte(msgs):
 
 def _fonte_indice(msgs):
     """(indice del messaggio, testo) della fonte; (None, "") se non c'è"""
+    ids = _ids_ricordo(msgs)
     for i in range(len(msgs) - 1, -1, -1):
         m = msgs[i]
         c = m.get("content")
@@ -969,7 +1100,7 @@ def _fonte_indice(msgs):
             continue
         if m.get("role") == "user":
             return i, c
-        if m.get("role") == "tool" and not m.get("tool_call_id", "").startswith(TOOL_RICORDO):
+        if m.get("role") == "tool" and not _e_ricordo(m, ids):
             prosa = _leggibile(c)
             if len(prosa) >= LETTURA_MIN:
                 return i, prosa
@@ -1127,6 +1258,22 @@ class Proxy(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self._inoltra(None)
 
+    def _ricordo(self, body):
+        if not _ammesso(self.client_address[0]):
+            self.send_error(403)
+            return
+        try:
+            testo = memorinvolontaria(json.loads(body or b"{}"))
+        except Exception as e:
+            _diario({"memorinvolontaria": f"rotta: {e}"})
+            testo = R_GIU
+        b = json.dumps({"testo": testo}, ensure_ascii=False).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
     def _memoria(self, body, flusso=None):
         """Memoria involontaria: a ogni lettura nuova il Lux sceglie fino a 4
         ricordi, tutti nella stessa risposta del tool; i ricordi già consegnati nella conversazione tornano al loro posto.
@@ -1153,12 +1300,19 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             else:
                 _ultima_lettura[0] = impronta
         nuova = None
+        visti = {c for v in voci for c in _codici(v)} | _codici_nei_messaggi(msgs)   # qlux compresi (09/11)
+        if flusso == "chat":
+            with _esclusi_lock:
+                _esclusi_chat[0] = set(visti)
         if fonte:
-            r = _lux_consegna(query_riflesso(fonte), [c for v in voci for c in _codici(v)])
+            r = _lux_consegna(query_riflesso(fonte), sorted(visti))
             if r.get("codici") and attivo:
                 nuova = {"dopo": _impronta(msgs[i]["content"]),
                          "codici": r["codici"], "risposta": r["risposta"]}
                 voci = voci + [nuova]
+                if flusso == "chat":
+                    with _esclusi_lock:
+                        _esclusi_chat[0] |= set(r["codici"])
                 with _consegne_lock:
                     tutte = _consegne_carica()
                     tutte[conv] = {"ts": time.time(), "voci": voci}
@@ -1189,6 +1343,9 @@ class Proxy(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self._inoltrato = self._esito = self._salva = None   # la connessione keep-alive serve piu' richieste
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if self.path == "/memorinvolontaria":   # 09/11: il plugin di Hermes, mai inoltrato al 35B
+            self._ricordo(body)
+            return
         arrivo, ultimo = time.time(), None   # B6: il messaggio dell'utente prima di ora e coda
         chat = self.path.split("?")[0].endswith("/chat/completions")   # issue #3 punto E
         # PATTO clausola 3: la parola scritta dall'agente spegne il vettore, prima
