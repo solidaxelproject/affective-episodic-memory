@@ -75,7 +75,7 @@ PREDISPOSIZIONE_EMIVITA = 21600.0   # 1.12.0 (6 ore, Cai 2016, Rashid 2016): sec
 PREDISPOSIZIONE_MAX = 2.0   # 1.12.0: tetto del moltiplicatore del richiamo
 PESO_COPPIA = 1.0   # 1.12.0: un arco condiviso (stessa coppia di engrammi) vale quanto un engramma in piu'
 S_ABITUDINE = LUX.S_BASE * LUX.AROUSAL_MAX   # B5: come persistenza.py, la frequenza fa le veci dell'intensita'
-SOGLIA_FIRMA = 1.532   # B6 (01/11): soglia della firma coi vettori se' (stats-firma-se.pt, B3); prima 1.8
+SOGLIA_FIRMA = 1.904   # 09/11 (PIANO-FIRMA-44-ASSI): firma a 44 assi, stessa quota; prima 1.532 (B6), 1.8
 TRASCINATO_S0 = 0.5    # B6: S0 del trascinato quando memoria.db non porta la sua cattura (nodi trascinati prima del 01/11 sera)
 INVERSO = {}
 for _k, _v in T.PREPOSIZIONI.items():   # forma canonica: la prima della tabella (di, non d'; a, non ad; tra, non fra)

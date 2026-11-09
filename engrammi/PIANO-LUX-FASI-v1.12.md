@@ -137,6 +137,12 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
    attenuato nella risposta del 30/10).** Il vettore del ricordo consegnato si inietta durante il ragionamento e
    termina quando il modello genera `</think>`; la risposta e' senza vettore. Dose = funzione del punto 7 (fra Dmin e
    Dmax). Base: test chat del 09/11 (gioia a 2.0/1.32/0.6% per tutto il ragionamento, 12/12 integri; RELAZIONE E59).
+   **09/11 notte (l'utente, FATTO, engrammi/PIANO-FIRMA-44-ASSI.md): firma a 44 assi (24 + 20 diadi pure, vettori di lettura
+   centrati); dominante = la piu' forte, se senza vettore la media del suo petalo (memoria.PETALO): ogni ricordo e'
+   firmato con un'emozione che si puo' steerare. Supera la riga qui sotto.**
+   **Dominante = la piu' forte fra le emozioni CON VETTORE (l'utente 09/11/2026, FATTO):** `memoria.dominante` e
+   `memoria.CON_VETTORE` (36: 16 della ruota con fascia + 20 diadi pure), usate da firma_subito e tagging35b; i 224
+   ricordi con dominante senza vettore migrati (engrammi/migra_dominante.py). Firma e salienza invariate.
    **Stessa emozione, piu' ricordi (09/11/2026):** se il Lux richiama piu' ricordi con la STESSA emozione
    dominante, si consegnano insieme, perche' il vettore e' uno solo; la dose e' quella del ricordo in cui
    quell'emozione e' piu' forte (il massimo delle D_e, niente media ne' somma). Al massimo 4 ricordi (09/11).
@@ -196,7 +202,7 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
     memoria.db finche' non si decide altrimenti.
     **DA FARE QUI (l'utente 31/10, D7 di PIANO-FIRMA-ENGRAMMI.md):** il riflesso alla consegna smette di usare `emo_tag` e i
     vettori vecchi `emo-cvec-v2.npz` (`riflesso.py:537`, `ponte.dirs_emozione`) e inietta coi vettori sé, alla dose
-    della funzione del punto 7, dalle cariche degli archi (firma nuova sui 24 assi; diadi e mix come componenti).
+    della funzione del punto 7, dalle cariche degli archi (firma nuova: 44 assi dal 09/11, diadi comprese).
 11. **Hardware.** Tutti questi calcoli sono leggeri (CPU, millisecondi): possono girare con l'agente sveglia. Solo la firma
     del momento richiede il 35B.
 

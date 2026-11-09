@@ -5,7 +5,7 @@ server vivo (firma_se.firma_server, stats e soglia di B3), crea il nodo in memor
 Registro del giorno (giornata-firma.jsonl, una riga per messaggio, l'ultima per (ts, testo) vale): contesto, dedup,
 trascinamento (behavioral tagging) e notturna.
   firma_subito.py servizio        giro ogni GIRO_S secondi sulla coda (firma-subito.service)
-  firma_subito.py recupera J      notturna: in coda i messaggi di J che mancano e le voci di ricorda-ora, poi aspetta
+  firma_subito.py recupera J      notturna: in coda i messaggi di J che mancano, poi aspetta
                                   che il servizio svuoti la coda (35B spento o servizio fermo = uscita 1)
   firma_subito.py notte DA_TS     notturna: persistenza sugli scartati e omeostato dai nodi nati da DA_TS in poi
 Uso: /data/jspace/venv/bin/python /data/memoria-episodica-affettiva/engrammi/firma_subito.py servizio"""
@@ -34,7 +34,6 @@ CODA = f"{MEM}/coda-firma.jsonl"
 POS = f"{MEM}/coda-firma.pos"
 ROTTE = f"{MEM}/coda-firma-rotte.jsonl"
 GIORNATA = f"{MEM}/giornata-firma.jsonl"
-FORZATE = f"{MEM}/da-ricordare.jsonl"   # ricorda-ora.py
 MARKER = os.environ.get("MARKER_NOTTE", "/data/memoria-episodica-affettiva/.ultimo-consolidamento")   # notte-memoria.sh
 URL = os.environ.get("URL_FIRMA", "http://127.0.0.1:8090")
 STATS = os.environ.get("STATS_SE", "/data/memoria-episodica-affettiva/stats-firma-se.pt")
@@ -42,7 +41,7 @@ SPACY = "/data/venv-spacy/bin/python"
 GIRO_S = float(os.environ.get("GIRO_S", 5))
 FINESTRA = 86400       # contesto e dedup: messaggi delle 24 ore prima, come B3
 TRASCINA = 3600        # behavioral tagging: 60 minuti prima e dopo (Moncada e Viola 2007)
-FORTE_DELTA = 1.0      # "forte" = salienza almeno un punto z sopra la soglia
+FORTE_DELTA = 0.76     # "forte" = salienza almeno 0.76 z sopra la soglia (09/11 l'utente: stessa quota di forti della firma a 24, 5.7%; prima 1.0)
 # 01/11 sera: la cattura vuole anche la sovrapposizione PARZIALE degli engrammi col forte (cattura sinaptica:
 # solo le tracce che condividono cellule col forte prendono le sue proteine; Dunsmoor 2015: solo i ricordi legati)
 QUOTA_MIN = 0.25       # almeno un quarto degli engrammi del debole gia' nel forte (scelta di CC)
@@ -126,6 +125,8 @@ _st = {}
 def stats():
     if not _st:
         s = torch.load(STATS, weights_only=False)
+        F.usa(s.get("vettori", "/data/jspace/out-occamy/vettori-firma.pt"))   # 09/11: i vettori delle statistiche
+        assert F.vettori()[0] == s["assi"] and len(s["mean"]) == len(s["assi"]), "vettori e statistiche diversi"
         _st.update(s=s, mean=s["mean"].double().numpy(), sd=np.sqrt(s["M2"].double().numpy() / max(s["n"] - 1, 1)),
                    mu={l: s["mu"][l].double().numpy() for l in F.STRATI})
     return _st
@@ -210,7 +211,7 @@ def elabora(m, reg):
         return False
     forzato = bool(m.get("forzato"))
     testo = T.pulisci(m["testo"])
-    if testo is not None:   # 09/11: tolto il marcatore [ricordare]; restano i forzati di ricorda-ora
+    if testo is not None:   # 09/11: tolto il marcatore [ricordare]; restano i forzati di +lux
         m = dict(m, testo=testo.strip())
     if testo is None or (len(m["testo"]) < 15 and not forzato):
         _annota(reg, dict(m, esito="corto"))
@@ -351,8 +352,8 @@ def _pronto(m):
 
 
 def recupera(jsonl):
-    """i messaggi della giornata estratta che il riflesso non ha passato (riflesso giu', pensatoio) e le voci di
-    ricorda-ora vanno in coda; poi si aspetta la coda vuota. Uscita 1 = la notte dopo rimedia."""
+    """i messaggi della giornata estratta che il riflesso non ha passato (riflesso giu', pensatoio) vanno in coda;
+    poi si aspetta la coda vuota. Uscita 1 = la notte dopo rimedia. 09/11: ricorda-ora archiviato, c'e' +lux."""
     giorno = [json.loads(r) for r in open(jsonl, encoding="utf-8") if r.strip()]
     da = min((float(m["ts"]) for m in giorno), default=0) - FINESTRA   # stessa finestra del dedup di elabora
     viste = {_dedup(v) for v in registro().values() if v["ts"] >= da}
@@ -371,14 +372,8 @@ def recupera(jsonl):
             continue
         viste.add(k)
         mancano.append({"ts": float(m["ts"]), "autore": m.get("autore", ""), "testo": m["testo"]})
-    forzate = []
-    if os.path.exists(FORZATE):
-        os.replace(FORZATE, FORZATE + ".in-coda")   # ricorda-ora intanto scrive in un file nuovo
-    if os.path.exists(FORZATE + ".in-coda"):   # un recupero fallito le ha gia' messe in coda: non due volte
-        forzate = [dict(json.loads(r), forzato=True) for r in open(FORZATE + ".in-coda", encoding="utf-8") if r.strip()]
-        forzate = [v for v in forzate if _dedup(v) not in viste]
-    accoda(sorted(mancano, key=lambda v: v["ts"]) + forzate)
-    log.info("RECUPERO: %d messaggi mancanti, %d voci di ricorda-ora in coda", len(mancano), len(forzate))
+    accoda(sorted(mancano, key=lambda v: v["ts"]))
+    log.info("RECUPERO: %d messaggi mancanti in coda", len(mancano))
     p, fermo = _pos(), time.time()
     while p < os.path.getsize(CODA):
         if time.time() - fermo > FERMA_MAX:
@@ -387,8 +382,6 @@ def recupera(jsonl):
         time.sleep(GIRO_S)
         if _pos() != p:
             p, fermo = _pos(), time.time()
-    if os.path.exists(FORZATE + ".in-coda"):
-        os.remove(FORZATE + ".in-coda")
     log.info("RECUPERO-COMPLETO")
     return 0
 

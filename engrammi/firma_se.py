@@ -16,15 +16,24 @@ import urllib.request
 import numpy as np
 import torch
 
-VETTORI = "/data/jspace/out-occamy/vettori-firma.pt"
+VETTORI = "/data/jspace/out-occamy/vettori-firma.pt"   # 09/11 (PIANO-FIRMA-44-ASSI): lo sceglie chi usa la firma (usa)
 STRATI = list(range(15, 32))
 CTX_TOK = 320    # come tagging35b (MAX_TOK): ultimi 320 token del contesto, primi 320 del messaggio
 MSG_TOK = 320
 _v = {}
 
 
+def usa(percorso):
+    """09/11 (PIANO-FIRMA-44-ASSI, revisione dei danni): i vettori della firma sono quelli scritti nelle statistiche;
+    cambiano insieme, mai 44 vettori con statistiche a 24"""
+    global VETTORI
+    if percorso != VETTORI:
+        VETTORI = percorso
+        _v.clear()
+
+
 def vettori():
-    """(assi, matrice [strato] -> [24 x 2048] unitaria)"""
+    """(assi, matrice [strato] -> [assi x 2048] unitaria)"""
     if not _v:
         d = torch.load(VETTORI, weights_only=False)
         _v["assi"] = d["assi"]
@@ -33,7 +42,7 @@ def vettori():
 
 
 def proietta(diff):
-    """diff = {strato: vettore 2048} -> 24 valori (media sugli strati del coseno con ogni asse)"""
+    """diff = {strato: vettore 2048} -> un valore per asse (media sugli strati del coseno con ogni asse)"""
     _, M = vettori()
     out = np.zeros(len(M[STRATI[0]]), np.float64)
     for l in STRATI:
@@ -88,19 +97,25 @@ def _somme(url, testo, n_atteso):
 
 
 def firma_server(contesto, messaggio, url, mu=None):
-    """24 valori dal server vivo, 3 letture (B5b): contesto + messaggio, contesto, primo token del contesto (il pozzo,
-    fuori dalla media del contesto come in tagging35b). Somma del messaggio = differenza delle somme.
+    """un valore per asse: proietta(diff_server(...))"""
+    return proietta(diff_server(contesto, messaggio, url, mu))
+
+
+def diff_server(contesto, messaggio, url, mu=None):
+    """09/11: la differenza per strato {strato: vettore 2048} (prima dentro firma_server), dal server vivo, 3 letture
+    (B5b): contesto + messaggio, contesto, primo token del contesto (il pozzo, fuori dalla media del contesto come in
+    tagging35b). Somma del messaggio = differenza delle somme.
     Contesto vuoto -> messaggio - mu (mu = {strato: vettore}, da B3). Ogni errore solleva: mai una firma a meta'."""
     messaggio = _taglia(url, messaggio, MSG_TOK, coda=False)
     if not contesto:
         if mu is None:
             raise ValueError("senza contesto serve mu (statistiche di B3)")
         m, n = _somme(url, messaggio, None)
-        return proietta({l: m[l] / n - np.asarray(mu[l], np.float64) for l in STRATI})
+        return {l: m[l] / n - np.asarray(mu[l], np.float64) for l in STRATI}
     contesto = _taglia(url, contesto, CTX_TOK, coda=True).rstrip()   # spazio finale + "\n" = un token solo: niente prefisso
     contesto = _primo_intero(url, contesto)
     if not contesto:
-        return firma_server("", messaggio, url, mu)
+        return diff_server("", messaggio, url, mu)
     unito = contesto + "\n" + messaggio
     tc, tu = tokens(url, contesto), tokens(url, unito)
     if tu[:len(tc)] != tc or len(tu) <= len(tc):
@@ -116,7 +131,7 @@ def firma_server(contesto, messaggio, url, mu=None):
         h_msg = (su[l] - sc[l]) / (len(tu) - len(tc))
         h_ctx = (sc[l] - h0[l]) / (len(tc) - 1) if len(tc) > 1 else h0[l]
         diff[l] = h_msg - h_ctx
-    return proietta(diff)
+    return diff
 
 
 def _firma_per_strato(contesto, messaggio, url, mu=None):

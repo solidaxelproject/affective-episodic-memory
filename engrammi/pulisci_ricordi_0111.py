@@ -48,6 +48,7 @@ def firme():
     spec.loader.exec_module(R)
     url = os.environ.get("URL_FIRMA", "http://127.0.0.1:8098")
     s = torch.load("/data/memoria-episodica-affettiva/stats-firma-se.pt", weights_only=False)
+    R.F.usa(s.get("vettori", R.F.VETTORI))   # 09/11 (PIANO-FIRMA-44-ASSI): i vettori delle statistiche
     with urllib_get(url + "/props") as f:
         assert json.load(f)["model_path"] == s["lettore"], "lettore diverso da quello delle statistiche"
     mean, sd = s["mean"].double().numpy(), np.sqrt(s["M2"].double().numpy() / max(s["n"] - 1, 1))

@@ -77,8 +77,21 @@ def _save_vec(d):
     os.replace(f"{VEC}.tmp", VEC)
 
 
+# 09/11 sera: ogni ricordo si firma con un'emozione che si puo' steerare; le 8 della ruota senza vettore vanno
+# alla vicina nello stesso petalo che lo ha (la media del petalo)
+PETALO = {e["en"]: m["en"] for e in EMOZIONI for m in EMOZIONI if (e["it"], m["it"]) in {
+    ("accettazione", "fiducia"), ("apprensione", "paura"), ("distrazione", "sorpresa"), ("malinconia", "tristezza"),
+    ("noia", "disgusto"), ("ribrezzo", "disgusto"), ("fastidio", "rabbia"), ("furia", "rabbia")}}
+
+
 def dominante(firma):
-    """emozione dominante della firma (dict): la piu' forte fra quelle con vettore; senza nessuna, la piu' forte"""
+    """emozione dominante della firma (dict), sempre con vettore (l'utente 09/11 sera): la piu' forte; se non ha vettore,
+    la media del suo petalo (PETALO); se non e' della ruota, la piu' forte fra quelle con vettore"""
+    top = max(firma, key=firma.get)
+    if top in CON_VETTORE:
+        return top
+    if top in PETALO:
+        return PETALO[top]
     con = [e for e in firma if e in CON_VETTORE]
     return max(con or firma, key=firma.get)
 

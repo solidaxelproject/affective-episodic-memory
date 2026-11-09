@@ -242,7 +242,7 @@ uno, = nodi_con("B6uno")
 assert uno[2] == "@agente:localhost" and uno[4] == "vissuto" and uno[3] == 0
 assert not nodi_con("B6due")
 tre, = nodi_con("B6tre")
-assert tre[1] == "B6tre voglio tenerlo Z=0.1" and tre[3] == 1   # forzato (ricorda-ora), voluto
+assert tre[1] == "B6tre voglio tenerlo Z=0.1" and tre[3] == 1   # forzato (+lux), voluto
 q, = nodi_con("B6q")
 assert q[3] == 1                                               # forzato corto: entra lo stesso
 cinque, = nodi_con("B6cinque")
@@ -455,7 +455,7 @@ assert len(nodi_con("B6insieme")) == 20
 sentinella(30)   # nessuna scrittura persa: ogni nodo ha i suoi vettori ed e' nel Lux
 
 # ---------- 13. recupero notturno ----------
-print("13. recupera: solo i mancanti, ricorda-ora, uscita 1 a servizio fermo, niente due volte", flush=True)
+print("13. recupera: solo i mancanti, uscita 1 a servizio fermo, niente due volte", flush=True)
 proc.kill()
 proc.wait()
 t13 = T0 + 770000
@@ -473,25 +473,19 @@ with open(J, "w") as fh:
               voce(t13 + 10, "B6nuovo dalla notte Z=0.2"),
               voce(t13 + 12, "B6dodici forzato Z=0.1"),   # gia' passato
               voce(t13 + 14, "B6forzato pendente Z=0.1"),                # gia' in coda
-              voce(t13 + 16, "B6uno forte e felice Z=1.63"),   # come un messaggio di 9 giorni fa: non e' un doppione
+              voce(t13 + 16, f"B6uno forte e felice Z={FORTE - 1.1:.2f}"),   # 09/11: la stessa del punto 1-4   # come un messaggio di 9 giorni fa: non e' un doppione
               voce(t13 + 20, "💭 **Reasoning:**\n```\npensieri\n```")]:   # vuoto dopo pulisci
         fh.write(json.dumps(m, ensure_ascii=False) + "\n")
-with open(FS.FORZATE, "w") as fh:
-    fh.write(json.dumps({"ts": t13 + 30, "testo": "B6sera", "forzato": True}) + "\n")
 FS.FERMA_MAX = 2
 assert FS.recupera(J) == 1
-assert os.path.exists(FS.FORZATE + ".in-coda") and not os.path.exists(FS.FORZATE)
-nuove = [json.loads(r)["testo"] for r in open(FS.CODA, encoding="utf-8").readlines()[-5:]]
+nuove = [json.loads(r)["testo"] for r in open(FS.CODA, encoding="utf-8").readlines()[-4:]]
 assert nuove == ["B6pendente in coda Z=0.2", "B6forzato pendente Z=0.1", "B6nuovo dalla notte Z=0.2",
-                 "B6uno forte e felice Z=1.63", "B6sera"], nuove
+                 f"B6uno forte e felice Z={FORTE - 1.1:.2f}"], nuove
 n_prima = len(open(FS.CODA).readlines())
 proc = servizio()
 FS.FERMA_MAX = 60
 assert FS.recupera(J) == 0
 assert len(open(FS.CODA).readlines()) == n_prima   # niente due volte
-assert not os.path.exists(FS.FORZATE + ".in-coda")
-sera, = nodi_con("B6sera")
-assert sera[3] == 1
 assert esiti()["B6nuovo dalla notte Z=0.2"] == "scartato"
 assert esito_a(t13 + 16) == "nodo"   # entrato e firmato: il dedup guarda solo le 24 ore prima
 assert sum(v["testo"] == "B6dodici forzato Z=0.1" for v in FS.registro().values()) == 1

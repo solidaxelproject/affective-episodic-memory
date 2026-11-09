@@ -55,7 +55,7 @@ fi
 /data/jspace/venv/bin/python sincronizza-richiami.py \
   || echo "$(date -Iseconds) sincronia richiami FALLITA (non critico: la prossima notte li riprende)"
 # B6 (01/11, engrammi/PIANO-FIRMA-ENGRAMMI.md): niente piu' tagging col 35B spento, i ricordi li fa firma-subito
-# durante il giorno. Qui: in coda i messaggi che il riflesso non ha passato (e ricorda-ora), coda svuotata, poi
+# durante il giorno. Qui: in coda i messaggi che il riflesso non ha passato, coda svuotata, poi
 # persistenza sugli scartati e omeostato dai ricordi nati dal marker in poi
 DA=$(stat -c %Y "$MARKER" 2>/dev/null || echo 0)
 FS="/data/jspace/venv/bin/python /data/memoria-episodica-affettiva/engrammi/firma_subito.py"
@@ -72,10 +72,8 @@ touch "$MARKER"
 # quanto manca alla prossima notturna possibile (lui non vede memoria-episodica-affettiva)
 touch /data/workspace/memoria/.ultima-notturna
 
-# SHY: il wiring hebbiano è diurno (ricorda.py); qui la notte riscala
-# giù i pesi e pota i legami non tornati. I causali (scottature) restano intatti.
-/data/jspace/venv/bin/python -c "import memoria; print('$(date -Iseconds) consolida_notte:', memoria.consolida_notte())" \
-  || echo "$(date -Iseconds) consolida_notte FALLITA (non critico)"
+# 09/11: tolta consolida_notte (SHY sugli archi hebbiani di memoria.db). Dopo qlux nessuno li crea piu':
+# restano intatti fino alla migrazione di memoria.db nel Lux. La funzione resta in memoria.py.
 
 # Lux degli engrammi (12/10): i ricordi nati stanotte entrano nel Lux che consegna
 # i ricordi al riflesso (taglio + archi nuovi, i rinforzi degli altri restano);
