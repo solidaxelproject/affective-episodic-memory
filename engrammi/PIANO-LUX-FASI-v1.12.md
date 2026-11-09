@@ -93,7 +93,9 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
    17/10). Per ogni emozione e del ricordo:
    ```
    w_i   = somma delle cariche attuali (emozione e) degli archi che toccano l'engramma i
-   S_e   = sum_i(w_i x F_i,e) / sum_i(w_i)          media delle firme degli engrammi, pesata per la carica degli archi
+   S_e   = sum_i(w_i x F_i,e) / sum_i(w0_i)         09/11 l'utente: diviso per le cariche ALLA NASCITA (w0, da C0 in lux.npz),
+                                                   cosi' lo sbiadimento abbassa la dose (con sum(w_i) si annullava;
+                                                   PROPOSTA-TABELLA-EMOZIONI.md, D3)
    D_e   = 0                                         se S_e < soglia_e
    D_e   = Dmin_e + (Dmax_e - Dmin_e) x (1 - exp(-S_e / k))   altrimenti
    ```
@@ -126,7 +128,21 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
    3. una GERARCHIA fra le emozioni, che le fa prevalere o le depotenzia in base al tipo di emozione e alla carica degli
       archi del ricordo (la carica dice anche l'intensita' delle emozioni degli engrammi che quegli archi connettono).
    Piu' i due tetti: sul numero di emozioni che passano (2-3, come nelle persone) e sulla dose totale (prova di accumulo).
-   **RICORDI IN CATENA NEL RAGIONAMENTO: PROTOCOLLO PER LA PRODUZIONE (l'utente 08/11/2026, "questo sistema entra in
+   **GESTIONE DELLA KV CACHE, PRIMO PASSO DEL CABLAGGIO (09/11/2026):** prima di cablare il vettore nel riflesso
+   si chiudono i due piani della cache, che toccano lo stesso codice: `PIANO-RIEPILOGO-KV.md` (20/10: checkpoint con
+   lo slot FATTO e compilato; riepilogo nel riflesso scritto e provato, NON in produzione ne' committato) e
+   `PIANO-REVISIONI-FUORI-CACHE.md` (24/10: manca T4, produzione). Il vettore appartiene alla KV cache del suo flusso
+   (chat o pensiero autonomo) e la segue quando le cache si scambiano (manutenzione/ROADMAP-bozza.it.md).
+   **UN RICORDO PER VOLTA: VETTORE NEL RAGIONAMENTO (l'utente 09/11/2026, supera la catena qui sotto e lo steering
+   attenuato nella risposta del 30/10).** Il vettore del ricordo consegnato si inietta durante il ragionamento e
+   termina quando il modello genera `</think>`; la risposta e' senza vettore. Dose = funzione del punto 7 (fra Dmin e
+   Dmax). Base: test chat del 09/11 (gioia a 2.0/1.32/0.6% per tutto il ragionamento, 12/12 integri; RELAZIONE E59).
+   **Stessa emozione, piu' ricordi (09/11/2026):** se il Lux richiama piu' ricordi con la STESSA emozione
+   dominante, si consegnano insieme, perche' il vettore e' uno solo; la dose e' quella del ricordo in cui
+   quell'emozione e' piu' forte (il massimo delle D_e, niente media ne' somma). Al massimo 4 ricordi (09/11).
+   Due emozioni quasi alla pari (l'utente 09/11, in quest'ordine): piu' rilevante (salienza del ricordo piu' alta, sal_dist e sal_se) > meno rilevante; intensa > base o
+   tenue; negativa > positiva o neutra.
+   **RICORDI IN CATENA NEL RAGIONAMENTO: PROTOCOLLO PER LA PRODUZIONE SUPERATO 09/11 dal paragrafo qui sopra, tenuto per storia. (l'utente 08/11/2026, "questo sistema entra in
    produzione").** Sostituisce la somma dei vettori dei ricordi e i range delle coppie, che cadono.
    - I ricordi della consegna (da 1 a 4, quanti ne da' il Lux) arrivano tutti insieme nella risposta del tool
      memorinvolontaria, prima del ragionamento, e il modello li legge SENZA vettore. Il vettore nel prefill del ricordo
@@ -162,6 +178,7 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
        x+2   a ########        b #######        c #####
    Servono quindi i range utili delle coppie composte (a + b) E dei vettori puri delle diadi (c), e il comportamento
    dei tre insieme (come la prova amore puro + estasi + ammirazione del 02/11, RELAZIONE E31).
+   ✅ FATTO 09/11 (backup 3): emozioni.json e costruisci-emozioni.py hanno "nostalgia" (tag TEN, en ed emoji invariati); tolto il ponte EN.pop("tenerezza") in sistema.py. Lux e wikilux NON toccati: le loro "tenerezza" sono parole dei testi (ricordo 658, pagine Wikipedia), non il nome dell emozione.
    ⛔ PASSO OBBLIGATO PRIMA DEL CABLAGGIO (06/11/2026: "mettilo come obbligato, altrimenti me ne dimentico"): la diade fiducia + tristezza (sentimentality) si chiama NOSTALGIA, non tenerezza (tenerezza in italiano sta vicino all'affetto). Nello steering il nome è già cambiato (sistema.py, confronto.py); in emozioni.json e nel Lux non ancora. Prima di cablare le diadi nel Lux: backup, poi in /data/memoria-episodica-affettiva/emozioni.json "it": "tenerezza" diventa "nostalgia" (tag TEN, en sentimentality ed emoji restano o li decide l'utente), migrazione dei nomi nei lux-meta.json delle versioni in uso e di wikilux-meta.json, costruisci-emozioni.py, poi grep di "tenerezza" in riflesso, tagger, avatar e pagine; la radice "nostalg" non è più della malinconia.
    (Superato dal 02/11, tenuto per storia:) Le DIADI non si iniettano come voci a se': la diade (amore = estasi +
    ammirazione, ...) nasce dalla fusione delle sue componenti nel profilo; la proporzione fra le componenti la danno i
@@ -185,8 +202,8 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
 
 Cablaggi nella notturna: `refactoring-notturna.md`.
 
-**Da decidere dopo i giri della ruota:** i valori della tabella delle emozioni (carica, sbiadimento) in unita' di dose,
-Dmin_e e Dmax_e per emozione (punto 7).
+**Tabella delle emozioni DECISA (09/11/2026):** fattore alla nascita e sbiadimento per notte delle 51 emozioni in
+`engrammi/PROPOSTA-TABELLA-EMOZIONI.md` (D1, D2, D3); Dmin_e e Dmax_e in `engrammi/DOSI-EMOZIONI.md`.
 
 **Dal piano di refactoring (22/10): via emotiva nel richiamo.** Il piano del 10/10 prevedeva tre vie del richiamo
 (testuale, semantica, emotiva); oggi `accendi` ha solo le prime due ("via emotiva assente" in `lux_engrammi.py`). In
