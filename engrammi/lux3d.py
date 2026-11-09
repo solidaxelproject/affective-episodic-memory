@@ -20,6 +20,7 @@ import lux_engrammi as X
 PORTA = 8131
 L = X.Lux()
 _firma = [None]
+IT = {e["en"]: e["it"] for e in json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "emozioni.json")))}   # 09/11: nella pagina il nome italiano
 COL = {e["en"]: e["colore"] for e in json.load(open("/data/memoria-episodica-affettiva/emozioni.json"))}   # palette emozione -> colore
 
 
@@ -40,7 +41,7 @@ def dati():
             continue
         par = "".join("{%s}" % mostra_par(int(p)) for p in L.P[p0:p0 + n])
         archi.append([a, b, r, pos, par, round(float(fa[j]), 3)])
-    return {"pos": np.round(P, 1).tolist(), "testi": L.testi, "emo": emo, "col": COL,
+    return {"pos": np.round(P, 1).tolist(), "testi": L.testi, "emo": emo, "col": COL, "it": IT,
             "ricordi": [sorted(ricordi_di.get(i, ())) for i in range(len(L.testi))], "archi": archi}
 
 

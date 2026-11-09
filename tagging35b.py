@@ -231,7 +231,7 @@ def inserisci(validi, isolati, Z, emos, soglia, dry):
             log.info("SCARTO (z=%.2f) %s", salienza, testo[:60])
             scartati.append(i)
             continue
-        dominante = max(firma, key=firma.get)
+        dominante = memoria.dominante(firma)   # 09/11: fra le emozioni con vettore
         # Regola 2 del contratto di navigazione (11/07): URL = "letto"
         classe = "letto" if re.search(r"https?://|www\.", testo) else "vissuto"
         log.info("NODO-%s (z=%.2f, %s) %s", classe.upper(), salienza, dominante, testo[:60])
@@ -259,7 +259,7 @@ def persistenza_notte(scartati, validi, Z, emos):
 
         def promuovi(testo, firma, vettore, ts, giorni):
             # addr_sem = bge-m3 del testo: la via semantica L29 non esiste piu' (P1 del piano della firma)
-            dominante = max(firma, key=firma.get)
+            dominante = memoria.dominante(firma)   # 09/11: fra le emozioni con vettore
             return memoria.add_node(testo, firma, torch.tensor(vettore), dominante, None,
                                     max(firma.values()), fonte="abitudine", ts=ts,
                                     classe="vissuto")

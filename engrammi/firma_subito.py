@@ -154,8 +154,7 @@ def firma(contesto, testo):
         raise Aspetta(f"lettura fallita ({e})")
     z = (r - st["mean"]) / (st["sd"] + 1e-6)
     f = {a: round(float(z[j]), 3) for j, a in enumerate(st["s"]["assi"])}
-    dom = max(f, key=f.get)
-    return f, f[dom], dom
+    return f, max(f.values()), memoria.dominante(f)   # 09/11: dominante fra le emozioni con vettore
 
 
 # ---------- nodi ----------
@@ -401,9 +400,8 @@ def notte(da_ts):
     sc = [(v["testo"], v["firma"], v["ts"]) for v in voci if v["esito"] == "scartato" and not URL_RE.search(v["testo"])]
 
     def promuovi(testo, firma, vettore, ts, giorni):
-        dom = max(firma, key=firma.get)
-        return memoria.add_node(testo, firma, torch.tensor(vettore), dom, None, firma[dom], fonte="abitudine", ts=ts,
-                                classe="vissuto")
+        return memoria.add_node(testo, firma, torch.tensor(vettore), memoria.dominante(firma), None, max(firma.values()),
+                                fonte="abitudine", ts=ts, classe="vissuto")
 
     firme = [v["firma"] for v in voci if v["esito"] in ("nodo", "trascinato")]
     if firme:   # prima della persistenza: se fallisce, la notte dopo rifa' tutto senza contare due volte eco e temi

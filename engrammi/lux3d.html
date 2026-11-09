@@ -231,7 +231,7 @@ function apri(html, x, y) {
 function popNeurone(i, x, y) {
   const r = D.ricordi[i];
   apri(`<h3 style="color:${D.col[D.emo[i]] || '#8ea0c9'}">engramma ${i}</h3><div class="t">${esc(D.testi[i])}</div>
-    <div class="m">emozione: ${D.emo[i] || '—'} · archi: ${archiDi[i].length} · ricordi: ${r.length}</div>
+    <div class="m">emozione: ${D.it[D.emo[i]] || D.emo[i] || '—'} · archi: ${archiDi[i].length} · ricordi: ${r.length}</div>
     <div class="m">${r.slice(0, 40).map(n => `<span class="rl" data-r="${n}">${n}</span>`).join(', ')}${r.length > 40 ? '…' : ''}</div>`, x, y);
 }
 function popArco(k, x, y) {

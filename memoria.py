@@ -17,6 +17,15 @@ DB = DIR / "memoria.db"
 VEC = DIR / "vettori.pt"
 # B7 (01/11, P3 di PIANO-FIRMA-ENGRAMMI.md): un solo ordine dei 51 assi, quello di emozioni.json
 EMOZIONI = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "emozioni.json")))
+# 09/11: la dominante di un ricordo e' la piu' forte fra le emozioni che hanno un vettore di steering
+# (engrammi/DOSI-EMOZIONI.md: 16 della ruota con la loro fascia + 20 diadi pure; fuori le inaccessibili, la morbosita'
+# esclusa e quelle mai provate)
+CON_VETTORE = {e["en"] for e in EMOZIONI if e["it"] in {
+    "gioia", "fiducia", "paura", "sorpresa", "tristezza", "disgusto", "rabbia", "attesa", "serenità", "estasi",
+    "ammirazione", "terrore", "stupore", "cordoglio", "vigilanza", "interesse",
+    "amore", "sottomissione", "soggezione", "disapprovazione", "rimorso", "disprezzo", "ottimismo", "colpa",
+    "curiosità", "disperazione", "invidia", "cinismo", "orgoglio", "speranza", "diletto", "nostalgia", "vergogna",
+    "pessimismo", "dominanza", "ansia"}}
 HEBB_GAIN = 0.1     # rinforzo per co-richiamo
 HEBB_BLEND = 0.25   # peso degli archi nel punteggio di recupero
 
@@ -66,6 +75,12 @@ def _save_vec(d):
     # B6 (01/11): file temporaneo e poi os.replace, uno stop a meta' scrittura non corrompe vettori.pt
     torch.save(d, f"{VEC}.tmp")
     os.replace(f"{VEC}.tmp", VEC)
+
+
+def dominante(firma):
+    """emozione dominante della firma (dict): la piu' forte fra quelle con vettore; senza nessuna, la piu' forte"""
+    con = [e for e in firma if e in CON_VETTORE]
+    return max(con or firma, key=firma.get)
 
 
 def addr_emo(firma):
