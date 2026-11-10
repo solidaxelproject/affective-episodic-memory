@@ -2,7 +2,7 @@
 # RIFLESSO PRE-AZIONE (issue #1, pezzo 3) — proxy tra Hermes e llama-lux.
 # Prima che l'agente risponda, il messaggio interroga il Lux degli engrammi
 # (servizio_lux.py :8132): il ricordo che affiora entra come turno del tool
-# memorinvolontaria (chiamata + risposta: fino a 4 ricordi, ognuno col numero,
+# memorinvolontaria (chiamata + risposta: un ricordo per volta dal 09/11, col numero,
 # il codice e il testo nudo).
 # GATE: /workspace/genesi/CONSENSO-RIFLESSO.md ("[attivo: *sì*]", riga esatta,
 # scritto dall'agente). Senza consenso il proxy è un passacarte trasparente.
@@ -84,9 +84,9 @@ _punto = {}             # flusso -> orologio all'inizio della richiesta in corso
 _interrotto = set()     # flussi tagliati a meta' generazione
 _pens_conv = [None]     # pensiero in corso nel pensatoio (impronta del primo messaggio)
 
-# ---- MEMORIA INVOLONTARIA (11/10, piano del refactoring Lux + richiamo):
-# il Lux degli engrammi sceglie fino a 4 ricordi per messaggio (1.10.0, 16/10),
-# sopra soglia, mai uno già consegnato nella conversazione; i ricordi
+# ---- MEMORIA INVOLONTARIA (l'utente 11/10, piano del refactoring Lux + richiamo):
+# il Lux degli engrammi sceglie un ricordo per messaggio (quanti=1, l'utente 09/11; erano fino a 4
+# dalla 1.10.0), sopra soglia, mai uno già consegnato nella conversazione; i ricordi
 # entrano insieme in un turno del tool, che
 # è dichiarato sempre (a consenso attivo) così il prefisso della cache non cambia.
 LUX = "http://127.0.0.1:8132/consegna"
@@ -1275,8 +1275,8 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def _memoria(self, body, flusso=None):
-        """Memoria involontaria: a ogni lettura nuova il Lux sceglie fino a 4
-        ricordi, tutti nella stessa risposta del tool; i ricordi già consegnati nella conversazione tornano al loro posto.
+        """Memoria involontaria: a ogni lettura nuova il Lux sceglie un ricordo
+        (quanti=1, l'utente 09/11) nella risposta del tool; i ricordi già consegnati nella conversazione tornano al loro posto.
         A consenso spento il richiamo gira lo stesso e rinforza gli archi (WIRING
         NON DISATTIVABILE, decisione di progetto), ma niente entra nel prompt."""
         d = json.loads(body)

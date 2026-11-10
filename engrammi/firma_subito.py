@@ -26,7 +26,7 @@ sys.path.insert(0, "/data/memoria-episodica-affettiva/engrammi")
 import firma_se as F  # noqa: E402
 import memoria  # noqa: E402
 import persistenza  # noqa: E402  (vettore = bge-m3 del messaggio intero, come le abitudini di B5)
-import tagging35b as T  # noqa: E402  (pulisci, contesto_di: gli stessi del tagging)
+import prepara_messaggi as T  # noqa: E402  (pulisci, contesto_di: gli stessi del tagging; 10/11 senza tagging35b)
 
 QUI = os.path.dirname(os.path.abspath(__file__))
 MEM = os.environ.get("MEM_SAM", "/data/workspace/memoria")   # MEM_SAM: copia per i test

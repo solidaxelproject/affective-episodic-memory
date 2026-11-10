@@ -131,8 +131,18 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
    **GESTIONE DELLA KV CACHE, PRIMO PASSO DEL CABLAGGIO (09/11/2026):** prima di cablare il vettore nel riflesso
    si chiudono i due piani della cache, che toccano lo stesso codice: `PIANO-RIEPILOGO-KV.md` (20/10: checkpoint con
    lo slot FATTO e compilato; riepilogo nel riflesso scritto e provato, NON in produzione ne' committato) e
-   `PIANO-REVISIONI-FUORI-CACHE.md` (24/10: manca T4, produzione). Il vettore appartiene alla KV cache del suo flusso
+   `PIANO-REVISIONI-FUORI-CACHE.md` (24/10: manca T4, produzione). 10/11: il riepilogo e' gia' IN PRODUZIONE (riflesso
+   del 09/11); nello stesso passo va cablato il blocco metadati dell'utente (stato del pensatoio, data e ora in coda
+   all'ultima risposta dell'agente, prefill anticipato dopo il riepilogo: PIANO-RIEPILOGO-KV.md 3.5, decisioni M1-M4). Il vettore appartiene alla KV cache del suo flusso
    (chat o pensiero autonomo) e la segue quando le cache si scambiano (manutenzione/ROADMAP-bozza.it.md).
+   **⛔ INIEZIONE IN PRODUZIONE = QUELLA DEI TEST (10/11/2026): i vettori di steering si iniettano nello stesso
+   modo delle prove, nel modello dentro luxifer.cpp (llama-35b, :8090).** Stessi vettori (out-occamy/vettori-*.pt,
+   sistema.sorgenti()), stessa normalizzazione e dose per strato L15-L31 (sistema.strati(): dir/norma * dose *
+   sqrt(2048)), stesse fasce (DOSI-EMOZIONI.md), stesso /control-vector con relative=true. Verificato 10/11:
+   llama-adapter.cpp di luxifer.cpp e di luxifer-prova applicano la stessa formula (h += rms(h)*v); la prova ha in piu'
+   solo LUXIFER_CVEC_NORMA (E39, scartata, spenta di default). Oggi il riflesso usa ancora ponte.dirs_emozione con
+   emo-cvec-v2.npz (vettori vecchi): va sostituito. Codice condiviso (10/11): MODULO UNICO fuori dalle prove,
+   importato da prove, confronto.py e riflesso (punto 0c della manutenzione).
    **UN RICORDO PER VOLTA: VETTORE NEL RAGIONAMENTO (l'utente 09/11/2026, supera la catena qui sotto e lo steering
    attenuato nella risposta del 30/10).** Il vettore del ricordo consegnato si inietta durante il ragionamento e
    termina quando il modello genera `</think>`; la risposta e' senza vettore. Dose = funzione del punto 7 (fra Dmin e
@@ -215,6 +225,13 @@ Cablaggi nella notturna: `refactoring-notturna.md`.
 (testuale, semantica, emotiva); oggi `accendi` ha solo le prime due ("via emotiva assente" in `lux_engrammi.py`). In
 questa fase la carica degli archi puo' diventare anche un indizio: un ricordo affiora piu' facilmente se la sua emozione
 somiglia a quella del momento (memoria congruente con l'umore, Bower 1981).
+**⛔ DECISIONE DELL'UTENTE (ribadita 10/11/2026: "e' importante", non doveva uscire dal codice): lo stato emotivo del
+modello si LEGGE IN PRODUZIONE con la J-lens e SELEZIONA il ricordo.** Era nella visione (firma emotiva letta dalla lens,
+richiamo congruente con lo stato corrente) e nella candidata 1 (lettura L29 in coordinate lente via /lux-read sulla coda
+del pensiero, ogni 25 token); l'ha tolta CC col refactoring del 10/10, SENZA decisione dell'utente (Lux degli engrammi =
+solo via testuale e semantica bge-m3). Va rimessa come via emotiva del richiamo della fase 2: emozione del momento letta sul modello -> ricordi con
+quella emozione favoriti. Da definire con l'utente nel piano del cablaggio: strato/strati e lente della lettura, ogni quanto,
+come pesa contro le altre due vie.
 
 **Fase 2, ultimo passo (22/10): `memoria.db` diventa superfluo.** Tutto quello che e' rimasto solo in
 `memoria.db` entra nel Lux, poi nessun componente vivo lo apre piu'.

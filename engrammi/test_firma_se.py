@@ -15,7 +15,7 @@ import numpy as np
 sys.path.insert(0, "/data/memoria-episodica-affettiva/engrammi")
 sys.path.insert(0, "/data/memoria-episodica-affettiva")
 import firma_se as F   # noqa: E402
-import tagging35b as T  # noqa: E402  (pulisci, contesto_di: la stessa preparazione del tagging)
+import prepara_messaggi as T  # noqa: E402  (pulisci, contesto_di: la stessa preparazione del tagging)
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8098"
 QUI = "/data/memoria-episodica-affettiva/engrammi"

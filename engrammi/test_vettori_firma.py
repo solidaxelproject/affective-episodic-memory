@@ -43,7 +43,7 @@ for e in C.FONTI:
 assert d["fonte"][EN["vigilanza"]] == C.FONTI["vigilanza"] == "sé-nuovo"
 # le diadi della pagina: la componente intensa dalla stessa fonte (sé-proprio per terrore e stupore)
 for e in ("terrore", "stupore"):
-    assert C.FONTI[e] == "sé-medio+proprio" and d["fonte"][EN[e]] == "sé-proprio"
+    assert C.FONTI[e] == d["fonte"][EN[e]] == "sé-proprio"   # 10/11: una tabella sola (steering.FONTI)
     src = S.sorgenti()["sé-medio+proprio"][EN[e]]
     assert cos(src[24].float(), d["vettori"][EN[e]][24]) > 0.9999, e
 

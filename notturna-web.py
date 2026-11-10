@@ -85,8 +85,7 @@ def _sistema():
             "riflesso": _pgrep("riflesso.py"),
             "pensatoio": mot == "active",
             "ultima_notturna": time.strftime("%d/%m %H:%M", time.localtime(mk)) if mk else "mai",
-            "prossima": ("adesso" if mk + 21600 <= time.time()
-                         else time.strftime("%d/%m %H:%M", time.localtime(mk + 21600))),
+            "prossima": "adesso",   # 10/11: nessun minimo fra due notturne
             "notturna_in_corso": _pgrep("notte-memoria.sh|tagging35b.py")}
 
 

@@ -6,7 +6,7 @@ Stessa geometria di lux3d.py (PCA 3D dei vettori bge-m3, colore = emozione princ
 solo sfere, archi, data e conteggi, quindi pubblicabile.
   /data/jspace/venv/bin/python lux3d-gif.py [out.gif]"""
 import json
-import re
+import os
 import sqlite3
 import sys
 import time
@@ -20,8 +20,8 @@ DB = "/data/workspace/memoria/memoria.db"
 W, H, MS = 640, 480, 90
 F_NASCITA, F_PAUSA, F_GIRO = 90, 8, 48
 BG = (11, 14, 26)
-COL = json.loads(re.search(r"COL=(\{.*?\});", open("/data/memoria-episodica-affettiva/grafo3d.py").read()).group(1))
-EMOZIONI = [e["en"] for e in json.load(open("/data/memoria-episodica-affettiva/emozioni.json"))]
+COL = {e["en"]: e["colore"] for e in json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "emozioni.json")))}   # 10/11: palette da emozioni.json (prima da grafo3d.py con una regex)
+EMOZIONI = [e["en"] for e in json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "emozioni.json")))]
 
 z = np.load(f"{DIR}/lux.npz")
 V, F, A = z["V"].astype(np.float32), z["F"], z["A"]

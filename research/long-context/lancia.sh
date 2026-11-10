@@ -1,4 +1,6 @@
 #!/bin/bash
+# Manutenzione 10/11: le prove chiuse (1-lente, 2-steering, 7-codici, prova_prefill, estrai_vettori, emovec_it, accumulo,
+# lanciatori e log della radice) sono in archivio-20261110/ (stessi percorsi): i modi che le usano non girano piu' da qui.
 # Prova contesto lungo (11/10/2026): J-lens e steering con contesti veri fino a 140k token.
 # Si lancia a mano, con l'agente e llama-35b SPENTI (la GPU serve tutta). Usa un llama-server di PROVA
 # (copia di luxifer.cpp con /lux-read esteso, patch in lux-read-lungo.diff; percorso in $LUXIFER_PROVA) sulla porta 8099: la produzione non si tocca.

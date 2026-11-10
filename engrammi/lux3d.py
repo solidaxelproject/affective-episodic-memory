@@ -21,7 +21,7 @@ PORTA = 8131
 L = X.Lux()
 _firma = [None]
 IT = {e["en"]: e["it"] for e in json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "emozioni.json")))}   # 09/11: nella pagina il nome italiano
-COL = {e["en"]: e["colore"] for e in json.load(open("/data/memoria-episodica-affettiva/emozioni.json"))}   # palette emozione -> colore
+COL = {e["en"]: e["colore"] for e in json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "emozioni.json")))}   # 10/11: palette da emozioni.json (prima da grafo3d.py con una regex)
 
 
 def dati():

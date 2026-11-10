@@ -5,14 +5,11 @@
 set -u
 cd /data/memoria-episodica-affettiva
 
-# GUARDIA ANTI-DOPPIONE (19/07): da quando l'agente può chiedere la notturna da solo
-# (.notte-richiesta), cron e richiesta possono sovrapporsi: minimo 6 ore tra
-# due notturne (l'avviso di stanchezza arriva a 16h: dopo, deve poter dormire
-# SUBITO, quindi la guardia resta solo come freno anti-raffica).
+# GUARDIA ANTI-DOPPIONE: cron e richiesta dell'agente (.notte-richiesta) possono sovrapporsi. 10/11: tolto il
+# minimo di 6 ore fra due notturne (ormai durano pochi secondi); resta solo il lucchetto: mai due notturne insieme.
 MARKER=/data/memoria-episodica-affettiva/.ultimo-consolidamento
-if [ -n "$(find "$MARKER" -mmin -360 2>/dev/null)" ]; then
-  echo "$(date -Iseconds) consolidamento recente (<6h): salto"; exit 0
-fi
+exec 9>/tmp/notte-memoria.lock
+flock -n 9 || { echo "$(date -Iseconds) notturna gia' in corso: salto"; exit 0; }
 
 # FINESTRA DINAMICA (19/07): si estrae dal marker in poi (+2 minuti di
 # margine), non un fisso 1.1 giorni: la finestra è la prima difesa contro i

@@ -74,7 +74,7 @@ for nid, firma, tag, sal in nodi:
     f = json.loads(firma)
     ok(list(f) == assi, f"nodo {nid}: assi della firma {list(f)[:3]}...")
     ok(all(np.isfinite(x) for x in f.values()), f"nodo {nid}: firma non finita")
-    ok(tag == R.T.memoria.dominante(f), f"nodo {nid}: emo_tag {tag} non e' la dominante (memoria.dominante)")
+    ok(tag == R.memoria.dominante(f), f"nodo {nid}: emo_tag {tag} non e' la dominante (memoria.dominante)")
     ok(tag in cvec, f"nodo {nid}: emo_tag {tag} assente dai vettori del riflesso")
     ok(abs(sal - max(f.values())) < 1e-3, f"nodo {nid}: salienza {sal} != max z {max(f.values())}")
 ok(any(classi[n] == "letto" for n, *_ in nodi), "nessun nodo 'letto' controllato")
@@ -85,7 +85,7 @@ for nid, firma, *_ in nodi:
     if nid in vec:
         f = json.loads(firma)
         a = vec[nid]["addr_emo"]
-        ok(torch.allclose(a, R.T.memoria.addr_emo(f), atol=1e-6),   # B7: 51 assi nell'ordine di emozioni.json
+        ok(torch.allclose(a, R.memoria.addr_emo(f), atol=1e-6),   # B7: 51 assi nell'ordine di emozioni.json
            f"nodo {nid}: addr_emo diversa dalla firma")
 
 print("3. statistiche", flush=True)

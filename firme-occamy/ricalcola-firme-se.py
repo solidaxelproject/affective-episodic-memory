@@ -29,7 +29,8 @@ import torch
 sys.path.insert(0, "/data/memoria-episodica-affettiva")
 sys.path.insert(0, "/data/memoria-episodica-affettiva/engrammi")
 import firma_se as F  # noqa: E402
-import tagging35b as T  # noqa: E402  (pulisci, contesto_di: gli stessi del tagging)
+import memoria  # noqa: E402
+import prepara_messaggi as T  # noqa: E402  (pulisci, contesto_di: gli stessi del tagging)
 
 QUI = "/data/memoria-episodica-affettiva/firme-occamy"
 CHAT = f"{QUI}/chat-completa-0111.jsonl"
@@ -165,7 +166,7 @@ def calcola():
     for (tipo, nid, _, _), z, s in zip(v, Z, sal):
         if tipo == "nodo":
             firma = {a: round(float(z[j]), 3) for j, a in enumerate(assi)}
-            nuove[nid] = (firma, T.memoria.dominante(firma), float(s))   # 09/11: come firma_subito
+            nuove[nid] = (firma, memoria.dominante(firma), float(s))   # 09/11: come firma_subito
     stats = {"versione": 2, "assi": assi, "strati": F.STRATI, "vettori": VETTORI,
              "fonti": torch.load(VETTORI, weights_only=False)["fonte"],
              "lettore": f["modello"], "n": len(X), "mean": torch.tensor(mean), "M2": torch.tensor(M2),
@@ -202,7 +203,7 @@ def scrivi(dry):
         return res
 
     bak = f".bak-pre-firme-se-{time.strftime('%Y%m%d-%H%M%S')}"
-    M = T.memoria
+    M = memoria
     M.DB, M.VEC = M.Path(DB), M.Path(VEC)
     with open(f"{DB}.lock", "w") as lk:   # 09/11: lo stesso lucchetto di memoria.add_node, backup compreso
         fcntl.flock(lk, fcntl.LOCK_EX)
