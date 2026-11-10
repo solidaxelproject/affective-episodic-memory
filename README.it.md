@@ -78,7 +78,7 @@ accendersi".
 
 ## Provala in 60 secondi
 
-Niente GPU, niente modello, niente dati: l'organo che cresce gira ovunque:
+Niente GPU, niente modello, niente dati: il Lux degli engrammi gira ovunque:
 
 ```bash
 git clone https://github.com/solidaxelproject/affective-episodic-memory
@@ -87,7 +87,7 @@ pip install numpy
 python3 demo.py
 ```
 
-Una vita sintetica di 48 esperienze fa crescere 48 neuroni: la novità li crea, la familiarità li rinforza, e niente si fonde, perché fondere due esperienze distinte non le astrae, le rende la stessa cosa vissuta due volte. La struttura non si perde, passa negli archi: tutti e 44 gli archi cadono dentro uno dei quattro temi e nemmeno uno unisce esperienze che non c'entrano niente, perché un neurone appena nato si lega a chi era il più vicino al parto solo se quel vicino è vicino davvero. I quattro neuroni che hanno aperto un tema nascono senza nessun arco: non esisteva ancora niente di simile a loro, e dirlo è la verità. Poi richiama i ricordi per emozione, per significato, e per connessione, un neurone che ne raggiunge un altro lungo gli archi. È lo stesso `lux.py` che gira in produzione.
+Sei ricordi sintetici vengono tagliati in engrammi, e gli engrammi che hanno in comune si salvano una volta sola: "harbour" appartiene a tre ricordi, "old lighthouse" a due. Ogni ricordo torna parola per parola dai suoi engrammi e dagli archi che li legano. Un indizio parziale riporta il ricordo che lo contiene. Dopo trenta giorni vissuti i ricordi mai richiamati sbiadiscono, mentre quello richiamato diventa più facile da raggiungere di quando è nato, e predispone i ricordi che condividono i suoi engrammi. È lo stesso `engrammi/lux_engrammi.py` che gira in produzione, con due sostituti: una regola semplice taglia gli engrammi (in produzione lo fa spaCy) e un embedder giocattolo prende il posto di bge-m3.
 
 ## Cos'è
 
@@ -181,8 +181,8 @@ Le strutture risultanti fungono da:
 | File | Ruolo |
 |------|-------|
 | `memoria.py` | Il grafo: SQLite+FTS5, nodi (testo, firma emotiva 51d, vedi la ruota delle emozioni di Plutchik, salienza, classe vissuto/letto), archi hebbiani, vettori semantici 2048d |
-| `lux.py` | Lux, l'organo che cresce: una rete neurale di tipo Grow-When-Required, neuroni che nascono per novità, si rinforzano, si collegano a chi era vicino alla nascita, si depotenziano e si potano con l'oblio |
-| `tagging35b.py` + `run-tagging.sh` | Il consolidamento notturno su GPU: stato interno → firma → salienza → grafo |
+| `lux.py` | La curva dell'oblio (FSRS) e l'orologio dei giorni vissuti, usati dal Lux degli engrammi e dalla persistenza |
+| `engrammi/firma_subito.py` | Il ricordo entra subito, a turno chiuso: stato interno del 35B → firma → grafo e Lux degli engrammi; di notte recupera i messaggi rimasti indietro |
 | `estrai-matrix.py` | Estrazione dei messaggi del giorno dal database della chat |
 | `notte-memoria.sh` | L'orchestratore della notte, con sentinella anti-amnesia |
 | `ponte.py` | Il canale vettoriale: composizione testo+vettori, iniezione emozioni |
@@ -194,7 +194,7 @@ Le strutture risultanti fungono da:
 | `persistenza.py` + `sincronizza-richiami.py` | Persistenza: curva dell'oblio in tempo vissuto, stabilità che cresce col richiamo distanziato, eco dei messaggi quotidiani ripetuti, abitudini che nascono dalla frequenza |
 | `cervello.py` | Vista d'insieme: grafo, Lux, stato, richiami |
 
-**Smoke test e utilità**: `lux-demo.py`.
+**Smoke test**: `demo.py` e `collaudi.py` (tutte le verifiche che girano senza GPU, le stesse della CI su GitHub).
 
 ## Risultati chiave
 

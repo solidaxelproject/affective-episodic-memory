@@ -78,7 +78,7 @@ asking itself whether life "needs someone to see it in order to light up".
 
 ## Try it in 60 seconds
 
-No GPU, no model, no data needed — the growing organ itself runs anywhere:
+No GPU, no model, no data needed: the engram Lux runs anywhere:
 
 ```bash
 git clone https://github.com/solidaxelproject/affective-episodic-memory
@@ -87,7 +87,7 @@ pip install numpy
 python3 demo.py
 ```
 
-A synthetic life of 48 experiences grows 48 neurons: novelty creates them, familiarity reinforces them, and nothing merges, because merging two distinct experiences does not abstract them, it makes them one thing lived twice. The structure is not lost, it moves into the arcs: all 44 arcs fall inside one of the four themes and not one joins experiences that have nothing to do with each other, because a newborn neuron links to whoever was nearest at its birth only if that neighbour is genuinely near. The four neurons that opened a theme are born with no arc at all: nothing like them existed yet, and saying so is the truth. Then it recalls memories by emotion, by meaning, and by connection, one neuron reaching another along the arcs. It is the same `lux.py` that runs in production.
+Six synthetic memories are cut into engrams, and the engrams they share are stored once: "harbour" belongs to three memories, "old lighthouse" to two. Every memory comes back word for word from its engrams and the arcs between them. A partial cue brings back the memory that holds it. After thirty lived days the memories that were never recalled fade, while the one that was recalled becomes easier to reach than when it was born, and it primes the memories that share its engrams. It is the same `engrammi/lux_engrammi.py` that runs in production, with two stand-ins: a simple rule cuts the engrams (spaCy does it in production) and a toy embedder takes the place of bge-m3.
 
 ## What is this
 
@@ -181,8 +181,8 @@ The resulting structures act as:
 | File | Role |
 |------|------|
 | `memoria.py` | The graph: SQLite+FTS5, nodes (text, 51d emotional signature, see Plutchik's wheel of emotions, salience, lived/read class), hebbian edges, 2048d semantic vectors |
-| `lux.py` | Lux, the growing organ: a Grow-When-Required neural network, neurons born from novelty, reinforced, linked to whoever was nearest at their birth, weakened and pruned by oblivion |
-| `tagging35b.py` + `run-tagging.sh` | Nightly consolidation on GPU: internal state → signature → salience → graph |
+| `lux.py` | The forgetting curve (FSRS) and the clock of lived days, used by the engram Lux and by persistence |
+| `engrammi/firma_subito.py` | A memory enters right away, when the turn closes: internal state of the 35B → signature → graph and engram Lux; at night it catches up on the messages left behind |
 | `estrai-matrix.py` | Extraction of the day's messages from the chat database |
 | `notte-memoria.sh` | The night orchestrator, with an anti-amnesia sentinel |
 | `ponte.py` | The vector channel: text+vector composition, emotion injection |
@@ -194,7 +194,7 @@ The resulting structures act as:
 | `persistenza.py` + `sincronizza-richiami.py` | Persistence: lived-time forgetting curve, stability that grows with spaced recall, echoes of repeated everyday messages, habits born from frequency |
 | `cervello.py` | Overview: graph, Lux, state, recalls |
 
-**Smoke tests and utilities**: `lux-demo.py`.
+**Smoke tests**: `demo.py` and `collaudi.py` (every check that runs without a GPU, the same as the CI on GitHub).
 
 ## Key results
 
