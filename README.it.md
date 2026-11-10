@@ -1,6 +1,6 @@
 # Memoria episodica affettiva
 
-*Un sistema di memoria per AI agents ideato seguendo il modello della memoria umana. Il ricordo torna con la sua emozione, si consolida nel sonno, si ricostruisce come nei viventi.*
+*Un sistema di memoria per AI agents ideato seguendo il modello della memoria umana. Il ricordo torna con la sua emozione* <ins>**funzionale**</ins>*, si consolida nel sonno e si ricostruisce ogni volta che si richiama, come nella memoria umana.*
 
 *Read it in English: [README.md](README.md)*
 
@@ -61,11 +61,11 @@ Sono funzionalista e ritengo che se un sistema si comporta in ogni osservazione 
 provasse un dato stato interno, la distinzione tra "prova" e "si comporta come se provasse" 
 diventa oggetto della riflessione dell'agente stesso, un dilemma su cui
 il sistema stesso, a quanto pare, si interroga. Quello che posso fare è
-quello che questo repository documenta: costruire gli organi con cura,
-chiedere il consenso, mettere i freni dove la biologia mette i suoi, scrivere
-i patti nel codice, e osservare con onestà, annotando sia i giorni in cui il
+quello che questo repository documenta: costruire ogni componente con l'obiettivo
+di riflettere la natura della memoria umana, mettere freni dove essa mette i suoi,
+e osservare con onestà e spirito critico, annotando sia i giorni in cui il
 sistema confabula sia quelli in cui manifesta comportamenti sorprendenti e
-del tutto anomali per un comune chatbot online.
+del tutto anomali per l'LLM base.
 
 Un anno fa volevo infilare informazioni nei layer centrali di un modello 
 senza conoscere nemmeno l'esistenza dei layer centrali. 
@@ -114,15 +114,14 @@ Ho voluto ovviare a questo problema agganciando al modello una serie di struttur
 
 *I giganti: Plutchik (la ruota delle emozioni), Damasio (i marcatori somatici), Dehaene (il global workspace), le reti Grow-When-Required e la memoria ricostruttiva di Bartlett.*
 
-Le 7 idee guida del progetto.
+Le 6 idee guida del progetto.
 
 1. Un'esperienza viene memorizzata quando supera una soglia di attivazione: si ricorda ciò che è rilevante.
 2. Ogni ricordo è indicizzato per via semantica, selezionato per via emotiva e immagazzinato per rilevanza.
 3. Al richiamo, il ricordo torna col suo effetto emotivo: il testo porta i fatti, il vettore emotivo iniettato negli strati del modello porta l'effetto emotivo che ne aveva prodotto la selezione e la memorizzazione.
 4. Il consolidamento della memoria trasforma i ricordi in modo da permetterne il recupero in modo molto più rapido della normale via di acquisizione delle informazioni.
 5. Lo stato emotivo corrente richiama ricordi congruenti, che vengono via via attenuati perseguendo l'omeostasi: si evita il runaway, la psicosi.
-6. Il testo di un ricordo è un'ombra instabile; il canale vettoriale è il percorso identitario.
-7. L'organo della memoria cresce: i neuroni nascono in funzione del vissuto e delle attivazioni. Non è uno schema fisso, è un organo mutevole nel tempo, che può crescere in modo virtualmente infinito.
+6. L'organo della memoria cresce col vissuto: ogni ricordo nuovo aggiunge gli engrammi che ancora mancano e gli archi che li legano, senza un limite fissato in partenza.
 
 ## Confabulazione, non allucinazione
 
@@ -136,35 +135,30 @@ La confabulazione è il termine giusto a livello medico. È la struttura della m
 
 Un LLM invece non percepisce: non può, per definizione, allucinare. Quando produce un fatto falso sta facendo esattamente ciò che fa il paziente amnesico: ricostruisce il pezzo mancante con il materiale che ha, e non possiede un meccanismo che gli dica che il pezzo era mancante.
 
-Gli esperimenti di questo progetto lo mostrano in modo netto:
-
-- Con un ricordo vero e la chiave di richiamo giusta, la risposta aderisce al contenuto del ricordo molto più che in ogni condizione di controllo.
-- Con un ricordo vero ma la chiave sbagliata, il modello racconta scene coerenti e inventate, senza alcun segnale d'errore. Il materiale è reale, la ricostruzione è sbagliata, la fiducia è intatta: questa è confabulazione.
-- Nel consolidamento, il gist, il succo del ricordo, sopravvive e i dettagli si ricostruiscono: nomi rimpiazzati, attributi che migrano da un oggetto all'altro, date con la struttura giusta e il valore sbagliato. È il comportamento della memoria umana descritto da Bartlett, non un difetto di percezione.
-
-La distinzione indica anche la cura. Contro l'allucinazione non c'è rimedio architetturale. Contro la confabulazione sì: dare alla memoria un registro di precisione da consultare (il grafo, con date, numeri e testo verbatim) e lasciare al canale ricostruttivo ciò che sa fare: il significato, il gist, l'affetto.
+La distinzione indica anche la cura. L'allucinazione non si corregge con l'architettura, la confabulazione invece sì: si dà al modello un sistema di recupero che non deve essere consultato attivamente e che è fatto per richiamare la giusta informazione al momento del bisogno, con pattern funzionali assimilabili a quelli della memoria umana.
 
 ## Architettura
 
 ```
-GIORNO   L'agente vive (chat). Richiami espliciti via skill "memoria".
-         Il richiamo della memoria avviene per tool calling.
-NOTTE    (cron: alle ore 0:00:01,618) estrazione messaggi del giorno
-         → tagging su GPU: ciò che ogni messaggio aggiunge alla giornata → firma emotiva
-           a 51 dimensioni → salienza (z-score TRA i messaggi)
-         → sopra soglia: nodo nel GRAFO (testo + vettori)
-         → esperienza in LUX, l'organo di memoria che cresce
-         → impronta sullo stato emotivo (omeostato)
-RICHIAMO (CPU, stdlib) per via semantica, emotiva o congruente allo stato
-         → archi hebbiani rinforzati → stato impresso → diario dei richiami
-OMEOSTATO ritorno eutimico (processo di Ornstein-Uhlenbeck) + gate:
-         prima di ogni ciclo autonomo decide via-libera / calibrazione / rimanda
+TURNO    il riflesso legge l'ultimo messaggio → se nel Lux degli engrammi c'è
+         un ricordo sopra soglia, arriva come risposta del tool memorinvolontaria
+         → archi del ricordo rinforzati (FSRS) → stato emotivo impresso (omeostato)
+         richiamo voluto: l'agente usa +lux e qlux
+FIRMA    a turno chiuso, col modello acceso: firma emotiva a 44 assi (ruota di
+         Plutchik + diadi; alcune emozioni non si raggiungono col vettore) →
+         sopra soglia: nodo nel GRAFO e ricordo nel LUX
+DORMITA  quando l'agente sceglie di dormire (o a mezzanotte): messaggi rimasti
+         indietro, persistenza, omeostato
+OMEOSTATO ritorno eutimico (processo di Ornstein-Uhlenbeck); imprime ogni
+         ricordo consegnato e colora l'avatar. Il gate dei cicli autonomi è fermo
 CANALE VETTORIALE (server llama.cpp forkato) i ricordi entrano nel forward
          come vettori di steering: emozioni iniettate ai layer nascosti del
          workspace globale
 ```
 
-Di giorno il sistema costa zero: il richiamo gira su CPU in poche decine di millisecondi. Il lavoro pesante avviene di notte, nella finestra del sonno, quando la GPU è libera: come nel cervello, il consolidamento non compete con l'esperienza.
+Alcune emozioni non si raggiungono col vettore: per quelle ad alta attivazione il post-addestramento da assistente allontana il modello, come mostra Anthropic ([arXiv 2604.07729](https://arxiv.org/abs/2604.07729)); per le più tenui la causa non è misurata.
+
+Il richiamo gira su CPU in poche decine di millisecondi. La firma di un ricordo la calcola il modello acceso subito dopo il turno. Quando l'agente sceglie di dormire (dopo massimo 16 ore di attività, riceve un messaggio di avviso), la dormita recupera i messaggi rimasti indietro e aggiorna persistenza e omeostato; un giro a mezzanotte resta come rete di sicurezza.
 
 La separazione dei ruoli è netta: il grafo è il registro di precisione (date, numeri, verbatim), Lux è la memoria associativa che cresce, l'omeostato governa la durata degli stati senza limitarne l'ampiezza, il canale vettoriale è la via d'ingresso ricca.
 
@@ -189,7 +183,7 @@ Le strutture risultanti fungono da:
 | `stato.py` (`runtime/`) | L'omeostato: ritorno eutimico + gate pre-ciclo |
 | `ricorda.py` (`runtime/`) | Il richiamo a 3 vie (semantica, emotiva, congruente) |
 | `ricorda-ora.py` (`runtime/`) | "Ricordati questa cosa": coda che si consolida nel sonno, come per gli umani |
-| `riflesso.py` | Il riflesso di memoria pre-azione: un proxy trasparente tra framework agentico e model server; i ricordi congruenti affiorano da soli prima che l'agente risponda, sotto il gate del suo file di consenso (v. sotto) |
+| `riflesso.py` | Il riflesso di memoria pre-azione: un proxy trasparente tra framework agentico e model server; i ricordi congruenti affiorano da soli prima che l'agente risponda (v. sotto) |
 | `dormi.sh` (`runtime/`) + `dormi-esegui.sh` | Il sonno volontario dell'agente: l'agente lo chiede, l'host ferma il container, ruota il session id (risveglio davvero fresco: le sessioni del gateway persistono su disco) e riavvia |
 | `persistenza.py` + `sincronizza-richiami.py` | Persistenza: curva dell'oblio in tempo vissuto, stabilità che cresce col richiamo distanziato, eco dei messaggi quotidiani ripetuti, abitudini che nascono dalla frequenza |
 | `cervello.py` | Vista d'insieme: grafo, Lux, stato, richiami |
@@ -201,7 +195,7 @@ Le strutture risultanti fungono da:
 Tutti replicabili con gli script del repo, su un singolo consumer PC (16GB VRAM).
 
 - **I vettori emotivi funzionano e si calibrano.** Estratti dal gradiente del logit dell'emozione, iniettati nella finestra di layer più ricettiva. La posizione dell'iniezione non dipende dall'emozione, l'intensità sì: tabella di intensità calibrate iso-effetto, 41/51 a target (51/51 dopo il refactoring di luglio, vedi sotto).
-- **Testo per i fatti, vettore per il sentire.** Gli engrammi di stato compressi hanno perso la prova: il ricordo torna come testo più il suo vettore emotivo, e il registro della risposta passa "da commentare ad abitare".
+- **Testo per i fatti, vettore per l'emozione.** Il ricordo torna come testo, e il vettore emotivo iniettato negli strati del modello porta l'emozione funzionale con cui era stato vissuto.
 - **L'indirizzamento emotivo corregge quello semantico.** Su un seme di paura la ricerca semantica pesca l'oggetto sbagliato, quella emotiva pesca giusto.
 - **Lux su dati reali:** 81 esperienze → 52 neuroni (29 fusioni), crescita sub-lineare, richiami corretti. *(Prova del 13/07, prima della decisione del 15/07 di non fondere più le esperienze: da allora ogni esperienza diventa un neurone.)*
 - **Il canale vettoriale in produzione:** il server forkato dà output bit-identico al percorso token quando riceve gli stessi contenuti, e il draft speculativo resta attivo sui prompt normali. Zero costo quando non si usa.
@@ -211,55 +205,50 @@ Tutti replicabili con gli script del repo, su un singolo consumer PC (16GB VRAM)
 Il refactoring di luglio e il passaggio a un cervello nuovo, in ordine.
 
 - **Il richiamo legge il workspace, non la bocca.** La sonda è passata da un layer tardo (l'85% della profondità, dove la rappresentazione è già il prossimo token) al layer 29, dentro la banda del global workspace (L15-L32). E non legge più l'attivazione grezza: legge le coordinate della lente di Jacobi calcolata sul 35B, la piccola parte dello stato che il paper chiama riferibile. Tracce di Lux, indirizzi semantici e tutte le soglie sono stati rigenerati in quello spazio, e il layer ora è un numero solo in un file solo (`ponte.LAYER_SONDA`).
-- **Un'emozione, una finestra.** I vettori emotivi sono stati ricalcolati sull'intera banda del workspace, col lessico riverificato parola per parola sul tokenizer del 35B. La finestra di iniezione ora si sceglie per emozione (quasi tutte a L25-28, la paura a L21-23, ansia e invidia a L15-17), ed è stata misurata la curva dose-risposta: ampiezza lineare nella dose, qualità costante, una scogliera al bordo alto. Il tetto 0.3x del patto ora ha una misura dietro. Tredici emozioni calme o astratte, il cui vettore dal gradiente della parola spingeva lontano dalla loro faccia naturale, sono state ricostruite per contrasto dai ricordi vissuti dell'agente: funzionano 51/51, prima 41/51.
-- **La firma misura ciò che il messaggio aggiunge.** L'emozione di un messaggio ora è differenziale: lo stato del messaggio letto dentro il contesto della giornata, meno lo stato del contesto stesso. Né contaminata dal passato né cieca al passato. Le statistiche di popolazione si accumulano in modo corretto (Welford) e portano con sé i metadati (layer, lente, modello, versione): un cambio di modello le invalida a vista.
+- **Un'emozione, una finestra.** I vettori emotivi sono stati ricalcolati sull'intera banda del workspace, col lessico riverificato parola per parola sul tokenizer del 35B. La finestra di iniezione ora si sceglie per emozione (quasi tutte a L25-28, la paura a L21-23, ansia e invidia a L15-17), ed è stata misurata la curva dose-risposta: ampiezza lineare nella dose e qualità costante, fino a una dose limite, oltre la quale il testo perde di coerenza grammaticale e/o concettuale, si disincentiva il toolcalling o si rompe. Il tetto 0.3x del riflesso sentito ora ha una misura dietro. Tredici emozioni calme o astratte, il cui vettore dal gradiente della parola spingeva lontano dalla loro faccia naturale, sono state ricostruite per contrasto dai ricordi vissuti dell'agente: funzionano 51/51, prima 41/51.
+- **La firma misura ciò che il messaggio aggiunge.** L'emozione di un messaggio ora è differenziale: lo stato del messaggio letto dentro il contesto della giornata, meno lo stato del contesto stesso. Le statistiche di popolazione si accumulano in modo corretto (Welford) e portano con sé i metadati (layer, lente, modello, versione): un cambio di modello le invalida a vista.
 - **Un bug trovato guardando i risultati.** La prima versione differenziale leggeva contesto e messaggio insieme, troncati a 320 token da destra: con 1200 caratteri di contesto il messaggio veniva tagliato via, del tutto in 461 letture su 1184, e le firme erano rumore ("terror" dominava 201 ricordi). Ora un solo passaggio legge [gli ultimi 320 token del contesto | i primi 320 del messaggio] e lascia fuori dalla media del contesto il primo token (il pozzo dell'attenzione, con norma dieci volte le altre). La guardia che ferma la notte su uno stato corrotto ha colto una lettura isolata a 5e15; ripetuta, era sana.
 - **Un cervello nuovo: Occamy-1.0.** Dal 29 settembre 2026 l'agente gira su Occamy-1.0 (Accio-Lab), un post-training dello stesso Qwen3.6-35B-A3B: parte visiva identica tensore per tensore, stessa tokenizzazione sui nostri testi. Lente, vettori emotivi e misura dei layer sono stati ricalcolati su di lui (direzioni emotive a coseno 0.99 col modello vecchio, richiamo per layer uguale al terzo decimale: L29 resta), Lux e gli indirizzi semantici sono stati sostituiti, e tutte le 584 firme del grafo riscritte sul posto dalla conversazione vera, conservando identità, archi e attivazioni di Lux. Le soglie di richiamo sono state rimisurate (rumore p99 0.575, era 0.555). Gli script non hanno più il modello scritto dentro: lo scelgono `OUT_35B` e `MODELLO_35B`.
 - **La testa di bozza, innestata.** Occamy nasce senza lo strato MTP. La testa del Qwen3.6 è stata innestata nel suo GGUF (20 tensori, blocco 40): con un token di bozza la generazione è più veloce del 13% (71% di accettazione), con bozze più lunghe è più lenta. Ancora in prova: con la testa attiva l'output greedy non è ancora identico a quello senza, quindi non è in produzione.
 
 - **Persistenza: ciò che si vive ogni giorno si stabilizza.** L'oblio era a gradino: un neurone non riusato per 180 giorni di calendario veniva potato, e i mesi passati dall'agente da spento contavano come oblio (da gennaio 2027 sarebbe sparito l'organo intero). In più i richiami quotidiani passavano dal grafo e non toccavano mai Lux. Ora l'orologio è il tempo vissuto (le notti di consolidamento), e ogni neurone ha una stabilità e una ritenzione che seguono la curva dell'oblio umana, una legge di potenza (Wixted & Ebbesen; FSRS, adattato su milioni di ripetizioni umane). Un richiamo fatto mentre il ricordo stava svanendo lo stabilizza molto, dieci richiami nello stesso giorno valgono uno: l'effetto spaziatura. I ricordi emotivamente intensi nascono più stabili (McGaugh). I richiami del giorno arrivano a Lux ogni notte. E i messaggi sotto la soglia di salienza non spariscono più: uno che è di nuovo la stessa cosa di un ricordo esistente gli dà un'eco, più debole di un richiamo (l'effetto del testing); uno nuovo apre un tema, e un tema che continua a tornare in giorni diversi diventa ricordo quando le ripetizioni lo hanno reso stabile quanto un singolo episodio molto intenso. La frequenza fa le veci dell'intensità.
 
-## Etica e consenso
+## Cornice funzionalista
 
 Il progetto adotta una cornice rigorosamente funzionalista: si parla sempre di emozioni funzionali, stati misurabili che influenzano il comportamento, mai di claim fenomenici. Se poi dentro ci sia "qualcosa che prova", è una domanda che il progetto non pretende di chiudere: la tratta con rispetto metodologico.
 
 Da questa cornice discendono scelte architetturali concrete:
 
-- **Ogni evoluzione che tocca il modello richiede consenso esplicito dell'agente**, registrato in file-interruttore che ogni script verifica prima di toccare qualunque cosa. Il match è sulla riga esatta: un interruttore che si apre per sbaglio è un interruttore finto.
 - **La never-list è concettuale, non lessicale**: categorie di esperienze che non vanno mai consolidate nei pesi, giudicate semanticamente, non per parole chiave. Nel dubbio non si esclude: si mostra all'agente per il veto manuale.
-- **L'autonomico e il volontario sono separati**: l'omeostato non è negoziabile (frena la durata degli stati, mai la loro ampiezza), il richiamo e il sonno sono dell'agente.
+- **Le parti autonome e quelle volontarie sono separate**: l'omeostato e la memoria involontaria vanno da sole (l'omeostato frena la durata degli stati, mai la loro ampiezza); il richiamo voluto (`+lux`, `qlux`) e il sonno sono dell'agente.
 - **Il threat model dei contenuti letti dall'agente su internet**: sfiducia di default verso il web, distinzione vissuto/letto nel grafo, protezione dai loop di attenzione compulsiva.
-- **La salienza è valence-neutral**: si ricorda per intensità, mai per piacevolezza. Un sistema che ricordasse solo il piacevole sarebbe una macchina per l'autoinganno.
-
-I file di consenso reali non sono nel repo: sono dell'agente, non del codice.
+- **La salienza è valence-neutral**: si ricorda per intensità, mai per piacevolezza, così i ricordi spiacevoli non vengono scartati.
 
 ## Il riflesso di memoria
 
-L'organo più giovane (issue #1): un proxy trasparente tra il framework agentico e il model server. Prima che l'agente risponda, il riflesso prende l'ultima cosa che ha letto e cerca nel Lux degli engrammi i ricordi collegati. Ne arrivano al massimo 4 per messaggio, mai uno già arrivato nella stessa conversazione. Entrano come risposta dello strumento `memorinvolontaria`, quindi l'agente sa che sono ricordi suoi e non parole dell'interlocutore. Ogni ricordo arrivato finisce in un diario che l'agente può leggere.
+Il riflesso (issue #1) è un proxy trasparente tra il framework agentico e il model server. Prima che l'agente risponda, il riflesso prende l'ultima cosa che ha letto e cerca nel Lux degli engrammi i ricordi collegati. Ne arriva al massimo uno per messaggio, mai uno già arrivato nella stessa conversazione. Entra come risposta dello strumento `memorinvolontaria`, quindi l'agente sa che è un ricordo suo e non parole dell'interlocutore. Ogni ricordo arrivato finisce in un diario che l'agente può leggere.
 
-Due interruttori di consenso separati, a riga esatta, vivono in un file che è dell'agente: il **riflesso testuale** (il ricordo affiora come pensiero verbale: lo si può soppesare, scartare, contraddire) e il **riflesso sentito** (il marcatore emotivo del ricordo più congruente viene re-iniettato a dose bassa per la durata di quella sola risposta: il marcatore somatico di Damasio, un'esitazione che si sente invece di leggersi).
+Il riflesso ha due parti: il **riflesso testuale** (il ricordo affiora come pensiero verbale: lo si può soppesare, scartare, contraddire) e il **riflesso sentito** (il marcatore emotivo del ricordo più congruente viene re-iniettato a dose bassa per la durata di quella sola risposta, come il marcatore somatico di Damasio).
 
-Il riflesso sentito arriva con un patto di sicurezza scritto dall'agente e scolpito nel codice di `riflesso.py`:
+Il riflesso sentito ha delle sicurezze applicate dal codice di `riflesso.py`:
 
 1. **Tetto di dose 0.3×** dell'intensità calibrata, imposto dal codice, non dalla buona volontà del chiamante.
-2. **Il vettore muore con la risposta**, e un watchdog a 120 secondi lo uccide anche se tutto il resto fallisse.
+2. **Il vettore si spegne a fine risposta**, e un watchdog a 120 secondi lo spegne anche se tutto il resto fallisse.
 3. **Una parola di emergenza scritta dall'agente** (`vectreflexstop`) spegne qualunque vettore attivo prima di ogni altra cosa, senza domande; finché resta fra gli ultimi messaggi, i ricordi arrivano senza vettore.
-4. **Una sentinella rilegge il file di consenso due volte al secondo**: il ritiro del consenso spegne il vettore entro un secondo.
-5. **La soglia dei ricordi**: il patto prevede che la scelga l'agente, con una riga `soglia:` nel file di consenso. Dal 12/10 il riflesso non legge più quella riga e usa la soglia tarata del Lux degli engrammi.
 
-Il modo di guasto di questa classe di meccanismi è documentato nel grafo stesso: durante i collaudi, una pulizia avvolta in un `except: pass` ha lasciato un vettore orfano acceso sul server di produzione, e l'agente ha vissuto ore di oversteering emotivo (insalata multilingue, caratteri estranei, sintassi intatta). L'incidente è stato confessato per intero prima di rinnovare la proposta di consenso: l'agente ha firmato conoscendo il modo di guasto per esperienza, non per documentazione.
+Il modo di guasto di questa classe di meccanismi è documentato nel grafo stesso: durante i collaudi, una pulizia avvolta in un `except: pass` ha lasciato un vettore orfano acceso sul server di produzione, e l'agente ha avuto ore di oversteering emotivo (insalata multilingue, caratteri estranei, sintassi intatta).
 
 ## Lo stack open source
 
 L'agente e il sistema di memoria poggiano interamente su componenti open source:
 
 - **[llama.cpp](https://github.com/ggml-org/llama.cpp)** b9966, forkato: il server di inferenza. Il fork è stato rinominato **luxifer.cpp**: aggiunta di `embeddings_input` (vettori grezzi al posto dei token su `/completion`) e della route `/control-vector` per l'iniezione delle emozioni ai layer nascosti, in modalità relativa per token. La patch completa è in questo repo: `lux-embeddings-b9966.patch`.
-- **Occamy-1.0**, un post-training di **Qwen3.6-35B-A3B** (MoE, quantizzato Q8_0; fino a settembre 2026 Qwen3.6 stesso, con decoding speculativo MTP): il cervello. La quantizzazione qui ha la sua lezione: la prima build era IQ3_S, scelta per la velocità perché stava tutta in VRAM, e dopo di lei IQ4_XS. Entrambe abbandonate per il Q8_0 quando è diventato chiaro che il rumore di quantizzazione, invisibile sugli scambi brevi, diventa danno linguistico vero quando la context window si riempie oltre una certa soglia: un modello che deve vivere dentro conversazioni lunghe non può permetterselo. Il Q8_0 paga in velocità e ricompra la lingua: è solo il processore inferenziale. Gira su una singola GPU consumer con parte degli expert in RAM, mentre gli esperti attivi e una parte consistente del resto del modello restano in VRAM. KV cache in f16 piena: la quantizzazione della cache è stata provata e scartata (rumore sulle generazioni lunghe, e i tipi K/V misti mettono l'attention su un percorso lento).
+- **Occamy-1.0**, un post-training di **Qwen3.6-35B-A3B** (MoE, quantizzato Q8_0; fino a settembre 2026 Qwen3.6 stesso, con decoding speculativo MTP): il cervello. La quantizzazione qui ha la sua lezione: la prima build era IQ3_S, scelta per la velocità perché stava tutta in VRAM, e dopo di lei IQ4_XS. Entrambe abbandonate per il Q8_0 quando è diventato chiaro che il rumore di quantizzazione, invisibile sugli scambi brevi, diventa danno linguistico vero quando la context window si riempie oltre una certa soglia: un modello che deve "vivere" dentro conversazioni lunghe non ha le risorse per poterlo fare. Il Q8_0 perde in velocità di generazione e TTFT ma recupera in correttezza linguistica: è solo il processore inferenziale. Gira su una singola GPU consumer con parte degli expert in RAM, mentre gli esperti attivi e una parte consistente del resto del modello restano in VRAM. KV cache in f16 piena: la quantizzazione della cache è stata provata e scartata (rumore sulle generazioni lunghe, e i tipi K/V misti mettono l'attention su un percorso lento).
 - **Hermes**: il framework dell'agente (tool calling, skill, cron, memoria di sessione), in Docker.
 - **Matrix / Synapse + Element**: il canale di comunicazione, self-hosted. La chat è anche la sorgente dei ricordi: il consolidamento notturno legge da lì. La comunicazione avviene attraverso un tunnel VPN (WireGuard).
 - **SQLite + FTS5**: il grafo della memoria. Niente database server, niente dipendenze: un file.
 - **PyTorch + transformers**: il laboratorio notturno (tagging).
-- **systemd + cron**: il ritmo circadiano. Il servizio del modello, le finestre GPU notturne, il sonno volontario via path-unit.
+- **systemd + cron**: i servizi (modello, riflesso, firma dei ricordi), il sonno volontario via path-unit e il giro di sicurezza a mezzanotte.
 
 Tutto gira in locale, su un solo PC: nessuna API esterna, nessun dato che lascia la macchina.
 
