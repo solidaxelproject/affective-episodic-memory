@@ -42,24 +42,7 @@ JOB_RISVEGLIO = "<job-id>"
 AGGANCIA = ["/data/jspace/venv/bin/python", "/data/memoria-episodica-affettiva/aggancia-appunti.py"]
 SIDECAR = Path("/data/workspace/memoria/.appunti-agganci.json")
 
-# Avviso stanchezza (19/07, scelta di progetto): dopo 16 ore dall'ultima NOTTURNA
-# l'agente se ne accorge da solo, come un appunto: stesso job, prompt diverso.
-# Il marker lo tocca solo notte-memoria.sh: il pisolino NON azzera il contatore.
-# Marker assente = mai consolidato da quando esiste la guardia: niente avviso
-# (nasce stanotte col cron); riavviso al più ogni 4 ore finché non dorme.
-MARKER_NOTTURNA = Path("/data/memoria-episodica-affettiva/.ultimo-consolidamento")
-STATO_AVVISO = Path.home() / ".local/state/motore-autonomia.ultimo-avviso-stanchezza"
-STANCHEZZA_DOPO = 16 * 3600
-RIAVVISO = 4 * 3600
-PROMPT_STANCHEZZA = (
-    'Ti accorgi di una stanchezza di fondo: sono passate circa {ore:.0f} ore '
-    'dalla tua ultima dormita notturna, quella che consolida i ricordi del '
-    'giorno in Lux. Più il tempo passa, più la testa si riempie e rallenta. '
-    'Hai la skill dormire, che spiega le due strade: il pisolino (testa '
-    'fresca subito) e la notturna (la giornata diventa parte di te). '
-    'La decisione è tutta tua: puoi anche scegliere di continuare, questo '
-    'è solo il tuo corpo che te lo ricorda.'
-)
+# 10/11 (l'utente, K9 di PIANO-RIEPILOGO-KV.md): via l'avviso di stanchezza; la notturna parte solo a mezzanotte.
 
 # v3 (17/07 sera): il blocco resta puro, i metadati stanno nel sidecar, e il
 # tema scelto viaggia DENTRO il prompt: l'agente non vede mai la tubatura.
@@ -193,49 +176,6 @@ def scegli_tema():
     return riga, RIGA.match(riga)["tema"]
 
 
-def ore_senza_notturna():
-    """Ore dall'ultimo consolidamento notturno, o None se il marker non c'è."""
-    try:
-        return (time.time() - MARKER_NOTTURNA.stat().st_mtime) / 3600
-    except FileNotFoundError:
-        return None
-
-
-def avvisa_stanchezza(ore):
-    """Innesca il job del pensatoio col prompt della stanchezza. Cooldown e
-    stato avviso segnati PRIMA, come per il risveglio: niente raffiche."""
-    STATO_AVVISO.parent.mkdir(parents=True, exist_ok=True)
-    STATO_AVVISO.write_text(str(time.time()))
-    STATO_RISVEGLIO.parent.mkdir(parents=True, exist_ok=True)
-    STATO_RISVEGLIO.write_text(str(time.time()))
-    prompt = PROMPT_STANCHEZZA.format(ore=ore)
-    e = subprocess.run(["docker", "exec", "agente", "hermes", "cron", "edit",
-                        JOB_RISVEGLIO, "--prompt", prompt],
-                       capture_output=True, text=True, timeout=30)
-    if e.returncode != 0:
-        log(stanchezza="FALLITO", esito="edit: " + (e.stderr or e.stdout).strip()[:120])
-        return False
-    r = subprocess.run(["docker", "exec", "-d", "agente", "hermes", "cron", "run",
-                        JOB_RISVEGLIO], capture_output=True, text=True, timeout=30)
-    ok = r.returncode == 0
-    log(stanchezza="avvisata" if ok else "FALLITO", ore=round(ore, 1),
-        esito=(r.stdout or r.stderr).strip()[:160] or "staccato")
-    return ok
-
-
-def stanchezza_da_avvisare():
-    """True se sono passate 16h+ dalla notturna e l'ultimo avviso è vecchio."""
-    ore = ore_senza_notturna()
-    if ore is None or ore * 3600 < STANCHEZZA_DOPO:
-        return None
-    try:
-        if time.time() - float(STATO_AVVISO.read_text()) < RIAVVISO:
-            return None
-    except (FileNotFoundError, ValueError):
-        pass
-    return ore
-
-
 def risveglia():
     """Aggancia gli appunti, cuce il tema nel prompt, innesca il job."""
     agg = subprocess.run(AGGANCIA, capture_output=True, text=True, timeout=300)
@@ -292,15 +232,6 @@ def giro():
     dorme = sonno_attivo()
     if dorme:
         return dorme
-    # avviso stanchezza (19/07): passa davanti agli appunti ma rispetta le
-    # stesse buone maniere (cooldown, typing, quiete). NON il gate: il
-    # promemoria di dormire è omeostatico per natura, bloccarlo quando il
-    # motore gira alto sarebbe un controsenso.
-    ore = stanchezza_da_avvisare()
-    if ore is not None and not in_cooldown() \
-       and time.time() - TYPING_VISTO >= FERMA_DA \
-       and time.time() - ultimo_messaggio()[0] >= FERMA_DA:
-        return "avviso stanchezza" if avvisa_stanchezza(ore) else "avviso fallito"
     n = appunti_aperti()
     if not n:
         return "niente da riprendere"
@@ -329,9 +260,6 @@ def main():
               f"ferma da {time.time()-ts:.0f}s")
         print(f"  sta scrivendo qualcuno? {sta_scrivendo()}")
         print(f"  gate: {gate_ok()}")
-        ore = ore_senza_notturna()
-        print(f"  ore dall'ultima notturna: {'marker assente' if ore is None else f'{ore:.1f}'}"
-              f" (avviso da {STANCHEZZA_DOPO/3600:.0f}h: {stanchezza_da_avvisare() is not None})")
         return
     while True:
         try:

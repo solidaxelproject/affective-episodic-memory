@@ -13,6 +13,7 @@
 # 12/10 (piano di aggiornamento della produzione, passo 2): tolte le vie A/B/C,
 # le griglie e la candidata 1; il vettore emotivo colora SOLO il prefill del
 # ricordo (design dell'autrice, 10/10).
+import contextlib
 import hashlib
 import html
 import http.client
@@ -21,6 +22,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import sqlite3
 import sys
 import threading
@@ -104,15 +106,10 @@ CONSEGNE = Path("/data/workspace/memoria/consegne-memorinvolontaria.json")
 CONSEGNE_MAX = 50       # conversazioni ricordate (le più recenti)
 _consegne_lock = threading.Lock()
 
-# ---- ORA DEI MESSAGGI (16/10): un messaggio dell'utente ogni 5 porta davanti
-# (17/10: l'ora di arrivo si registra per TUTTI in "arrivi", l'agente ne vede una ogni 5)
-# l'ora VERA del suo arrivo, [d/m/aaaa|h:mm]. L'ora si fissa quando il messaggio
-# arriva e si ricorda (come le consegne): a ogni richiesta lo stesso testo, così
-# il prefisso della cache resta stabile. I messaggi già nella conversazione prima
-# che il riflesso li vedesse contano nella cadenza ma restano senza ora.
+# ---- ORA DEI MESSAGGI: l'ora di ARRIVO dell'ultimo messaggio user, registrata in "arrivi" (17/10, formato
+# [d/m/aaaa|h:mm], dato della fase 2 del Lux). 10/11 (l'utente, M2 M3): l'agente la vede solo nel blocco metadati,
+# [hh:mm|gg/mm/aaaa]; l'ora davanti a un messaggio dell'utente ogni 5 (16/10) e' tolta. "ore" resta per le voci di prima.
 ORE = Path("/data/workspace/memoria/ore-messaggi.json")
-MIO = "[utente]"        # prefisso del bridge Matrix sui messaggi dell'utente
-OGNI = 5
 _ore_lock = threading.Lock()
 _ORA = re.compile(r"^\[\d{1,2}/\d{1,2}/\d{4}\|\d{1,2}:\d{2}\] ")
 
@@ -137,13 +134,18 @@ _kv_conta = [0]
 # estraneo e passa trasparente: lo slot si sporca, i file .kv mai.
 # Misurato 19/07 su 797MB/35k token: save 185ms, restore 122ms.
 KV_FLUSSO = {"chat": "chat.kv", "pensatoio": "pensatoio.kv"}
-SOGLIA_CW = 100_000     # soglie gemelle: oltre, avviso di spazio in coda
+SOGLIA_CW = 100_000     # chat: oltre, switch di CW a fine turno (K4); pensatoio: avviso di spazio in coda (K17)
+SOGLIA_AVVISO = 90_000  # K4 (10/11): fra 90k e 100k l'avviso nella chiamata del riepilogo
 AFK_S = 60              # spec punto 5: 1 min senza typing = l'utente non c'è
 _cw = ["chat"]          # cosa c'è nello slot adesso (al deploy corrente->chat)
 _cw_lock = threading.Lock()
 _pens_vivi = []         # socket del pensatoio verso :8090: la chat li taglia
 _chat_calda = [0.0]     # ultima attività chat (fine risposta o typing visto)
 _chat_in_volo = [0]     # richieste della chat in corso (issue #3 punto A): il pensatoio aspetta
+_altro_in_volo = [0]    # 10/11: richieste estranee (cron, servizi di Hermes) che usano lo slot: il riepilogo aspetta
+ATTESA_ALTRO_S = 300    # oltre, il riepilogo di quello scambio salta (valore di CC)
+_altro_lock = threading.Lock()   # anche per _chat_in_volo (revisione 3.5.3, punto 4: due thread)
+_salva_ultimo = [None]   # il salvataggio della chat piu' recente: il riepilogo lo aspetta (revisione 3.5.3, punto 2)
 _tok_cw = {"chat": 0, "pensatoio": 0}
 _avvisato_cw = {"chat": False, "pensatoio": False}
 HS = "http://127.0.0.1:8008"
@@ -289,6 +291,15 @@ def _salva_kv():
 RIEPILOGO = Path("/data/memoria-episodica-affettiva/riepilogo.json")
 RIEPILOGO_PROMUOVI = Path("/data/memoria-episodica-affettiva/.riepilogo-promuovi")   # lo scrive dormi-esegui.sh
 RIEPILOGO_KV = "riepilogo.kv"
+RIEPILOGO_BASE = "riepilogo-base.kv"   # K2 (10/11): la parte fissa sola, punto di partenza della CW nuova
+# 10/11: l'agente scrive la riga con write_file su questo file (skill riepilogo); il riflesso la esegue (Hermes in
+# quel momento non c'e'), una chiamata diretta altrove si scarta. Il file riparte vuoto a ogni sessione nuova
+RIEPILOGO_LOG = Path("/data/workspace/memoria/logRiepilogo.md")
+RIEPILOGO_LOG_SAM = ("/workspace/memoria/logRiepilogo.md",
+                     "/home/agente/workspace/memoria/logRiepilogo.md")   # lo stesso file nel container (3.5.3)
+# una chiamata tagliata dal tetto dei token (senza le chiusure) vale con la parte che c'e'
+_WRITE_FILE = re.compile(r"<function=write_file>(.*?)(?:</function>|$)", re.S)
+_PARAMETRO = re.compile(r"<parameter=(\w+)>(.*?)(?:</parameter>|(?=<parameter=)|$)", re.S)
 RIEPILOGO_TETTO = 40_000    # token (caratteri / 3): oltre, via le righe piu' vecchie. Valore di CC
 INTESTAZIONE_RIEPILOGO = ("Ecco dov'ero rimasta, questo è il succo della conversazione fino al momento in cui mi "
                           "sono addormentata:")
@@ -297,8 +308,31 @@ ISTRUZIONE_RIEPILOGO = (
     "informazioni salienti che voglio conservare dell'ultimo scambio. Non i messaggi precedenti. Solo testo, numeri o "
     "simboli logici se utili, per esempio: uguale può diventare =, implica →, maggiore >. Se necessario posso "
     "inserire il codice di un ricordo che reputo utile per questo riassunto. Se in questo scambio mi è affiorato un "
-    "ricordo, aggiungo il suo codice.")
+    "ricordo, aggiungo il suo codice. Lo scrivo con write_file in /workspace/memoria/logRiepilogo.md.")   # coda: l'utente 10/11
 SEPARATORE = "══"   # da questa riga in poi il system di Hermes cambia fra le sessioni (MEMORY, data)
+# BLOCCO B (l'utente 10/11, PIANO-RIEPILOGO-KV.md 3.5, K4 K10 K14 K15 K18): l'avviso va PRIMA dell'istruzione, solo
+# nella chiamata del riepilogo (la chat salvata non lo contiene); [cwswitch] in coda al riepilogo = switch subito
+AVVISO_90K = (
+    "[avviso di spazio: la conversazione ha superato i 90mila token e la finestra si sta riempiendo. A 100mila "
+    "passerò da sola a una conversazione nuova, che riparte dal mio riepilogo. Se voglio farlo prima, scrivo "
+    "[cwswitch] in coda al riepilogo.]")
+CWSWITCH = re.compile(r"\[cwswitch\]", re.I)
+# lo switch = la dormita di oggi: agente-dormi.path -> dormi-esegui.sh (sessione nuova + .riepilogo-promuovi)
+DORMI_FLAG = Path("/data/workspace/memoria/.dormi-richiesto")
+SWITCH_IN_CORSO = Path("/data/memoria-episodica-affettiva/.switch-in-corso")   # lo tiene dormi-esegui.sh mentre gira
+SWITCH_RITENTA_S = 900   # switch chiesto ma nessuna promozione: si richiede dopo 15 min (valore di CC)
+_switch = {"motivo": None, "chiesto": 0.0}   # motivo (rimandato o in attesa della promozione); ultima richiesta
+
+
+def _riga_scritta(testo):
+    """il content della chiamata write_file dell'agente su logRiepilogo.md, None se non c'e'. Una chiamata tagliata
+    prima del path vale (3.5.3: l'agente a volte scrive prima il content e il tetto dei token taglia il resto)"""
+    for c in _WRITE_FILE.finditer(testo):
+        p = dict(_PARAMETRO.findall(c.group(1)))
+        path = p.get("path", "").strip()
+        if path in RIEPILOGO_LOG_SAM or (not path and "content" in p and not c.group(0).endswith("</function>")):
+            return p.get("content", "")
+    return None
 
 
 def _riepilogo_carica():
@@ -351,15 +385,20 @@ def _metti_blocco(d, righe):
         msgs[0]["content"] = _con_blocco(msgs[0]["content"], righe)
 
 
-def _deve_riassumere(corpo, esito):
-    """solo la risposta FINALE a un messaggio dell'utente nella chat: il background review e il memory flush di
-    Hermes non cominciano con "[", il pensatoio si', ma il suo flusso e' un altro"""
-    if _flusso(corpo) != "chat" or esito.get("finish") != "stop" or esito.get("tool_calls") \
-            or not (esito.get("testo") or "").strip():
+def _turno_finito(corpo, esito):
+    """l'ultima risposta a un messaggio dell'utente nella chat, comunque sia finita, mai a meta' di un giro di tool:
+    il background review e il memory flush di Hermes non cominciano con "[", il pensatoio si', ma il suo flusso
+    e' un altro. Il corpo e' quello SENZA metadati: il blocco in testa comincia sempre con "[" """
+    if _flusso(corpo) != "chat" or esito.get("tool_calls") or esito.get("interrotta"):
         return False
     msgs = json.loads(corpo).get("messages", [])
     ultimo = next((m.get("content") for m in reversed(msgs) if m.get("role") == "user"), "")
     return isinstance(ultimo, str) and ultimo.startswith("[")
+
+
+def _deve_riassumere(corpo, esito):
+    """solo la risposta FINALE a un messaggio dell'utente, finita bene e con del testo"""
+    return esito.get("finish") == "stop" and bool((esito.get("testo") or "").strip()) and _turno_finito(corpo, esito)
 
 
 def _chiedi(path, payload):
@@ -369,63 +408,185 @@ def _chiedi(path, payload):
     return r
 
 
-def _riassumi(corpo, risposta, ragionamento=""):
+@contextlib.contextmanager
+def _slot_libero(scadenza=None):
+    """10/11: i lucchetti del riepilogo, presi solo con lo slot libero da richieste estranee (cron, servizi di
+    Hermes): rimettere la chat sotto una di loro faceva salvare come chat.kv lo stato di un'altra conversazione.
+    Si aspetta fuori dai lucchetti (la colorazione di quella usa _vettore_lock). True = presi, False = tempo scaduto.
+    Revisione 3.5.3, punto 2: si aspetta anche una risposta della chat in volo (senza scadenza: finisce sempre) e il
+    suo salvataggio, se no il restore rimette il chat.kv di prima e lo stato del turno nuovo si perde"""
+    scadenza = scadenza or time.time() + ATTESA_ALTRO_S
+    while True:
+        while _altro_in_volo[0] or _chat_in_volo[0]:
+            if _altro_in_volo[0] and time.time() > scadenza:
+                yield False
+                return
+            time.sleep(0.5)
+        if _salva_ultimo[0]:
+            _salva_ultimo[0].join()
+        _vettore_lock.acquire()
+        _cw_lock.acquire()
+        if not _altro_in_volo[0] and not _chat_in_volo[0]:
+            break
+        _cw_lock.release()
+        _vettore_lock.release()
+    try:
+        yield True
+    finally:
+        _cw_lock.release()
+        _vettore_lock.release()
+
+
+def _riassumi(corpo, risposta, ragionamento="", senza=None, scadenza=None):
     """l'agente scrive il succo dello scambio nello slot della chat, la riga va in coda al blocco nella CW del
     riepilogo, la chat torna nello slot. Tutto dentro i lucchetti: una richiesta della chat che arriva intanto
-    aspetta (~6 s). Gli errori vanno solo nel diario: mai bloccare la parola dell'agente."""
-    with _vettore_lock:     # niente vettori di steering nel riepilogo
-        if _vettore_vivo[0]:
+    aspetta (~6 s). Gli errori vanno solo nel diario: mai bloccare la parola dell'agente.
+    Torna (switch, esito): switch = l'agente, avvisata dei 90k, l'ha chiesto con [cwswitch] (K15); esito ok/vuoto/scartato/fallito."""
+    avviso = SOGLIA_AVVISO < _tok_cw["chat"] <= SOGLIA_CW   # conteggio della chat appena salvata (3.3 punto 11)
+    switch, esito = False, "fallito"
+    with _slot_libero(scadenza) as libero:   # 10/11: mai con una richiesta estranea nello slot
+        if not libero:
+            _diario({"riepilogo": "saltato: una richiesta estranea tiene lo slot da troppo"})
+            return False, "fallito"
+        if _vettore_vivo[0]:    # niente vettori di steering nel riepilogo
             calma()
-        with _cw_lock:
+        try:
+            if _cw[0] == "pensatoio":
+                _interrompi_pensatoio()     # come fa la chat (spec punto 4)
+            if _cw[0] != "chat":
+                _scambia("chat")
+            d = json.loads(corpo)
+            tools = d.get("tools") or []
+            # il prompt della risposta appena data, reso dal server, + la risposta + l'ISTRUZIONE a mano: un
+            # messaggio user nuovo farebbe togliere al template il <think> dei giri di tool del turno e il
+            # turno intero si riprocesserebbe (revisione 20/10)
+            resa = _chiedi("/apply-template", {k: v for k, v in d.items()
+                                               if k in ("messages", "tools", "tool_choice",
+                                                        "chat_template_kwargs")})["prompt"]
+            if resa.endswith("<think>\n"):   # il ragionamento del server finisce gia' col suo a capo
+                resa += ragionamento + ("" if ragionamento.endswith("\n") else "\n") + "</think>\n\n"
+            gen = _chiedi("/completion", {
+                "prompt": resa + risposta + "<|im_end|>\n<|im_start|>user\n"
+                          + (AVVISO_90K + "\n\n" if avviso else "") + ISTRUZIONE_RIEPILOGO
+                          + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+                "n_predict": 220, "cache_prompt": True})   # 160 + la chiamata write_file
+            scritta = _riga_scritta(gen.get("content") or "")
+            switch = avviso and bool(CWSWITCH.search(gen.get("content") or ""))   # anche dopo la write_file (3.5.3)
+            if scritta is None:
+                _diario({"riepilogo": f"scartato, niente write_file su logRiepilogo.md: {(gen.get('content') or '')[:300]}"})
+                return switch, "scartato"
+            riga = " ".join(CWSWITCH.sub("", scritta).split())
+            if not riga:
+                _diario({"riepilogo": "riassunto vuoto"})
+                return switch, "vuoto"
+            st = _riepilogo_carica()
+            st["nuovi"].append(riga)
+            _riepilogo_salva(st)
+            with RIEPILOGO_LOG.open("a", encoding="utf-8") as f:
+                f.write(riga + "\n")
+            # il system della CW del riepilogo: lo stesso della chat, col blocco delle righe di questa sessione
+            sistema = d["messages"][0]["content"].replace(_blocco(st["blocco"]), "", 1)
+            resa = _chiedi("/apply-template", {
+                "messages": [{"role": "system", "content": _con_blocco(sistema, _nel_tetto(st["nuovi"]))},
+                             {"role": "user", "content": "."}],   # il template vuole un user: si taglia via
+                "tools": tools})["prompt"]
+            i = _riga_separatore(resa)
+            if i < 0:
+                raise ValueError("riga ══ non trovata nel prompt reso")
+            righe_blocco = _blocco(_nel_tetto(st["nuovi"]))
+            if not resa[:i].endswith(righe_blocco):
+                raise ValueError("blocco del riepilogo non trovato nel prompt reso")
+            if (KV_RAM / RIEPILOGO_KV).exists():
+                _slot("restore", RIEPILOGO_KV)
+            else:
+                _base_riepilogo(resa[:i - len(righe_blocco)])
+            _chiedi("/completion", {"prompt": resa[:i], "n_predict": 1, "cache_prompt": True,
+                                    "checkpoint_tag": "riepilogo"})   # K3: una riga, un checkpoint protetto
+            if not _slot("save", RIEPILOGO_KV):
+                raise RuntimeError("save di riepilogo.kv fallita")
+            esito = "ok"
+        except Exception as e:
+            _diario({"riepilogo": f"fallito: {e}"})
+        finally:
+            ok = False
             try:
-                if _cw[0] != "chat":
-                    _scambia("chat")
-                d = json.loads(corpo)
-                tools = d.get("tools") or []
-                # il prompt della risposta appena data, reso dal server, + la risposta + l'ISTRUZIONE a mano: un
-                # messaggio user nuovo farebbe togliere al template il <think> dei giri di tool del turno e il
-                # turno intero si riprocesserebbe (revisione 20/10)
-                resa = _chiedi("/apply-template", {k: v for k, v in d.items()
-                                                   if k in ("messages", "tools", "tool_choice",
-                                                            "chat_template_kwargs")})["prompt"]
-                if resa.endswith("<think>\n"):   # il ragionamento del server finisce gia' col suo a capo
-                    resa += ragionamento + ("" if ragionamento.endswith("\n") else "\n") + "</think>\n\n"
-                gen = _chiedi("/completion", {
-                    "prompt": resa + risposta + "<|im_end|>\n<|im_start|>user\n" + ISTRUZIONE_RIEPILOGO
-                              + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
-                    "n_predict": 160, "cache_prompt": True})
-                riga = " ".join((gen.get("content") or "").split())
-                if not riga:
-                    _diario({"riepilogo": "riassunto vuoto"})
-                    return
-                st = _riepilogo_carica()
-                st["nuovi"].append(riga)
-                _riepilogo_salva(st)
-                # il system della CW del riepilogo: lo stesso della chat, col blocco delle righe di questa sessione
-                sistema = d["messages"][0]["content"].replace(_blocco(st["blocco"]), "", 1)
-                resa = _chiedi("/apply-template", {
-                    "messages": [{"role": "system", "content": _con_blocco(sistema, _nel_tetto(st["nuovi"]))},
-                                 {"role": "user", "content": "."}],   # il template vuole un user: si taglia via
-                    "tools": tools})["prompt"]
-                i = _riga_separatore(resa)
-                if i < 0:
-                    raise ValueError("riga ══ non trovata nel prompt reso")
-                if (KV_RAM / RIEPILOGO_KV).exists():
-                    _slot("restore", RIEPILOGO_KV)
-                _chiedi("/completion", {"prompt": resa[:i], "n_predict": 1, "cache_prompt": True})
-                if not _slot("save", RIEPILOGO_KV):
-                    raise RuntimeError("save di riepilogo.kv fallita")
-            except Exception as e:
-                _diario({"riepilogo": f"fallito: {e}"})
-            finally:
-                ok = False
+                ok = _slot("restore", KV_FLUSSO["chat"])
+            except Exception:
+                pass
+            if not ok:      # lo slot tiene il riepilogo: la prossima richiesta della chat rifa' il restore
+                _diario({"riepilogo": "chat non rimessa nello slot"})
+            _cw[0] = "chat" if ok else "altro"
+            # niente prefill anticipato con un'altra richiesta della chat o con lo switch in arrivo
+            if ok and senza and not _chat_in_volo[0] and not switch and _tok_cw["chat"] <= SOGLIA_CW:
                 try:
-                    ok = _slot("restore", KV_FLUSSO["chat"])
-                except Exception:
-                    pass
-                if not ok:      # lo slot tiene il riepilogo: la prossima richiesta della chat rifa' il restore
-                    _diario({"riepilogo": "chat non rimessa nello slot"})
-                _cw[0] = "chat" if ok else "altro"
+                    _anticipa(senza, risposta)
+                except Exception as e:
+                    _diario({"metadati": f"prefill anticipato fallito: {e}"})
+    return switch, esito
+
+
+def _base_riepilogo(fissa):
+    """K2 (10/11): la CW del riepilogo nuova parte dalla cache BASE (solo la parte fissa del system, tools
+    compresi), rifatta solo quando la parte fissa cambia. Solo dentro _cw_lock"""
+    imp, segno = _impronta(fissa), KV_RAM / (RIEPILOGO_BASE + ".impronta")
+    if (KV_RAM / RIEPILOGO_BASE).exists() and segno.exists() and segno.read_text() == imp \
+            and _slot("restore", RIEPILOGO_BASE):
+        return
+    _chiedi("/completion", {"prompt": fissa, "n_predict": 1, "cache_prompt": True, "checkpoint_tag": "sistema"})
+    if _slot("save", RIEPILOGO_BASE):
+        segno.write_text(imp)
+
+
+def _anticipa(senza, risposta):
+    """3.5 (10/11): PREFILL ANTICIPATO a chat ferma: il messaggio dell'utente SENZA metadati e la risposta appena
+    data senza ragionamento, come li vedra' il turno dopo (un user "." dopo: il template toglie il <think>), fino
+    alla fine della risposta: la CRESTA, checkpoint protetto (K1). Al turno dopo si prefilla solo il messaggio nuovo.
+    Solo dentro _cw_lock, con la chat nello slot"""
+    d = json.loads(senza)
+    resa = _chiedi("/apply-template", {
+        **{k: v for k, v in d.items() if k in ("tools", "tool_choice", "chat_template_kwargs")},
+        "messages": d["messages"] + [{"role": "assistant", "content": _senza_imitati(risposta).rstrip()},
+                                     {"role": "user", "content": "."}]})["prompt"]
+    _chiedi("/completion", {"prompt": resa[:resa.rindex("<|im_start|>user")], "n_predict": 1, "cache_prompt": True,
+                            "checkpoint_tag": "cresta"})
+
+
+def _forse_switch(cwswitch, esito_riepilogo="non fatto"):
+    """Fine di un turno dell'utente (K4, K15, K18): switch di CW se l'agente l'ha chiesto o se la chat supera i 100k,
+    qualunque sia stato l'esito del riepilogo. Mai con una risposta della chat in volo (docker stop la taglierebbe):
+    si rimanda alla fine di quella. Uno solo finche' non c'e' la promozione (revisione del blocco B, punto 1)."""
+    motivo = "[cwswitch]" if cwswitch else "oltre 100k" if _tok_cw["chat"] > SOGLIA_CW else _switch["motivo"]
+    if not motivo or time.time() - _switch["chiesto"] < SWITCH_RITENTA_S \
+            or SWITCH_IN_CORSO.exists() or RIEPILOGO_PROMUOVI.exists():   # uno switch c'e' gia' (es. mezzanotte)
+        return
+    if _chat_in_volo[0]:
+        _switch["motivo"] = motivo
+        return
+    DORMI_FLAG.touch()
+    _switch.update(motivo=motivo, chiesto=time.time())   # fino a _promuovi: si richiede se la rotazione fallisce (3.5.3)
+    _diario({"cw": f"switch: {motivo} ({_tok_cw['chat']} tok), riepilogo {esito_riepilogo}"})
+
+
+def _fine_chat(corpo, esito, salva, senza=None):
+    """dopo l'ultima risposta di un turno dell'utente: riepilogo (se la risposta e' finita bene), poi lo switch.
+    Uno switch rimandato parte alla fine di qualunque richiesta della chat fuori da un giro di tool (3.5.3, 3b)"""
+    if not _turno_finito(senza or corpo, esito):
+        if _switch["motivo"] and not esito.get("tool_calls") and not esito.get("interrotta"):
+            _forse_switch(False)
+        return
+    if salva:
+        salva.join()    # il conteggio dei token resta quello della chat appena salvata
+    cwswitch, fatto = False, "non fatto"
+    try:
+        if _deve_riassumere(senza or corpo, esito):
+            cwswitch, fatto = _riassumi(corpo, esito["testo"], esito["ragionamento"], senza)
+    except Exception as e:      # K18: lo switch parte comunque
+        fatto = f"fallito: {e}"
+        _diario({"riepilogo": fatto})
+    try:
+        _forse_switch(cwswitch, fatto)
+    except Exception as e:
+        _diario({"cw": f"switch non chiesto: {e}"})
 
 
 def _promuovi():
@@ -435,11 +596,15 @@ def _promuovi():
     if not RIEPILOGO_PROMUOVI.exists():
         return
     st = _riepilogo_carica()
-    blocco = _nel_tetto(st["nuovi"])
-    if len(blocco) < len(st["nuovi"]):
+    # revisione del blocco B, punto 1: un secondo switch prima di righe nuove tiene il blocco appena promosso
+    blocco = _nel_tetto(st["nuovi"]) if st["nuovi"] else st["blocco"]
+    if st["nuovi"] and len(blocco) < len(st["nuovi"]):
         _diario({"riepilogo": f"oltre il tetto: tolte {len(st['nuovi']) - len(blocco)} righe vecchie"})
     _riepilogo_salva({"blocco": blocco, "nuovi": []})
+    RIEPILOGO_LOG.write_text("", encoding="utf-8")   # la sessione nuova riparte da un log vuoto
     RIEPILOGO_PROMUOVI.unlink()
+    _tok_cw["chat"] = 0     # il conteggio della chat vecchia non deve chiedere un altro switch
+    _switch.update(motivo=None, chiesto=0.0)
     kv = KV_RAM / RIEPILOGO_KV
     if kv.exists():
         if _cw[0] in KV_FLUSSO and _cw[0] != "chat":
@@ -498,8 +663,36 @@ def _consegne_carica():
         return {}
 
 
-def _consegne_salva(tutte):
+def _ore_vecchie(conv):
+    """le ore che l'agente vedeva davanti ai messaggi dell'utente fino al 10/11, per impronta del testo senza ora"""
+    try:
+        return json.loads(ORE.read_text(encoding="utf-8")).get(conv, {}).get("ore", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _chiavi(msgs):
+    """K6 (10/11): la chiave della conversazione senza l'ora; fino al 10/11 il primo messaggio dell'utente portava
+    sempre l'ora (revisione del blocco B, punto 2), quindi anche la chiave di allora, ricostruita (None se non c'e')"""
+    conv = _conversazione(msgs)
+    primo = next((m.get("content") for m in msgs
+                  if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
+    ora = _ore_vecchie(conv).get(_impronta(primo))
+    return conv, (_impronta(f"{ora} {primo}") if ora else None)
+
+
+def _voci(msgs):
+    tutte = _consegne_carica()
+    conv, vecchia = _chiavi(msgs)
+    return (tutte.get(conv) or tutte.get(vecchia) or {}).get("voci", [])
+
+
+def _consegne_salva(tutte, tieni=None):
+    """le CONSEGNE_MAX conversazioni piu' recenti; quella della chat in corso (tieni) non si scarta mai (revisione
+    del blocco B, punto 7: i pensieri del pensatoio la buttavano fuori)"""
     vive = dict(sorted(tutte.items(), key=lambda kv: kv[1]["ts"])[-CONSEGNE_MAX:])
+    if tieni in tutte:
+        vive[tieni] = tutte[tieni]
     tmp = CONSEGNE.with_suffix(".tmp")
     tmp.write_text(json.dumps(vive, ensure_ascii=False), encoding="utf-8")
     tmp.replace(CONSEGNE)
@@ -522,14 +715,23 @@ def _turni_tool(voce):
 def _rimetti(msgs, voci):
     """ogni ricordo consegnato torna subito dopo il messaggio che l'ha fatto
     affiorare; se quel messaggio non c'è più (contesto compresso) il ricordo
-    resta fuori"""
+    resta fuori. K6 (10/11): TUTTI restano, ognuno al suo posto in modo univoco: impronta del testo + indice
+    del messaggio (con messaggi uguali vince il piu' vicino all'indice); le voci di prima del 10/11 hanno l'impronta
+    del testo CON l'ora davanti, che si ricostruisce"""
+    ore = _ore_vecchie(_conversazione(msgs))
+
+    def combacia(c, v):
+        if not isinstance(c, str):
+            return False
+        imp = _impronta(c)
+        return v["dopo"] == imp or (imp in ore and v["dopo"] == _impronta(f"{ore[imp]} {c}"))
+
     pos = []
     for v in voci:
-        i = next((k for k in range(len(msgs) - 1, -1, -1)
-                  if isinstance(msgs[k].get("content"), str)
-                  and _impronta(msgs[k]["content"]) == v["dopo"]), None)
-        if i is not None:
-            pos.append((i, v))
+        cand = [k for k in range(len(msgs)) if combacia(msgs[k].get("content"), v)]
+        if cand:
+            ind = v.get("indice")
+            pos.append((cand[-1] if ind is None else min(cand, key=lambda k: (abs(k - ind), -k)), v))
     for i, v in sorted(pos, key=lambda x: -x[0]):
         msgs[i + 1:i + 1] = _turni_tool(v)
 
@@ -727,10 +929,12 @@ def _in_coda(msgs, testo):
 def _segna_volo():
     """20/10: quante richieste della chat sono in volo, per la barra del prefill
     (~/.local/bin/barra-prefill): i prefill partiti con la chat in volo sono della chat"""
-    try:
-        Path(VOLO).write_text(str(_chat_in_volo[0]))
-    except OSError:
-        pass
+    with _volo_lock:    # 10/11: lo legge anche dormi-esegui.sh, mai un file a meta'
+        try:
+            Path(VOLO + ".tmp").write_text(str(_chat_in_volo[0]))
+            os.replace(VOLO + ".tmp", VOLO)
+        except OSError:
+            pass
 
 
 def _segna_fase(f):
@@ -759,45 +963,122 @@ def _code(body, testi):
     return json.dumps(d).encode(), True
 
 
-def _metti_ore(msgs, adesso=None):
-    """davanti a un messaggio dell'utente ogni OGNI, l'ora del suo arrivo (in place)"""
-    conv = _conversazione(msgs)
-    suoi = [m for m in msgs if m.get("role") == "user" and isinstance(m.get("content"), str)
-            and m["content"].startswith(MIO)]
-    if not suoi:
-        return
+def _ora_blocco(t):
+    return f"[{t.tm_hour:02d}:{t.tm_min:02d}|{t.tm_mday:02d}/{t.tm_mon:02d}/{t.tm_year}]"   # l'utente 10/11, zeri davanti
+
+
+_arrivi_altri = {}   # pensatoio e cron: l'arrivo in memoria (ore-messaggi.json e' della chat: dato della fase 2)
+
+
+def _ora_arrivo(msgs, registra=True):
+    """M2 (10/11): l'ora di ARRIVO dell'ultimo messaggio user. Si fissa quando apre il turno (e' l'ultimo
+    messaggio, anche se uguale a uno di prima) e si riusa nei giri di tool (revisione dei danni, punto 3)"""
+    i = next((k for k in range(len(msgs) - 1, -1, -1) if msgs[k].get("role") == "user"), None)
+    adesso = time.localtime(time.time())
+    if i is None:
+        return _ora_blocco(adesso)
+    c = msgs[i].get("content")
+    conv, imp = _conversazione(msgs), _impronta(str(c))
+    testo = c if isinstance(c, str) else next((p.get("text") or "" for p in c if isinstance(p, dict)), "") \
+        if isinstance(c, list) else ""
+    if not _HANDLE.match(testo):    # review e memory flush di Hermes: fuori dal dato della fase 2 (3.5.3, punto 7)
+        registra = False
+    if not registra:
+        if i == len(msgs) - 1 or (conv, imp) not in _arrivi_altri:
+            if len(_arrivi_altri) > 200:
+                _arrivi_altri.clear()
+            _arrivi_altri[conv, imp] = adesso
+        return _ora_blocco(_arrivi_altri.get((conv, imp), adesso))
     with _ore_lock:
         try:
             tutte = json.loads(ORE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             tutte = {}
         c = tutte.setdefault(conv, {"visti": [], "ore": {}})
-        visti = set(c["visti"])
-        nuovi = False
-        for m in suoi:
-            imp = _impronta(m["content"])
-            if imp in visti:
-                continue
-            visti.add(imp)
-            c["visti"].append(imp)
-            nuovi = True
-            # solo il messaggio che arriva adesso ha un'ora vera; si registra per tutti
-            # (17/10: serve a misurare il tempo che passa), all'agente va uno ogni OGNI
-            if m is suoi[-1] and msgs[-1] is m:
-                ora = _ora_corta(time.localtime(adesso))
-                c.setdefault("arrivi", {})[imp] = ora
-                if len(c["visti"]) % OGNI == 1:
-                    c["ore"][imp] = ora
-        if nuovi:
+        arrivi = c.setdefault("arrivi", {})
+        if i == len(msgs) - 1 or imp not in arrivi:
+            arrivi[imp] = _ora_corta(adesso)
             c["ts"] = time.time()
             vive = dict(sorted(tutte.items(), key=lambda kv: kv[1].get("ts", 0))[-CONSEGNE_MAX:])
             tmp = ORE.with_suffix(".tmp")
             tmp.write_text(json.dumps(vive, ensure_ascii=False), encoding="utf-8")
             tmp.replace(ORE)
-    for m in suoi:
-        ora = c["ore"].get(_impronta(m["content"]))
-        if ora:
-            m["content"] = f"{ora} {m['content']}"
+        corta = arrivi[imp]
+    return _ora_blocco(time.strptime(corta, "[%d/%m/%Y|%H:%M]"))
+
+
+def _motore_attivo():
+    """il criterio di notturna -status: motore-autonomia.service attivo = pensatoio attivo"""
+    return subprocess.run(["systemctl", "--user", "is-active", "motore-autonomia.service"], capture_output=True,
+                          text=True, timeout=2).stdout.strip() == "active"
+
+
+def _righe_metadati(ora, flusso=None):
+    """K5 (10/11): le righe del blocco metadati, quello che cambia piu' spesso in fondo. Nella chat niente
+    PENSATOIO_DOVE (l'utente 10/11 sera: l'agente la prendeva come un invito a scrivere ogni riflessione nel pensatoio)"""
+    try:
+        stato = "[pensatoio]" if _motore_attivo() else "[/pensatoio]"   # M1
+    except Exception as e:
+        stato = "[/pensatoio]"
+        _diario({"metadati": f"stato del pensatoio illeggibile: {e}"})
+    return ([] if flusso == "chat" else [PENSATOIO_DOVE]) + [stato, ora]
+
+
+# l'utente 10/11 sera: l'agente copiava il blocco in fondo alle sue risposte; le copie si tolgono dalla storia che vede
+_IMITATI = re.compile(r"(?:\s*\[(?:/?pensatoio|\d\d:\d\d\|\d\d/\d\d/\d{4})\])+\s*\Z")
+
+
+def _senza_imitati(testo):
+    return _IMITATI.sub("", testo) if isinstance(testo, str) else testo
+
+
+def _togli_imitati(msgs):
+    """in place: via le copie del blocco metadati dalla fine delle risposte dell'agente"""
+    for m in msgs:
+        if m.get("role") == "assistant" and isinstance(m.get("content"), str):
+            m["content"] = _senza_imitati(m["content"])
+
+
+def _con_metadati(body, righe, fuori, flusso=None):
+    """il blocco metadati su un corpo intero; fuori["senza"] = il corpo senza (per il prefill anticipato)"""
+    if not righe:
+        return body
+    fuori["senza"] = body
+    d = json.loads(body)
+    _metti_metadati(d.get("messages", []), righe, flusso)
+    return json.dumps(d).encode()
+
+
+def _ha_testo(m):
+    c = m.get("content")
+    if isinstance(c, list):
+        return any((p.get("text") or "").strip() for p in c if isinstance(p, dict))
+    return bool((c or "").strip())
+
+
+def _metti_metadati(msgs, righe, flusso=None):
+    """3.5 (10/11): nella chat il blocco metadati all'INIZIO dell'ultimo messaggio dell'utente (l'utente 10/11 sera:
+    in coda alla risposta dell'agente lei lo leggeva come scritto da se' e lo imitava); al turno dopo sparisce da li'.
+    Pensatoio e cron: in coda all'ultima risposta dell'agente con testo prima dell'ultimo messaggio user (stabile nei giri
+    di tool), se non c'e' in coda a quel messaggio user. Mai su un messaggio tool: la memoria involontaria resta nuda"""
+    u = next((k for k in range(len(msgs) - 1, -1, -1) if msgs[k].get("role") == "user"), None)
+    if u is None:
+        return
+    if flusso == "chat":
+        testa = "\n".join(righe) + "\n\n"
+        c = msgs[u].get("content")
+        if isinstance(c, list):
+            c.insert(0, {"type": "text", "text": testa})
+        else:
+            msgs[u]["content"] = testa + (c or "")
+        return
+    dove = next((k for k in range(u - 1, -1, -1) if msgs[k].get("role") == "assistant" and _ha_testo(msgs[k])), u)
+    testo = "\n\n" + "\n".join(righe)
+    c = msgs[dove].get("content")
+    if isinstance(c, list):
+        c.append({"type": "text", "text": testo})
+    else:
+        msgs[dove]["content"] = (c or "") + testo
 
 
 def _stop_chiesto(msgs):
@@ -919,7 +1200,7 @@ def _accoda_firma(flusso, ultimo, arrivo, esito):
     Pensatoio: la risposta dell'agente. Una sola write in append: righe intere anche con la notturna che accoda"""
     if not esito or esito.get("finish") != "stop" or esito.get("tool_calls"):
         return
-    risposta = (esito.get("testo") or "").strip()
+    risposta = _senza_imitati(esito.get("testo") or "").strip()
     righe = []
     if flusso == "chat":
         m = _HANDLE.match(ultimo.strip()) if isinstance(ultimo, str) else None
@@ -1122,6 +1403,7 @@ def query_riflesso(testo):
 STREAM_LIVE = "/tmp/stream-live.log"
 VOLO = "/tmp/chat-in-volo"
 FASE = "/tmp/fase"
+_volo_lock = threading.Lock()
 _fase = [None]
 _fase_lock = threading.Lock()
 
@@ -1215,8 +1497,12 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 chunk = resp.read1(8192)
                 if not chunk:
                     break
-                self.wfile.write(chunk)
-                self.wfile.flush()
+                try:
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    self._esito["interrotta"] = True   # Hermes ha chiuso: il turno non e' finito, niente switch
+                    raise
                 try:
                     buf = _tee_sse(buf, chunk, tee, self._esito)
                 except Exception:
@@ -1239,21 +1525,15 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         if resp is not None and resp.status == 200 and ("completion" in self.path or "/v1/chat" in self.path):
             if flusso == "chat":
                 _chat_calda[0] = time.time()
-            self._salva = threading.Thread(target=_salva_kv, daemon=True)
+            self._salva = _salva_ultimo[0] = threading.Thread(target=_salva_kv, daemon=True)
             self._salva.start()
 
     def _dopo_chat(self):
         """20/10: dopo la risposta finale all'utente il riepilogo, quando lo specchio della chat e' gia' salvato
-        (cosi' il conteggio dei token resta quello della chat)"""
-        corpo, esito, salva = self._inoltrato, self._esito, self._salva
-        if not esito or not _deve_riassumere(corpo, esito):
-            return
-
-        def lavora():
-            if salva:
-                salva.join()
-            _riassumi(corpo, esito["testo"], esito["ragionamento"])
-        threading.Thread(target=lavora, daemon=True).start()
+        (cosi' il conteggio dei token resta quello della chat); 10/11 poi lo switch (blocco B)"""
+        if self._esito and self._inoltrato:
+            threading.Thread(target=_fine_chat, args=(self._inoltrato, self._esito, self._salva, self._senza),
+                             daemon=True).start()
 
     def do_GET(self):
         self._inoltra(None)
@@ -1274,20 +1554,22 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
-    def _memoria(self, body, flusso=None):
+    def _memoria(self, body, flusso=None, righe=None, fuori=None):
         """Memoria involontaria: a ogni lettura nuova il Lux sceglie un ricordo
         (quanti=1, l'utente 09/11) nella risposta del tool; i ricordi già consegnati nella conversazione tornano al loro posto.
         A consenso spento il richiamo gira lo stesso e rinforza gli archi (WIRING
-        NON DISATTIVABILE, decisione di progetto), ma niente entra nel prompt."""
+        NON DISATTIVABILE, decisione di progetto), ma niente entra nel prompt.
+        10/11 (blocco A): con righe, il blocco metadati entra DOPO la query e l'impronta "dopo" ma PRIMA della
+        colorazione del ricordo (la cache colorata e' quella che l'inoltro riusa); fuori["senza"] = corpo senza."""
         d = json.loads(body)
         msgs = d.get("messages", [])
         if not msgs or not _sam_accesa():
-            return body
+            return _con_metadati(body, righe, fuori, flusso)
         attivo = consenso_attivo()
         stop = _stop_chiesto(msgs)   # prima di _rimetti: stessa finestra del controllo in do_POST
-        conv = _conversazione(msgs)
+        conv, vecchia = _chiavi(msgs)
         with _consegne_lock:
-            voci = _consegne_carica().get(conv, {}).get("voci", [])
+            voci = _voci(msgs)
         # 25/07, progetto: la familiarità deve arrivare su ciò che l'agente LEGGE, non
         # solo su ciò che gli viene detto (pagine, file, output dei tool).
         i, fonte = _fonte_indice(msgs)
@@ -1307,7 +1589,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         if fonte:
             r = _lux_consegna(query_riflesso(fonte), sorted(visti))
             if r.get("codici") and attivo:
-                nuova = {"dopo": _impronta(msgs[i]["content"]),
+                nuova = {"dopo": _impronta(msgs[i]["content"]), "indice": i,
                          "codici": r["codici"], "risposta": r["risposta"]}
                 voci = voci + [nuova]
                 if flusso == "chat":
@@ -1315,14 +1597,18 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                         _esclusi_chat[0] |= set(r["codici"])
                 with _consegne_lock:
                     tutte = _consegne_carica()
+                    tutte.pop(vecchia, None)     # la voce di prima del 10/11 passa alla chiave senza ora
                     tutte[conv] = {"ts": time.time(), "voci": voci}
-                    _consegne_salva(tutte)
+                    _consegne_salva(tutte, tieni=conv if flusso == "chat" else None)
         if not attivo:
-            return body
+            return _con_metadati(body, righe, fuori, flusso)
         tools = d.setdefault("tools", [])
         if not any(t.get("function", {}).get("name") == TOOL_RICORDO for t in tools):
             tools.append(TOOL)
         _rimetti(msgs, voci)
+        if righe:
+            fuori["senza"] = json.dumps(d).encode()
+            _metti_metadati(msgs, righe, flusso)
         if nuova:
             nids, emos, fattori = zip(*(_emo_del_ricordo(c) for c in nuova["codici"]))
             colorati = []
@@ -1341,7 +1627,8 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         return json.dumps(d).encode()
 
     def do_POST(self):
-        self._inoltrato = self._esito = self._salva = None   # la connessione keep-alive serve piu' richieste
+        self._inoltrato = self._esito = self._salva = self._senza = None   # keep-alive: piu' richieste
+        self._altro = False
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if self.path == "/memorinvolontaria":   # 09/11: il plugin di Hermes, mai inoltrato al 35B
             self._ricordo(body)
@@ -1360,23 +1647,11 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     _diario({"kill": f"{STOP} scritto dall'agente"})
             except Exception:
                 pass
-        # 16/10, l'utente: niente più ora a ogni messaggio ("[adesso sono le ...]",
-        # dal 19/07): l'ora vera sta davanti a un suo messaggio ogni 5 (_metti_ore).
-        # Resta in CODA, del momento, la destinazione unica delle riflessioni (25/07):
-        # 20/10 la mette _code() dopo la memoria involontaria.
-        if chat and _flusso(body) == "chat":
-            try:
-                d2 = json.loads(body)
-                msgs = d2.get("messages", [])
-                if msgs:
-                    _metti_ore(msgs)
-                    body = json.dumps(d2).encode()
-            except Exception:
-                pass  # mai bloccare la parola dell'agente per un orologio rotto
         # --- doppia CW (19/07): riconosci il flusso, scambia le cache.
         flusso = _flusso(body) if chat else None
         if flusso == "chat":
-            _chat_in_volo[0] += 1     # fino a fine risposta: il pensatoio non prende lo slot
+            with _altro_lock:
+                _chat_in_volo[0] += 1     # fino a fine risposta: il pensatoio non prende lo slot
             _segna_volo()
             _segna_fase("legge")
         try:
@@ -1385,20 +1660,33 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             if flusso == "chat":
                 if _chat_in_volo[0] <= 1:   # un'altra richiesta della chat in volo ha la sua fase
                     _segna_fase("tool" if self._esito and self._esito["finish"] == "tool_calls" else "")
-                _chat_in_volo[0] -= 1
+                with _altro_lock:
+                    _chat_in_volo[0] -= 1
                 _chat_calda[0] = time.time()
                 _segna_volo()
                 try:
                     self._dopo_chat()
                 except Exception as e:
                     _diario({"riepilogo": f"non avviato: {e}"})
+            if self._altro:
+                with _altro_lock:
+                    _altro_in_volo[0] -= 1
             try:
                 _accoda_firma(flusso, ultimo, arrivo, self._esito)
             except Exception as e:
                 _diario({"firma": f"coda non scritta: {e}"})   # mai toccare la parola dell'agente
 
     def _post_chat(self, body, chat, flusso):
+        ora = None
         if chat:
+            try:
+                d = json.loads(body)
+                _togli_imitati(d.get("messages", []))
+                body = json.dumps(d).encode()
+                ora = _ora_arrivo(d.get("messages", []), flusso == "chat")   # l'arrivo vero
+            except Exception as e:
+                _diario({"metadati": f"ora non letta: {e}"})
+            righe = _righe_metadati(ora or _ora_blocco(time.localtime(time.time())), flusso)   # fuori dai lucchetti
             inizio = time.time()
             while True:
                 if flusso == "pensatoio":
@@ -1434,6 +1722,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                         _slot("save", KV_FLUSSO[_cw[0]])  # al riparo prima dell'estraneo
                         _cambia_cw("altro")
                         _diario({"cw": "flusso estraneo: slot ceduto, CW al riparo"})
+                    if flusso == "altro":
+                        with _altro_lock:     # fino a fine richiesta (do_POST): il riepilogo aspetta
+                            _altro_in_volo[0] += 1
+                        self._altro = True
                     break
             if flusso == "pensatoio" and time.time() - inizio > 5:
                 _diario({"cw": f"pensatoio trattenuto {time.time()-inizio:.0f}s (chat calda)"})
@@ -1446,28 +1738,31 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                         body = json.dumps(d).encode()
                 except Exception as e:
                     _diario({"riepilogo": f"blocco non messo: {e}"})   # mai bloccare la parola dell'agente
-        coda = [PENSATOIO_DOVE] if chat else []
+        coda = []   # PENSATOIO_DOVE passa nel blocco metadati (M3, l'utente 10/11)
         avviso = None
         if chat:
-            # soglie gemelle: oltre 100k l'avviso di spazio, in coda come l'ora
-            if flusso in KV_FLUSSO and _tok_cw[flusso] > SOGLIA_CW \
-                    and not _avvisato_cw[flusso]:
+            # oltre 100k l'avviso di spazio, in coda, solo al pensatoio (K17); la chat ha lo switch (K4)
+            if flusso == "pensatoio" and _tok_cw[flusso] > SOGLIA_CW and not _avvisato_cw[flusso]:
                 avviso = (
                     "[avviso di spazio: questo flusso di pensiero ha superato i "
                     "100mila token e la finestra si sta riempiendo: tutto rallenta. "
-                    "È il momento di tirare le fila e chiudere il pensiero.]"
-                    if flusso == "pensatoio" else
-                    "[avviso di spazio: la conversazione ha superato i 100mila "
-                    "token e la finestra si sta riempiendo: tutto rallenta. "
-                    "La valvola è la dormita, che consolida i ricordi e libera la testa.]")
+                    "È il momento di tirare le fila e chiudere il pensiero.]")
                 coda.append(avviso)
         # MEMORIA INVOLONTARIA: DOPO lo scambio CW (il prefill colorato deve finire
         # nella cache giusta).
         if chat:
+            fuori = {}
             try:
-                body = self._memoria(body, flusso)
+                body = self._memoria(body, flusso, righe, fuori)
             except Exception as e:
                 _diario({"memoria": f"rotta: {e}"})  # mai bloccare la parola dell'agente
+                fuori.clear()           # il corpo e' quello di prima: niente metadati dentro
+            if "senza" not in fuori:     # memoria rotta: i metadati ci vanno lo stesso
+                try:
+                    body = _con_metadati(body, righe, fuori, flusso)
+                except Exception as e:
+                    _diario({"metadati": f"non messi: {e}"})
+            self._senza = fuori.get("senza")
             # 20/10: i testi in coda per ULTIMI, dopo la memoria: cosi' non entrano
             # nella query del Lux ne' nell'impronta del messaggio a cui il ricordo
             # si aggancia, e non toccano la cache colorata
@@ -1483,6 +1778,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     _segna_fase("")   # una fase rimasta da un riflesso morto a meta' risposta non resta accesa
+    _segna_volo()     # idem il conteggio delle richieste in volo (lo script dello switch lo aspetta a 0)
     # igiene all'avvio: qualunque vettore orfano di run precedenti muore qui
     try:
         calma()

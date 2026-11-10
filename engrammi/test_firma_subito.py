@@ -550,8 +550,8 @@ assert righe()[1]["testo"] == lungo.strip()
 src = open("/data/memoria-episodica-affettiva/riflesso.py").read()
 i = src.index("_accoda_firma(flusso, ultimo, arrivo, self._esito)")
 assert "try:" in src[i - 40:i] and "except Exception" in src[i:i + 120]   # un errore non tocca la risposta
-j, k = src.index("ultimo = next("), src.index("_metti_ore(msgs)")
-assert j < k   # il messaggio dell'utente si prende prima dell'ora e della coda
+j, k = src.index("ultimo = next("), src.index("ora = _ora_arrivo(d.get(\"messages\"")
+assert j < k   # il messaggio dell'utente si prende prima dell'ora e dei metadati
 print("riflesso ok")
 """
 r = subprocess.run(["python3", "-c", codice], capture_output=True, text=True,

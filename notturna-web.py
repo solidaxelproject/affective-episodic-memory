@@ -33,7 +33,6 @@ NOTTURNA = "/usr/local/bin/notturna"
 DORMI_FLAG = "/data/workspace/memoria/.dormi-richiesto"
 AZLOG = "/data/memoria-episodica-affettiva/notturna-web-azioni.log"
 MEMDB = "/data/workspace/memoria/memoria.db"
-STATO_AVVISO = "/data/state/motore-autonomia.ultimo-avviso-stanchezza"
 ARMATA_FILE = "/data/memoria-episodica-affettiva/.notturna-armata"
 PENS_KV = "/dev/shm/agente-kv/pensatoio.kv"
 LLAMA = "http://127.0.0.1:8090"
@@ -135,10 +134,8 @@ def _storico():
 
 def dati():
     mk = os.path.getmtime(MARKER) if os.path.exists(MARKER) else 0
-    avviso = os.path.getmtime(STATO_AVVISO) if os.path.exists(STATO_AVVISO) else 0
     return {"ora": time.strftime("%H:%M:%S"),
             "ore_da_notturna": round((time.time() - mk) / 3600, 1) if mk else None,
-            "avviso_stanchezza": avviso > mk,
             "notturna_armata": os.path.exists(ARMATA_FILE),
             "gpu": _gpu(), "storico": _storico(),
             "sistema": _sistema()}
@@ -559,10 +556,7 @@ async function giro(){
   $("ora").className="ora";
   $("ora").textContent=d.ora;
   $("h-notturna").innerHTML = d.ore_da_notturna==null ? "" :
-    "· ultima notturna <b>"+d.ore_da_notturna.toLocaleString("it")+" h fa</b> · "+
-    (d.avviso_stanchezza
-      ? '<span class="stato-warn">avviso stanchezza ricevuto</span>'
-      : '<span class="stato-ok">nessun avviso di stanchezza (parte a 16 h)</span>');
+    "· ultima notturna <b>"+d.ore_da_notturna.toLocaleString("it")+" h fa</b>";
   $("gpu-metri").innerHTML=gpuMetri(d.gpu);
   grafico(d.storico);
   const s=d.sistema;

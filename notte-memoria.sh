@@ -28,11 +28,14 @@ python3 estrai-matrix.py "$GIORNI" > "$J" || { echo "estrazione fallita"; exit 1
 # estratta, la sessione Matrix va a dormire (flag -> path-unit agente-dormi.path
 # -> rotazione session_id a container fermo); il consolidamento gira DOPO,
 # ad agente già addormentato. Prima d'ora andava chiesta a mano: ultima il 14/07.
-echo "$(date -Iseconds) dormi richiesto (mezzanotte, chat estratta)" >> /data/workspace/memoria/dormi.log
-touch /data/workspace/memoria/.dormi-richiesto
-# 18/10, l'utente: con la dormita la conversazione finisce, e con lei la lista dei ricordi
-# consegnati dal riflesso (quella che l'agente legge con ricorda.py --richiamati)
-rm -f /data/workspace/memoria/consegne-memorinvolontaria.json
+# revisione 3.5.3 (10/11): con uno switch in corso o gia' fatto (promozione in attesa) niente seconda rotazione
+if [ -e /data/memoria-episodica-affettiva/.switch-in-corso ] || [ -e /data/memoria-episodica-affettiva/.riepilogo-promuovi ]; then
+  echo "$(date -Iseconds) dormi saltato (mezzanotte): switch gia' in corso o fatto" >> /data/workspace/memoria/dormi.log
+else
+  echo "$(date -Iseconds) dormi richiesto (mezzanotte, chat estratta)" >> /data/workspace/memoria/dormi.log
+  touch /data/workspace/memoria/.dormi-richiesto
+fi
+# la lista dei ricordi consegnati (18/10) la svuota dormi-esegui.sh a sessione ruotata (10/11, vale per ogni switch)
 
 # REGOLA DI PROGETTO (19/07 sera): il marker avanza SOLO a lavoro riuscito: se
 # una notte salta o fallisce, la successiva riparte da dov'era il marker e

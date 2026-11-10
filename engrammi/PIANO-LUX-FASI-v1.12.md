@@ -133,7 +133,7 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
    lo slot FATTO e compilato; riepilogo nel riflesso scritto e provato, NON in produzione ne' committato) e
    `PIANO-REVISIONI-FUORI-CACHE.md` (24/10: manca T4, produzione). 10/11: il riepilogo e' gia' IN PRODUZIONE (riflesso
    del 09/11); nello stesso passo va cablato il blocco metadati dell'utente (stato del pensatoio, data e ora in coda
-   all'ultima risposta dell'agente, prefill anticipato dopo il riepilogo: PIANO-RIEPILOGO-KV.md 3.5, decisioni M1-M4). Il vettore appartiene alla KV cache del suo flusso
+   all'ultima risposta dell'agente, prefill anticipato dopo il riepilogo: PIANO-RIEPILOGO-KV.md 3.5, decisioni M1-M4; 10/11 notte: checkpoint della cresta K1-K3 e valutazione, cablaggio da fare). Il vettore appartiene alla KV cache del suo flusso
    (chat o pensiero autonomo) e la segue quando le cache si scambiano (manutenzione/ROADMAP-bozza.it.md).
    **⛔ INIEZIONE IN PRODUZIONE = QUELLA DEI TEST (10/11/2026): i vettori di steering si iniettano nello stesso
    modo delle prove, nel modello dentro luxifer.cpp (llama-35b, :8090).** Stessi vettori (out-occamy/vettori-*.pt,
