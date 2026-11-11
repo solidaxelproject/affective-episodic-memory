@@ -11,13 +11,13 @@ inglese; una frase passa all'inglese solo con sicurezza > SICUREZZA_LINGUA (gli 
 Inglese: stesse idee con le etichette di en_core_web_lg (prep/pobj al posto di case, "that"/"which"/"who" come "che").
 Le preposizioni inglesi sono parametri d'arco ma non hanno il codice compatto delle italiane (finiscono fra gli altri
 parametri, da 100 in su): ricomponendo restano inglesi. Altre lingue: si aggiungono a LINGUE quando servira'."""
+import json
 import re
-import sqlite3
 import sys
 
 import spacy
 
-DB = "/data/workspace/memoria/memoria.db"
+DB = "/data/workspace/memoria/memoria.db"   # 1.20.0: archivio; resta per gli script di prova e i test che lo leggono
 SOGG = {"nsubj", "nsubj:pass", "csubj", "nsubjpass", "csubjpass"}   # gli ultimi due: etichette inglesi
 ABBREV = {"art.", "artt.", "n.", "nn.", "p.", "pp.", "pag.", "cap.", "vol.", "fig.", "par.", "co.", "c.", "lett.", "no.", "v.", "es.", "ca.", "nr.", "al."}
 
@@ -305,7 +305,7 @@ def mostra(pezzi):
 
 if __name__ == "__main__":
     nid = int(sys.argv[1])
-    c = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-    testo = c.execute("select testo from nodi where id=?", (nid,)).fetchone()[0]
+    import meta_lux   # 1.20.0: dal meta del Lux (prima memoria.db)
+    testo = json.load(open(meta_lux.percorso()))["ricordi"][str(nid)]["testo"]
     print(testo, "\n")
     print(mostra(taglia(testo)))

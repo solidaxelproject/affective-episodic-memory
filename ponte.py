@@ -88,7 +88,7 @@ def dirs_emozione(nome, fattore=1.0):
     """layers-dict pronto per /control-vector (relative): direzioni della
     emozione alla dose centro * fattore, sulla SUA finestra. None se l'emozione
     non esiste. UNICA implementazione (gradino zero): la usano emozione() qui e
-    inietta_emozione() del riflesso (che sopra ci mette patto e assuefazione)."""
+    _applica_flusso() del riflesso (la discesa della fase 2; il vettore del ricordo usa steering.py dall'11/11)."""
     z = np.load(EMO_NPZ)
     nomi = [str(n) for n in z["nomi"]]
     if nome not in nomi:

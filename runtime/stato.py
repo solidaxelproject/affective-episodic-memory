@@ -3,8 +3,11 @@
 # Ritorno tipo Ornstein-Uhlenbeck: attrazione verso la baseline proporzionale
 # alla distanza + rumore -> graduale, dinamico, NON deterministico (spec il progetto).
 # Solo libreria standard: usabile dal container.
+import contextlib
+import fcntl
 import json
 import math
+import os
 import random
 import time
 from pathlib import Path
@@ -34,8 +37,30 @@ def _conf():
     return DEFAULT_CONF
 
 
+@contextlib.contextmanager
+def _bloccato():
+    """1.19.0 (revisione 11/11): riflesso, barra-prefill e notturna scrivono lo stesso file: un lucchetto fra processi
+    attorno a lettura, modifica e scrittura"""
+    with open(str(FILE) + ".lock", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def _scrivi(d):
+    """su un file accanto e poi al posto suo: chi legge con json.load non trova mai un file a meta'"""
+    tmp = str(FILE) + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, FILE)
+
+
 def carica(emos=None):
     """Stato attuale, con ritorno eutimico applicato per il tempo trascorso."""
+    with _bloccato():
+        return _carica(emos)
+
+
+def _carica(emos=None):
     conf = _conf()
     if FILE.exists():
         d = json.load(open(FILE))
@@ -52,7 +77,7 @@ def carica(emos=None):
         d["stato"][e] += k * (mu - d["stato"][e]) + random.gauss(0, rumore)
         d["stato"][e] = max(-conf["tetto"], min(conf["tetto"], d["stato"][e]))
     d["ts"] = time.time()
-    json.dump(d, open(FILE, "w"), ensure_ascii=False, indent=1)
+    _scrivi(d)
     return d["stato"]
 
 
@@ -65,15 +90,29 @@ def imprimi(firme, semantico=False):
         return
     conf = _conf()
     peso = conf.get("impronta_sem", 0.08) if semantico else conf["impronta"]
-    stato = carica(emos=list(firme[0]))
-    n = len(firme)
-    for e in stato:
-        media = sum(f.get(e, 0.0) for f in firme) / n
-        stato[e] += peso * (media - stato[e])
-        stato[e] = max(-conf["tetto"], min(conf["tetto"], stato[e]))
-    json.dump({"ts": time.time(), "stato": stato}, open(FILE, "w"),
-              ensure_ascii=False, indent=1)
+    with _bloccato():
+        stato = _carica(emos=list(firme[0]))
+        n = len(firme)
+        for e in stato:
+            media = sum(f.get(e, 0.0) for f in firme) / n
+            stato[e] += peso * (media - stato[e])
+            stato[e] = max(-conf["tetto"], min(conf["tetto"], stato[e]))
+        _scrivi({"ts": time.time(), "stato": stato})
     return stato
+
+
+def imprimi_lettura(lettura, peso):
+    """1.19.0 (l'utente 11/11, via emotiva): una lettura della J-lens imprime lo stato con il suo peso, solo sugli
+    assi letti (dict {emo: z}); gli altri restano dove sono. -> (stato prima, stato dopo)"""
+    conf = _conf()
+    with _bloccato():
+        stato = _carica(emos=list(lettura))
+        prima = dict(stato)
+        for e, z in lettura.items():
+            v = stato.get(e, 0.0)
+            stato[e] = max(-conf["tetto"], min(conf["tetto"], v + peso * (z - v)))
+        _scrivi({"ts": time.time(), "stato": stato})
+    return prima, stato
 
 
 def gate():

@@ -3,6 +3,14 @@ import threading
 import time
 
 import riflesso as R
+R._via_emotiva = lambda *a: (None, None)   # 1.19.0: la via emotiva la prova engrammi/test_via_emotiva.py, mai la lente vera qui
+R._leggi_risposta = lambda *a: None
+if not R.os.path.exists(R.steering.VETTORI):   # repo pubblico e CI: i vettori di steering sono dati, qui vettori finti
+    import numpy as np
+    _g = np.random.default_rng(0)
+    for _a in R.steering.EN.values():
+        R.steering._vettori[_a] = {l: _g.standard_normal(2048).astype(np.float32) for l in R.steering.STRATI}
+        R.steering._norme[_a] = {l: np.float32(1.0) for l in R.steering.STRATI}
 
 diario = []
 R._diario = diario.append
@@ -58,40 +66,77 @@ assert R._stop_chiesto([m("assistant", "vectreflexstop"), m("system", "ora"), m(
 import json, tempfile  # noqa: E401,E402
 R.CONSEGNE = R.Path(tempfile.mkdtemp()) / "consegne.json"
 R.consenso_attivo = R.vettori_attivi = lambda: True
-R._lux_consegna = lambda testo, esclusi: {"codici": ["abc"], "risposta": "1°\nabc\nil mare"}
+R._lux_consegna = lambda testo, esclusi, emozione=None: {"codici": ["abc"], "risposta": "1°\nabc\nil mare",
+                                                        "ricordi": [{"codice": "abc", "nid": 1, "dominante": "fear",
+                                                                     "classe": "vissuto"}]}
 emo_vero = R._emo_del_ricordo
 R._emo_del_ricordo = lambda c: (1, "fear", 1.0)
+R._forza = lambda codice, emo: 1.13
 colorati = []
-R._colora_ricordo = lambda *a: colorati.append(a) or ["fear"]
 corpo = lambda msgs: json.dumps({"messages": msgs}).encode()  # noqa: E731
 # 25/10: col 35B spento (cron di Hermes) nessun ricordo, ne' chiesto al Lux ne' salvato fra le consegne
 assert not R._sam_accesa(("127.0.0.1", 9)), "porta chiusa vista come l'agente accesa"
 R._sam_accesa = lambda *a: False
 chiesti = []
 lux = R._lux_consegna
-R._lux_consegna = lambda testo, esclusi: chiesti.append(testo) or lux(testo, esclusi)
+R._lux_consegna = lambda testo, esclusi, emozione=None: chiesti.append(testo) or lux(testo, esclusi)
 spenta = corpo([m("user", "[IMPORTANT: You are running as a scheduled cron job.] backup")])
 assert R.Proxy._memoria(None, spenta) == spenta and not chiesti and not R.CONSEGNE.exists(), "ricordo all'agente spenta"
 R._sam_accesa = lambda *a: True
 R._lux_consegna = lux
-R.Proxy._memoria(None, corpo([m("user", "guarda il mare"), m("assistant", "vectreflexstop"),
-                              m("user", "e adesso?")]))
+# 11/11: i cron di Hermes (flusso "altro") non ricevono ricordi: niente richiamo, niente consegna, niente vettore
+chiesti.clear()
+R._lux_consegna = lambda testo, esclusi, emozione=None: chiesti.append(testo) or lux(testo, esclusi)
+cron = corpo([m("user", "[IMPORTANT: You are running as a scheduled cron job.] guarda il mare")])
+fuori_c = {}
+assert R.Proxy._memoria(None, cron, "altro", None, fuori_c) == cron and not chiesti and not fuori_c, "ricordo a un cron"
+R._lux_consegna = lux
+
+
+def memoria(msgs, *a):
+    """PIANO-STEERING-RIFLESSO 7c (11/11): _memoria non accende niente, prepara il vettore del ricordo in fuori"""
+    fuori = {}
+    uscito = R.Proxy._memoria(None, corpo(msgs), *(a or ("chat",)), fuori=fuori)
+    if fuori.get("vettore"):
+        colorati.append(fuori["vettore"])
+    return uscito
+
+
+memoria([m("user", "guarda il mare"), m("assistant", "vectreflexstop"), m("user", "e adesso?")])
 assert not colorati, "colorato con vectreflexstop negli ultimi messaggi"
-assert "il mare" in json.dumps(json.loads(R.Proxy._memoria(None, corpo([m("user", "di nuovo il mare")]))))
+assert "il mare" in json.dumps(json.loads(memoria([m("user", "di nuovo il mare")])))
 assert colorati, "senza la parola il ricordo deve colorarsi"
+emo, dose, strati = colorati[-1]
+assert emo == "paura" and abs(dose - (0.036 + 0.009 * (1 - R.math.exp(-1)))) < 1e-9, (emo, dose)
+assert strati == R.steering.strati("paura", dose), "il vettore non e' quello del modulo unico"
+assert any(v.get("vettore") == ["paura", round(dose, 5)] for v in diario if isinstance(v, dict)), "vettore non a diario"
+
+# punto 7b (11/11): D_e del punto 7 con soglia 0.5 e k 1.13 (provvisori), fasce di DOSI-EMOZIONI.md
+F = R.steering.fasce()
+assert R._dose("fear", 0.49) is None, "sotto soglia niente vettore"
+assert R._dose("fear", None) is None and R._dose("boredom", 2.0) is None and R._dose("xyz", 2.0) is None
+lo, hi = F["gioia"]
+assert abs(R._dose("joy", 100.0)[1] - hi) < 1e-9 and R._dose("joy", 0.5)[1] > lo, "la dose resta nella fascia"
+assert abs(R._dose("joy", 1.13, 0.5)[1] - (lo + (hi - lo) * 0.5 * (1 - R.math.exp(-1)))) < 1e-9, "letto: meta' fascia"
+pu = R.steering.pure()["amore"]
+assert abs(R._dose("love", 1.13)[1] - (pu[0] + (pu[1] - pu[0]) * (1 - R.math.exp(-1)))) < 1e-9, "diade pura"
+assert abs(R._dose("terror", 1.13)[1] - (1 - R.math.exp(-1))) < 1e-9, "terrore: posizione 0-1 per emo_dose"
+R._forza = lambda codice, emo: 0.2
+colorati.clear()
+memoria([m("user", "ancora il mare")])
+assert not colorati, "S_e sotto soglia: niente vettore"
+R._forza = lambda codice, emo: 1.13
 
 # punto H (18/10): i ricordi "letto" si colorano con l'emozione di quando li ha letti, a meta' dose
-import sqlite3  # noqa: E402
-R.MEMORIA_DB = R.Path(tempfile.mkdtemp()) / "memoria.db"
-with sqlite3.connect(R.MEMORIA_DB) as c:
-    c.execute("CREATE TABLE nodi (id INTEGER, ts REAL, emo_tag TEXT, classe TEXT)")
-    c.executemany("INSERT INTO nodi VALUES (?,?,?,?)", [(1, 10.0, "fear", "vissuto"), (2, 20.0, "submission", "letto")])
-assert emo_vero(R._codice(10.0)) == (1, "fear", 1.0)
-assert emo_vero(R._codice(20.0)) == (2, "submission", 0.5), "il ricordo letto non e' a meta' dose"
+# Lux 1.20.0: nid, dominante e classe arrivano con la risposta di /consegna (prima da memoria.db)
+assert emo_vero({"codice": "a", "nid": 1, "dominante": "fear", "classe": "vissuto"}) == (1, "fear", 1.0)
+assert emo_vero({"codice": "b", "nid": 2, "dominante": "submission", "classe": "letto"}) == (2, "submission", 0.5), \
+    "il ricordo letto non e' a meta' dose"
+assert emo_vero({"codice": "c", "nid": None, "dominante": None, "classe": None}) == (None, None, 1.0), "ricordo ignoto"
 R._emo_del_ricordo = lambda c: (2, "submission", 0.5)
 colorati.clear()
-R.Proxy._memoria(None, corpo([m("user", "un altro mare")]))
-assert colorati and colorati[0][5] == (0.5,), "la meta' dose non arriva alla colorazione"
+memoria([m("user", "un altro mare")])
+assert colorati and colorati[0][:2] == R._dose("submission", 1.13, 0.5)[:2], "la meta' dose non arriva al vettore"
 
 # punto A (design dell'utente 18/10): il vettore appartiene alla KV cache del suo flusso
 import socket  # noqa: E402
@@ -167,6 +212,7 @@ R.RIEPILOGO = R.Path(tempfile.mkdtemp()) / "riepilogo.json"
 R.RIEPILOGO_PROMUOVI = R.RIEPILOGO.with_name(".riepilogo-promuovi")
 R.KV_RAM = R.Path(tempfile.mkdtemp())
 R.RIEPILOGO_LOG = R.Path(tempfile.mkdtemp()) / "logRiepilogo.md"
+R.FISSA = R.Path(tempfile.mkdtemp()) / "riepilogo-fissa.json"   # R6: mai quello vero
 
 
 def scrive(testo, path="/workspace/memoria/logRiepilogo.md", funzione="write_file"):
@@ -457,8 +503,9 @@ class Finto:
     def _memoria(self, body, flusso=None):
         return body
 
-    def _inoltra(self, body, flusso=None):
+    def _inoltra(self, body, flusso=None, vettore=None):
         self.inoltrato = json.loads(body)
+        self.vettore = vettore
 
 
 R._typing = lambda: False
@@ -555,8 +602,9 @@ colorati.clear()
 fuori = {}
 uscito = json.loads(R.Proxy._memoria(None, corpo([m("user", "[utente] u"), m("assistant", "r"),
                                                   m("user", "[utente] il mare blu di ieri")]), "chat", ["META"], fuori))
-assert colorati and colorati[-1][0]["messages"][2]["content"] == "META\n\n[utente] il mare blu di ieri", \
-    colorati[-1][0]["messages"]
+assert fuori.get("vettore"), "il vettore del ricordo non e' passato all'inoltro"
+assert next(v for v in reversed(diario) if isinstance(v, dict) and "memorinvolontaria" in v)["flusso"] == "chat", \
+    "1.14.0: il flusso della consegna serve al riconsolidamento"
 assert uscito["messages"][2]["content"] == "META\n\n[utente] il mare blu di ieri" \
     and json.loads(fuori["senza"])["messages"][2]["content"] == "[utente] il mare blu di ieri"
 fuori = {}
@@ -748,10 +796,221 @@ R._ora_arrivo = ora_vera
 R.CODA_FIRMA = str(R.Path(tempfile.mkdtemp()) / "coda.jsonl")
 R._accoda_firma("chat", "[utente] a", 1.0, {**fine, "testo": "bene.\n\n[/pensatoio]\n[20:15|10/11/2026]"})
 assert json.loads(R.Path(R.CODA_FIRMA).read_text().splitlines()[-1])["testo"] == "bene.", R.Path(R.CODA_FIRMA).read_text()
+assert json.loads(R.Path(R.CODA_FIRMA).read_text().splitlines()[-1])["flusso"] == "chat"
 
 # punto 7: in ore-messaggi.json (dato della fase 2) solo i messaggi dell'utente, mai il review o il memory flush
 prima_ore = R.ORE.read_text()
 R._ora_arrivo(review)
 assert R.ORE.read_text() == prima_ore, "il background review e' finito in ore-messaggi.json"
+
+# R6 (l'utente 24/10, PIANO-REVISIONI-FUORI-CACHE.md): la parte fissa del system (skill comprese) cambia nella chat
+# solo quando nasce una CW del riepilogo nuova; il riepilogo in formazione prende l'elenco nuovo solo sotto 20 righe
+R.FISSA.unlink(missing_ok=True)
+assert R._fissa_carica() == {"chat": None, "riepilogo": None, "elenco": None}, "file assente: tutto None"
+R.FISSA.write_text("{rotto", encoding="utf-8")
+assert R._fissa_carica() == {"chat": None, "riepilogo": None, "elenco": None}
+ELENCO_V = R.ELENCO_DA + "\n<available_skills>\n    - vecchia\n</available_skills>\n\n" + R.ELENCO_A
+ELENCO_N = R.ELENCO_DA + "\n<available_skills>\n    - nuova\n</available_skills>\n\n" + R.ELENCO_A
+FV, FN = (f"Sono l'agente.\n\n{e}\n\n# regole\n" for e in (ELENCO_V, ELENCO_N))
+CODA_H = SEP + "Conversation started: martedi"
+assert R._elenco(FV + CODA_H) == ELENCO_V and R._elenco("niente skill") is None
+assert R._fissa(FV + CODA_H) == FV and R._fissa("breve") is None
+
+# a. promozione: la chat nuova nasce da riepilogo.kv, quindi ha la sua parte fissa; senza riepilogo.kv quella di Hermes
+for kv, restore, attesa in ((True, True, FN), (False, True, None), (True, False, None)):
+    R._fissa_salva({"chat": FV, "riepilogo": FN, "elenco": ELENCO_N})
+    R._elenco_ok[0] = True
+    R._riepilogo_salva({"blocco": [], "nuovi": ["a"]})
+    R.RIEPILOGO_PROMUOVI.write_text("")
+    if kv:
+        (R.KV_RAM / "riepilogo.kv").write_bytes(b"x")
+    R._slot = lambda az, nome, ok=restore: passi.append((az, nome)) or ok
+    R._cw[0] = "chat"
+    R._promuovi()
+    assert R._fissa_carica() == {"chat": attesa, "riepilogo": None, "elenco": None}, (kv, restore, R._fissa_carica())
+    assert R._elenco_ok[0] is None, "il CONTROLLO va rifatto nella sessione nuova"
+R._slot = lambda az, nome: passi.append((az, nome)) or True
+
+# b. chat: la parte fissa di Hermes (skill nuove) sostituita da quella della cache, poi il blocco al suo posto
+R._riepilogo_salva({"blocco": ["r1"], "nuovi": []})
+R._fissa_salva({"chat": FV, "riepilogo": None, "elenco": None})
+R._cw[0] = "chat"
+n = len(diario)
+for volta in (1, 2):
+    f = Finto()
+    R.Proxy._post_chat(f, json.dumps({"messages": [sis := {"role": "system", "content": FN + CODA_H},
+                                                   m("user", "[utente] ciao")], "tools": [R.TOOL]}).encode(), True, "chat")
+    assert f.inoltrato["messages"][0]["content"] == FV + INTEST + "\nr1\n\n" + CODA_H, f.inoltrato["messages"][0]
+    assert f._hermes == {"system": FN + CODA_H, "tools": [R.TOOL["function"]["name"]]}, f._hermes
+assert sum("parte fissa" in str(v.get("riepilogo", "")) for v in diario[n:] if isinstance(v, dict)) == 1, \
+    "la sostituzione va nel diario una volta per sessione"
+for fissa, h in ((FV, "breve"), (None, FN + CODA_H)):
+    R._fissa_salva({"chat": fissa, "riepilogo": None, "elenco": None})
+    R._riepilogo_salva({"blocco": [], "nuovi": []})
+    f = Finto()
+    R.Proxy._post_chat(f, json.dumps({"messages": [{"role": "system", "content": h},
+                                                   m("user", "[utente] ciao")]}).encode(), True, "chat")
+    assert f.inoltrato["messages"][0]["content"] == h, (fissa, f.inoltrato["messages"][0])
+
+# c. _riassumi: il prompt della chat dal corpo inoltrato, il system del riepilogo dal system ORIGINALE di Hermes;
+# fissa_riepilogo scritta solo dopo la save riuscita; parte fissa cambiata = niente restore di riepilogo.kv (M3)
+R._riepilogo_salva({"blocco": ["r1"], "nuovi": ["n1"]})
+R._fissa_salva({"chat": FV, "riepilogo": FV, "elenco": None})
+(R.KV_RAM / "riepilogo.kv").write_bytes(b"x")
+R._tok_cw["chat"] = 50_000
+risposta_sam[0] = "un saluto"
+inoltrato_v = {"messages": [{"role": "system", "content": FV + INTEST + "\nr1\n\n" + CODA_H}, m("user", "[utente] ciao")],
+               "tools": [R.TOOL]}
+hermes = {"system": FN + CODA_H, "tools": ["memorinvolontaria"]}
+passi.clear(); chiesti.clear()
+R._cw[0] = "chat"
+assert R._riassumi(json.dumps(inoltrato_v).encode(), "ciao l'utente!", hermes=hermes) == (False, "ok")
+assert chiesti[0][1] == inoltrato_v, "il prompt del riassunto deve partire dal corpo inoltrato esatto"
+assert chiesti[2][1]["messages"][0]["content"] == FN + INTEST + "\nn1\nun saluto\n\n" + CODA_H, chiesti[2][1]
+assert ("restore", "riepilogo.kv") not in passi and ("save", "riepilogo-base.kv") in passi, passi
+assert R._fissa_carica()["riepilogo"] == FN
+R._slot = lambda az, nome: passi.append((az, nome)) or nome != "riepilogo.kv"
+R._riassumi(json.dumps(inoltrato_v).encode(), "ciao l'utente!", hermes={**hermes, "system": FV + CODA_H})
+assert R._fissa_carica()["riepilogo"] == FN, "save fallita: fissa_riepilogo cambiata lo stesso"
+R._slot = lambda az, nome: passi.append((az, nome)) or True
+passi.clear()
+R._riassumi(json.dumps(inoltrato_v).encode(), "ciao l'utente!", hermes=hermes)
+assert ("restore", "riepilogo.kv") in passi, "parte fissa uguale: riepilogo.kv va riusata"
+
+# d. elenco nuovo a meta' sessione: CONTROLLO alla prima chiamata, poi adottato solo sotto 20 righe
+uscite, chiamate = [], []
+
+
+def skills_finto(tools):
+    chiamate.append(tools)
+    u = uscite.pop(0)
+    if isinstance(u, Exception):
+        raise u
+    return u
+
+
+R._skills_da_hermes = skills_finto
+hermes = {"system": FV + CODA_H, "tools": ["skill_view"]}
+R._fissa_salva({"chat": None, "riepilogo": None, "elenco": None})
+R._riepilogo_salva({"blocco": [], "nuovi": ["x"] * 19})
+R._elenco_ok[0] = None
+uscite[:] = [OSError("docker giu'"), ELENCO_V, ELENCO_V, ELENCO_N]
+assert R._elenco_hermes(hermes) is None and R._elenco_ok[0] is None, "docker giu' non deve spegnere il CONTROLLO"
+assert R._elenco_hermes(hermes) is None and R._elenco_ok[0] is True, "CONTROLLO riuscito"
+assert R._elenco_hermes(hermes) is None, "elenco uguale: niente da cambiare"
+assert R._elenco_hermes(hermes) == ELENCO_N and chiamate[-1] == ["skill_view"]
+passi.clear(); chiesti.clear()
+R._riassumi(json.dumps(inoltrato_v).encode(), "ciao l'utente!", hermes=hermes, elenco=ELENCO_N)
+assert R._fissa_carica()["elenco"] == ELENCO_N and R._fissa_carica()["riepilogo"] == FN
+assert chiesti[2][1]["messages"][0]["content"].startswith(FN + INTEST), chiesti[2][1]
+R._riepilogo_salva({"blocco": [], "nuovi": ["x"] * 20})
+n = len(chiamate)
+assert R._elenco_hermes(hermes) is None and len(chiamate) == n, "da 20 righe in su niente docker exec"
+chiesti.clear()
+R._riassumi(json.dumps(inoltrato_v).encode(), "ciao l'utente!", hermes=hermes)
+assert chiesti[2][1]["messages"][0]["content"].startswith(FN + INTEST), "riga 21: l'elenco adottato deve restare"
+R._fissa_salva({"chat": None, "riepilogo": None, "elenco": None})
+R._riepilogo_salva({"blocco": [], "nuovi": []})
+R._elenco_ok[0] = None
+uscite[:] = [ELENCO_N]
+n = len(diario)
+assert R._elenco_hermes(hermes) is None and R._elenco_ok[0] is False, "CONTROLLO fallito: la funzione si spegne"
+assert any("elenco" in str(v.get("riepilogo", "")) for v in diario[n:] if isinstance(v, dict))
+n = len(chiamate)
+assert R._elenco_hermes(hermes) is None and len(chiamate) == n, "spenta: niente piu' docker exec"
+R._elenco_ok[0] = None
+assert R._elenco_hermes({"system": "senza marcatori" + CODA_H, "tools": []}) is None and len(chiamate) == n
+assert R._elenco_hermes(None) is None and len(chiamate) == n
+
+# _fine_chat: l'elenco di Hermes e il system originale arrivano a _riassumi
+presi = []
+riassumi_vero, elenco_vero = R._riassumi, R._elenco_hermes
+R._riassumi = lambda *a, **k: presi.append(k) or (False, "ok")
+R._elenco_hermes = lambda h: ELENCO_N
+R._tok_cw["chat"] = 50_000
+R._fine_chat(corpo_utente, fine, None, None, hermes)
+assert presi == [{"hermes": hermes, "elenco": ELENCO_N}], presi
+R._elenco_hermes = lambda h: 1 / 0
+presi.clear()
+R._fine_chat(corpo_utente, fine, None, None, hermes)
+assert presi == [{"hermes": hermes, "elenco": None}], "elenco rotto: il riepilogo deve partire lo stesso"
+R._riassumi, R._elenco_hermes = riassumi_vero, elenco_vero
+
+# prima richiesta dopo la dormita: promozione e parte fissa nella stessa richiesta
+R._fissa_salva({"chat": FV, "riepilogo": FN, "elenco": None})
+R._riepilogo_salva({"blocco": ["vecchia"], "nuovi": ["p1"]})
+R.RIEPILOGO_PROMUOVI.write_text("")
+(R.KV_RAM / "riepilogo.kv").write_bytes(b"x")
+R._cw[0] = "chat"
+f = Finto()
+R.Proxy._post_chat(f, json.dumps({"messages": [{"role": "system", "content": FV + CODA_H},
+                                               m("user", "[utente] ciao")]}).encode(), True, "chat")
+assert f.inoltrato["messages"][0]["content"] == FN + INTEST + "\np1\n\n" + CODA_H, f.inoltrato["messages"][0]
+assert f._hermes["system"] == FV + CODA_H
+
+# PIANO-STEERING-RIFLESSO 7d (11/11): _inoltra fa il prefill del corpo finale SENZA vettore, poi accende il vettore
+# del ricordo e chiede a luxifer di spegnerlo a </think>; a fine stream calma()
+import http.server as HS  # noqa: E402
+import io  # noqa: E402
+arrivati, chiuso = [], []
+
+
+class Monte(HS.BaseHTTPRequestHandler):
+    def do_POST(self):
+        arrivati.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+        chiuso.append(R._vettore_lock.locked())
+        b = b'data: {"choices":[{"delta":{"content":"ciao"},"finish_reason":"stop"}]}\n\n'
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def log_message(self, *a):
+        pass
+
+
+monte = HS.HTTPServer(("127.0.0.1", 0), Monte)
+threading.Thread(target=monte.serve_forever, daemon=True).start()
+R.UPSTREAM = monte.server_address
+passi = []
+R.ponte.post = lambda path, d, timeout=600: passi.append((path, d, R._vettore_vivo[0])) or \
+    (200, {"prompt": "PROMPT"} if path == "/apply-template" else {})
+R._cvec = lambda d: passi.append(("cvec", d))
+R.calma = lambda: (R._vettore_vivo.__setitem__(0, False), passi.append("calma"))
+R._vettori["chat"].clear()
+R._salva_kv = lambda: None
+
+
+def proxy():
+    p = R.Proxy.__new__(R.Proxy)
+    p.command, p.path, p.headers, p.wfile = "POST", "/v1/chat/completions", {}, io.BytesIO()
+    p.send_response = p.send_header = lambda *a: None
+    p.end_headers = p.send_error = lambda *a: None
+    return p
+
+
+V = R.steering.strati("paura", 0.04)
+R._vettore_vivo[0] = False
+corpo_v = {"messages": [m("user", "[utente] il mare")], "tools": [{"t": 1}], "stream": True}
+proxy()._inoltra(json.dumps(corpo_v).encode(), "chat", ("paura", 0.04, V))
+assert [x[0] if isinstance(x, tuple) else x for x in passi] == ["/apply-template", "/completion", "cvec", "calma"], passi
+assert passi[0][1] == corpo_v and not passi[0][2], passi[0]
+assert passi[1][1] == {"prompt": "PROMPT", "n_predict": 1, "cache_prompt": True} and not passi[1][2], "prefill col vettore"
+assert passi[2][1] == {"layers": V, "relative": True}
+assert arrivati[-1] == {**corpo_v, "reasoning_control": True, "cvec_solo_ragionamento": True}, arrivati[-1]
+assert chiuso[-1] and not R._vettore_lock.locked(), "il lucchetto va tenuto per tutto lo stream e lasciato dopo"
+passi.clear()
+proxy()._inoltra(json.dumps(corpo_v).encode(), "chat")
+assert not passi and arrivati[-1] == corpo_v, "senza vettore il corpo passa com'era"
+assert not chiuso[-1], "senza vettore il lucchetto non si tiene durante lo stream"
+R._cw[0] = "chat"
+proxy()._inoltra(json.dumps(corpo_v).encode(), "pensatoio", ("paura", 0.04, V))
+assert "cvec" not in [x[0] for x in passi if isinstance(x, tuple)], "pensatoio senza slot: niente vettore"
+monte.shutdown()
+# revisione 11/11: il watchdog rimandato di un ricordo vecchio non spegne il vettore di quello dopo
+passi.clear()
+R._vettore_vivo[0], R._vettore_di[0] = True, object()
+R._scaduto(object())
+assert "calma" not in passi, "il watchdog vecchio ha spento il vettore nuovo"
 
 print("test_riflesso: TUTTO VERDE")

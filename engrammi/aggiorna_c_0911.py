@@ -22,6 +22,8 @@ with X.lucchetto():
     firme = dict(c.execute("select id, firma from nodi"))
     c.close()
     z = dict(np.load(X.NPZ))
+    if "fattore" in z:   # 1.15.0: rifarebbe C dalla firma grezza senza fattore, con C0 nell'altra scala
+        sys.exit("script da una volta del 09/11: non si rilancia dalla 1.15.0")
     A, C = z["A"], z["C"].copy()
     k = np.array([p >= 0 and int(r) in firme for r, p in A[:, :2].tolist()])
     C[k] = np.stack([X.carica(firme[int(r)]) for r in A[k, 0].tolist()])

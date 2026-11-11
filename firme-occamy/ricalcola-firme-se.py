@@ -6,19 +6,21 @@
 #   --leggi   server di prova 8098 (GPU libera): per ogni voce (tutti i nodi + tutti gli altri messaggi della chat) la
 #             firma a 24 assi; il messaggio da solo per mu (media di popolazione per strato, serve ai messaggi senza
 #             contesto). Salvate in letture-se.pt con ripresa.
-#   --scrivi  CPU: z sulla popolazione, soglia, riscrive firma/emo_tag/salienza in memoria.db e addr_emo in vettori.pt
-#             (emo_alpha non si calcola piu', P2); stats-firma-se.pt coi metadati. Backup .bak-pre-firme-se-<ts>.
+#   --scrivi  CPU: z sulla popolazione, soglia, riscrive firma/dominante/salienza nel lux-meta.json della cartella
+#             LUX_DIR (obbligatoria: una cartella nuova, poi si ricostruisce; emo_alpha non si calcola piu', P2);
+#             stats-firma-se.pt coi metadati. Backup .bak-pre-firme-se-<ts>.
 #   --dry     con --scrivi: solo il resoconto.
 # 09/11 (PIANO-FIRMA-44-ASSI.md, l'utente): --leggi salva le DIFFERENZE per strato (letture-diff.pt, float32), non la
 #   proiezione: --scrivi proietta coi vettori di VETTORI_FIRMA (default vettori-lettura-firma.pt, 44 assi, variante C)
-#   e li scrive nelle statistiche ("vettori"); dominante con memoria.dominante; db e vettori.pt sotto il lucchetto.
+#   e li scrive nelle statistiche ("vettori"); dominante con memoria.dominante.
+# 1.20.0 (PIANO-1.20, punto 8): dal meta del Lux (prima memoria.db e vettori.pt). Senza LUX_DIR (--leggi, --dry) legge il
+#   meta della versione in servizio.
 # Uso: cd /data/jspace && venv/bin/python /data/memoria-episodica-affettiva/firme-occamy/ricalcola-firme-se.py --leggi
 import argparse
 import fcntl
 import json
 import os
 import shutil
-import sqlite3
 import sys
 import time
 import urllib.request
@@ -39,9 +41,12 @@ VETTORI = os.environ.get("VETTORI_FIRMA", "/data/jspace/out-occamy/vettori-lettu
 VECCHIE = f"{QUI}/letture-v3.pt"          # firma vecchia (51 assi) dei 600 messaggi non nodo di settembre
 STATS_VECCHIE = "/data/memoria-episodica-affettiva/stats-emo-v2.pt"
 STATS = os.environ.get("STATS_SE", "/data/memoria-episodica-affettiva/stats-firma-se.pt")
-MEM = os.environ.get("MEM_SAM", "/data/workspace/memoria")   # MEM_SAM: copia per i test
-DB = f"{MEM}/memoria.db"
-VEC = f"{MEM}/vettori.pt"
+ENG = "/data/memoria-episodica-affettiva/engrammi"   # 1.20.0: dal meta del Lux (prima memoria.db)
+LUX_DIR = os.environ.get("LUX_DIR")
+sys.path.insert(0, ENG)
+import meta_lux  # noqa: E402
+
+META = meta_lux.percorso()
 URL = os.environ.get("URL_FIRMA", "http://127.0.0.1:8098")
 FINESTRA = 86400          # contesto = messaggi delle 24 h prima, come il 29/09
 SOGLIA_VECCHIA = 1.8
@@ -64,9 +69,8 @@ def contesto(chat, ts):
 
 def voci():
     """tutti i nodi + tutti i messaggi della chat che non sono nodi (il campione della quota)"""
-    db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-    nodi = db.execute("SELECT id, ts, testo FROM nodi ORDER BY id").fetchall()
-    db.close()
+    ricordi = json.load(open(META))["ricordi"]   # 1.20.0: dal meta del Lux (prima memoria.db), correzioni fuori
+    nodi = sorted((int(k), r["ts"], r["testo"]) for k, r in ricordi.items() if r["classe"] != "correzione")
     chat = carica_chat()
     testi_nodi = {t.strip() for _, _, t in nodi}
     v = [("nodo", nid, ts, t) for nid, ts, t in nodi]
@@ -181,10 +185,10 @@ def calcola():
 
 
 def scrivi(dry):
+    if not dry and not LUX_DIR:
+        sys.exit("--scrivi: LUX_DIR obbligatoria (cartella nuova del Lux, poi si ricostruisce)")
     nuove, stats, res = calcola()
-    db = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-    vecchi = dict(db.execute("SELECT id, emo_tag FROM nodi"))
-    db.close()
+    vecchi = {int(k): r.get("dominante") for k, r in json.load(open(META))["ricordi"].items()}   # 1.20.0: dal meta
     log.info("RESOCONTO: %d nodi, popolazione %d (%d non nodo, %d senza contesto)", len(nuove), res["n"],
              res["n_campione"], res["senza_contesto"])
     log.info("  quota vecchia %.4f (salienza >= %.1f su %d messaggi di settembre) -> soglia nuova %.3f, quota "
@@ -203,34 +207,22 @@ def scrivi(dry):
         return res
 
     bak = f".bak-pre-firme-se-{time.strftime('%Y%m%d-%H%M%S')}"
-    M = memoria
-    M.DB, M.VEC = M.Path(DB), M.Path(VEC)
-    with open(f"{DB}.lock", "w") as lk:   # 09/11: lo stesso lucchetto di memoria.add_node, backup compreso
+    with open(f"{LUX_DIR}/.lucchetto", "w") as lk:   # 1.20.0: il lucchetto del Lux (lux_engrammi.lucchetto)
         fcntl.flock(lk, fcntl.LOCK_EX)
-        src = sqlite3.connect(DB)
-        src.execute("PRAGMA busy_timeout=5000")
-        assert {r[0] for r in src.execute("SELECT id FROM nodi")} == set(nuove), "nodi cambiati dopo la lettura: rilanciare"
-        dst = sqlite3.connect(DB + bak)
-        src.backup(dst)
-        dst.close()
-        for p in (VEC, STATS):
+        m = json.load(open(META))
+        ricordi = {int(k): r for k, r in m["ricordi"].items() if r["classe"] != "correzione"}
+        assert set(ricordi) == set(nuove), "ricordi cambiati dopo la lettura: rilanciare"
+        for p in (META, STATS):
             if os.path.exists(p):
                 shutil.copy2(p, p + bak)
         log.info("backup %s fatti", bak)
-        with src:
-            for nid, (firma, dom, salienza) in nuove.items():
-                src.execute("UPDATE nodi SET firma=?, emo_tag=?, salienza=? WHERE id=?",
-                            (json.dumps(firma, ensure_ascii=False), dom, salienza, nid))
-        src.close()
-        vec = M._load_vec()
-        for nid, (firma, _, _) in nuove.items():
-            if nid in vec:
-                vec[nid]["addr_emo"] = M.addr_emo(firma)   # B7: come memoria.add_node (ordine di emozioni.json)
-        M._save_vec(vec)   # file temporaneo e os.replace
+        for nid, (firma, dom, salienza) in nuove.items():
+            ricordi[nid].update(firma=firma, dominante=dom, salienza=salienza)
+        json.dump(m, open(META + ".tmp", "w"), ensure_ascii=False)
+        os.replace(META + ".tmp", META)   # mai un meta a meta'
         torch.save(stats, STATS + ".tmp")
         os.replace(STATS + ".tmp", STATS)
-    log.info("FIRME-SCRITTE: memoria.db %d nodi, vettori.pt addr_emo, %s n=%d soglia %.3f", len(nuove), STATS,
-             stats["n"], stats["soglia"])
+    log.info("FIRME-SCRITTE: %s %d ricordi, %s n=%d soglia %.3f", META, len(nuove), STATS, stats["n"], stats["soglia"])
     return res
 
 

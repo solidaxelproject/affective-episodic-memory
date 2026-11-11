@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """B6 di PIANO-FIRMA-ENGRAMMI.md (l'utente 31/10-01/11): il ricordo entra subito, non piu' nella notturna.
 Il riflesso, a turno chiuso, scrive i messaggi in coda-firma.jsonl ({ts, autore, testo}); questo servizio li firma col
-server vivo (firma_se.firma_server, stats e soglia di B3), crea il nodo in memoria.db e lo mette nel Lux degli engrammi.
+server vivo (firma_se.firma_server, stats e soglia di B3) e mette il ricordo nel Lux degli engrammi (1.20.0: POST /aggiungi
+del servizio del Lux, che da' anche il numero; prima memoria.db).
 Registro del giorno (giornata-firma.jsonl, una riga per messaggio, l'ultima per (ts, testo) vale): contesto, dedup,
 trascinamento (behavioral tagging) e notturna.
   firma_subito.py servizio        giro ogni GIRO_S secondi sulla coda (firma-subito.service)
@@ -12,7 +13,6 @@ Uso: /data/jspace/venv/bin/python /data/memoria-episodica-affettiva/engrammi/fir
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import urllib.error
@@ -37,7 +37,6 @@ GIORNATA = f"{MEM}/giornata-firma.jsonl"
 MARKER = os.environ.get("MARKER_NOTTE", "/data/memoria-episodica-affettiva/.ultimo-consolidamento")   # notte-memoria.sh
 URL = os.environ.get("URL_FIRMA", "http://127.0.0.1:8090")
 STATS = os.environ.get("STATS_SE", "/data/memoria-episodica-affettiva/stats-firma-se.pt")
-SPACY = "/data/venv-spacy/bin/python"
 GIRO_S = float(os.environ.get("GIRO_S", 5))
 FINESTRA = 86400       # contesto e dedup: messaggi delle 24 ore prima, come B3
 TRASCINA = 3600        # behavioral tagging: 60 minuti prima e dopo (Moncada e Viola 2007)
@@ -160,37 +159,41 @@ def firma(contesto, testo):
 
 # ---------- nodi ----------
 
+def _lux(rotta, corpo, attesa=30):
+    """POST al servizio del Lux; servizio giu', 5xx o altro 4xx (rotta assente: servizio vecchio) = Aspetta (la coda
+    aspetta), 400 = urllib.error.HTTPError"""
+    r = urllib.request.Request(LUX_URL + rotta, json.dumps(corpo).encode(), {"Content-Type": "application/json"})
+    try:
+        return json.load(urllib.request.urlopen(r, timeout=attesa))
+    except urllib.error.HTTPError as e:
+        if e.code == 400:
+            raise
+        raise Aspetta(f"servizio del Lux: HTTP {e.code}")
+    except OSError as e:
+        raise Aspetta(f"servizio del Lux non risponde ({e})")
+
+
 def nodo(v, fonte, cattura=None):
-    """memoria.db (deduplica sul testo: rifare la stessa voce non crea doppioni) -> nid"""
-    return memoria.add_node(v["testo"], v["firma"], torch.tensor(persistenza.vettore([v["testo"]])[0]), v["dominante"],
-                            None, v["salienza"], fonte=fonte, ts=v["ts"],
-                            classe="letto" if URL_RE.search(v["testo"]) else "vissuto", voluto=1 if v.get("forzato") else 0,
-                            cattura=cattura)
-
-
-def lux_aggiungi():
-    """i nodi nuovi di memoria.db nel Lux degli engrammi (venv-spacy, lucchetto dentro aggiungi)"""
-    r = subprocess.run([SPACY, "-c", "import sys, taglia as T; T.DB = sys.argv[1]; import lux_engrammi as X; X.aggiungi()",
-                        str(memoria.DB)], cwd=QUI, capture_output=True, text=True)
-    if r.returncode:
-        raise RuntimeError(f"Lux aggiungi fallito: {r.stderr.strip()[-500:]}")
-    log.info("Lux: %s", r.stdout.strip())
+    """1.20.0: il ricordo nel Lux (POST /aggiungi: stesso testo = stesso ricordo, come faceva memoria.add_node) -> nid.
+    Il Lux lo rifiuta (400) = ValueError: la voce si segna "errore" e la coda va avanti"""
+    corpo = {"testo": v["testo"], "firma": v["firma"], "dominante": v["dominante"], "fonte": fonte, "ts": v["ts"],
+             "classe": "letto" if URL_RE.search(v["testo"]) else "vissuto", "voluto": 1 if v.get("forzato") else 0,
+             "cattura": cattura, "salienza": v["salienza"]}
+    try:
+        return _lux("/aggiungi", corpo, attesa=120)["nid"]
+    except urllib.error.HTTPError as e:
+        raise ValueError(f"Lux: HTTP {e.code} {e.read()[:300]!r}")
 
 
 def cattura(testo, forte):
     """g del debole catturato dal ricordo forte (dict del registro), None = niente cattura. Sovrapposizione dal servizio
     del Lux (spaCy e bge-m3 stanno li'); servizio giu' = la coda aspetta"""
-    r = urllib.request.Request(LUX_URL + "/sovrapposizione", json.dumps({"testo": testo, "nid": forte["nid"]}).encode(),
-                               {"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(r, timeout=120) as f:
-            o = json.load(f)
+        o = _lux("/sovrapposizione", {"testo": testo, "nid": forte["nid"]}, attesa=120)
     except urllib.error.HTTPError as e:
         if e.code == 400:   # il forte non e' nel Lux (tolto): niente cattura
             return None
         raise Aspetta(f"servizio del Lux: HTTP {e.code}")
-    except OSError as e:
-        raise Aspetta(f"servizio del Lux non risponde ({e})")
     n, presi = o["n"], o["presi"]
     if not n or presi < 1 or presi == n or presi / n < QUOTA_MIN:   # niente in comune, troppo poco, o niente di nuovo
         return None
@@ -199,7 +202,13 @@ def cattura(testo, forte):
 
 
 def _trascina(reg, v, forte, g):
-    _annota(reg, dict(v, esito="trascinato", nid=nodo(v, "trascinato", g), da=forte["nid"], cattura=g))
+    try:
+        nid = nodo(v, "trascinato", g)
+    except ValueError as e:   # resta scartato (la persistenza lo vede ancora), con l'errore
+        _annota(reg, dict(v, esito="scartato", errore=str(e)))
+        log.warning("trascinato rifiutato dal Lux: %s (%s)", e, v["testo"][:60])
+        return
+    _annota(reg, dict(v, esito="trascinato", nid=nid, da=forte["nid"], cattura=g))
     log.info("TRASCINATO da %s (z=%.2f, g=%.2f) %s", forte["nid"], v["salienza"], g, v["testo"][:60])
 
 
@@ -239,9 +248,13 @@ def elabora(m, reg):
         _annota(reg, dict(v, esito="scartato"))
         log.info("SCARTO (z=%.2f) %s", sal, v["testo"][:60])
         return False
-    nid = nodo(v, m.get("autore", ""))
+    try:
+        nid = nodo(v, m.get("autore", ""))   # 1.20.0: e' gia' nel Lux, la sovrapposizione col forte si puo' misurare
+    except ValueError as e:
+        _annota(reg, dict(v, esito="errore", errore=str(e)))
+        log.warning("ricordo rifiutato dal Lux: %s (%s)", e, m["testo"][:60])
+        return False
     if sal >= soglia + FORTE_DELTA:
-        lux_aggiungi()   # la sovrapposizione si misura sugli engrammi del forte: deve gia' stare nel Lux
         for x in vivi:
             if x["esito"] == "scartato" and m["ts"] - x["ts"] <= TRASCINA and not URL_RE.search(x["testo"]):
                 g = cattura(x["testo"], dict(v, nid=nid))
@@ -290,14 +303,13 @@ def giro():
                 g.write(json.dumps({"riga": riga.decode("utf-8", "replace"), "errore": str(e)}, ensure_ascii=False) + "\n")
             log.warning("riga rotta saltata: %s", riga[:80])
         else:
-            _lux_dovuto[0] = elabora(m, reg) or _lux_dovuto[0]
+            elabora(m, reg)
         p += len(riga) + 1
         _segna(p)
         fatte += 1
     return fatte
 
 
-_lux_dovuto = [True]   # all'avvio: un crash fra memoria.db e il Lux si rimedia subito
 _potato = [0.0]
 
 
@@ -310,12 +322,7 @@ def passo():
                 pota()
             except Exception:
                 log.exception("potatura del registro fallita")
-        try:
-            giro()
-        finally:   # anche quando il lettore sparisce a meta': i nodi gia' fatti entrano nel Lux
-            if _lux_dovuto[0]:
-                lux_aggiungi()
-                _lux_dovuto[0] = False
+        giro()
         return "pronto"
     except Aspetta as e:
         return f"in attesa: {e}"
@@ -392,9 +399,13 @@ def notte(da_ts):
     voci = [v for v in registro().values() if v["ts"] >= da_ts]
     sc = [(v["testo"], v["firma"], v["ts"]) for v in voci if v["esito"] == "scartato" and not URL_RE.search(v["testo"])]
 
-    def promuovi(testo, firma, vettore, ts, giorni):
-        return memoria.add_node(testo, firma, torch.tensor(vettore), memoria.dominante(firma), None, max(firma.values()),
-                                fonte="abitudine", ts=ts, classe="vissuto")
+    def promuovi(testo, firma, vettore, ts, giorni):   # 1.20.0: nel Lux (prima memoria.db)
+        try:
+            return nodo({"testo": testo, "firma": firma, "dominante": memoria.dominante(firma), "ts": ts,
+                         "salienza": max(firma.values())}, "abitudine")
+        except ValueError as e:   # il Lux rifiuta questo tema: gli altri e il buffer vanno avanti
+            log.warning("abitudine rifiutata dal Lux: %s (%s)", e, testo[:60])
+            return None
 
     firme = [v["firma"] for v in voci if v["esito"] in ("nodo", "trascinato")]
     if firme:   # prima della persistenza: se fallisce, la notte dopo rifa' tutto senza contare due volte eco e temi

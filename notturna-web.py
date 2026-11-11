@@ -12,7 +12,6 @@ import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 import threading
@@ -32,7 +31,7 @@ AGENTE_START = "/usr/local/bin/agente-start"
 NOTTURNA = "/usr/local/bin/notturna"
 DORMI_FLAG = "/data/workspace/memoria/.dormi-richiesto"
 AZLOG = "/data/memoria-episodica-affettiva/notturna-web-azioni.log"
-MEMDB = "/data/workspace/memoria/memoria.db"
+ENG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engrammi")   # 1.20.0: meta del Lux (prima memoria.db)
 ARMATA_FILE = "/data/memoria-episodica-affettiva/.notturna-armata"
 PENS_KV = "/dev/shm/agente-kv/pensatoio.kv"
 LLAMA = "http://127.0.0.1:8090"
@@ -107,14 +106,18 @@ def _storico():
     ce = {}
     ric = {}
     try:
-        c = sqlite3.connect("file:" + MEMDB + "?mode=ro", uri=True)
+        per_giorno = {}
+        sys.path.insert(0, ENG)
+        import meta_lux
+        with open(meta_lux.percorso(), encoding="utf-8") as f:
+            for r in json.load(f)["ricordi"].values():
+                if r["classe"] != "correzione":
+                    g = datetime.datetime.fromtimestamp(float(r["ts"])).strftime("%Y-%m-%d")
+                    per_giorno[g] = per_giorno.get(g, 0) + 1
         tot = 0
-        for d, n in c.execute(
-                "SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') g,"
-                " COUNT(*) FROM nodi GROUP BY g ORDER BY g"):
-            tot += n
+        for d in sorted(per_giorno):
+            tot += per_giorno[d]
             ric[d] = tot
-        c.close()
     except Exception:
         pass
     giorni = sorted(set(ce) | set(ric))

@@ -10,7 +10,6 @@ letti) resta senza vettore L29 e conta solo la via bge-m3"""
 import json
 import os
 import re
-import sqlite3
 import sys
 
 import numpy as np
@@ -20,13 +19,13 @@ import ponte  # noqa: E402
 
 DIR = sys.argv[1]
 STATI = "/data/memoria-episodica-affettiva/engrammi/stati"
-DB = "/data/workspace/memoria/memoria.db"
 
 z = np.load(f"{DIR}/lux.npz")
 A = z["A"]
-testi = json.load(open(f"{DIR}/lux-meta.json"))["engrammi"]
-c = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-orig = dict(c.execute("select id, testo from nodi"))
+meta = json.load(open(f"{DIR}/lux-meta.json"))
+testi = meta["engrammi"]
+orig = {int(k): r["testo"] for k, r in meta["ricordi"].items()
+        if r["classe"] != "correzione"}   # 1.20.0: dal meta del Lux (prima memoria.db)
 base = ponte.base_lente()
 
 def cerca(engramma, testo, da):

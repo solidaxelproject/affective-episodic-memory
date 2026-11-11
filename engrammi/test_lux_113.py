@@ -31,14 +31,15 @@ def ok(cond, cosa):
         print("  ROSSO:", cosa, flush=True)
 
 
+V112 = "/data/memoria-episodica-affettiva/engrammi/lux-1.12.0"   # 1.14.0: PRECEDENTE ora e' la 1.13.0
 print("1. dati uguali alla 1.12.0", flush=True)
-z12, z13 = np.load(f"{X.PRECEDENTE}/lux.npz"), np.load(X.NPZ)
+z12, z13 = np.load(f"{V112}/lux.npz"), np.load(X.NPZ)
 for k in z12.files:
     if k != "F":
         ok(np.array_equal(z12[k], z13[k]), f"{k} diverso dalla 1.12.0")
 ok(set(z13.files) == set(z12.files) | {"C"}, f"chiavi di lux.npz {sorted(z13.files)}")
 for f in ("lux-meta.json", "lux-stato.npz"):
-    ok(open(f"{X.PRECEDENTE}/{f}", "rb").read() == open(f"{X.DIR}/{f}", "rb").read(), f"{f} non identico alla 1.12.0")
+    ok(open(f"{V112}/{f}", "rb").read() == open(f"{X.DIR}/{f}", "rb").read(), f"{f} non identico alla 1.12.0")
 
 print("2. C = firma del ricordo per ogni arco", flush=True)
 A, C, F = z13["A"], z13["C"], z13["F"]
@@ -101,13 +102,6 @@ try:
     sqlite3.connect(T.DB).backup(sqlite3.connect(f"{tmp}/memoria.db"))
     X.DIR, X.NPZ, X.META, X.STATO = copia, f"{copia}/lux.npz", f"{copia}/lux-meta.json", f"{copia}/lux-stato.npz"
     T.DB = f"{tmp}/memoria.db"
-    m = sqlite3.connect(T.DB)
-    with m:
-        nid = m.execute("INSERT INTO nodi (ts, testo, fonte, emo_tag, emo_alpha, firma, salienza, classe, voluto) "
-                        "SELECT ?, ?, fonte, emo_tag, emo_alpha, firma, salienza, classe, voluto FROM nodi WHERE id=294",
-                        (1.9e9, "Oggi abbiamo messo le emozioni sugli archi del Lux, e il ricordo nuovo ha la sua carica.")
-                        ).lastrowid
-    m.close()
     S = X.Lux()   # il "servizio": rinforza un ricordo vecchio di continuo, ricaricando come servizio_lux.py
     vecchio_nid = 294
     giri, ferma, errori = [0], threading.Event(), []
@@ -126,7 +120,8 @@ try:
     th = threading.Thread(target=servizio)
     th.start()
     n_a = len(np.load(X.NPZ)["A"])
-    X.aggiungi()
+    nid = X.aggiungi_ricordo({"testo": "Oggi abbiamo messo le emozioni sugli archi del Lux, e il ricordo nuovo ha la sua "
+                              "carica.", "firma": firme[294], "classe": "vissuto", "ts": 1.9e9})   # 1.20.0 (prima db + aggiungi)
     ferma.set()
     th.join()
     ok(not errori, f"servizio durante aggiungi: {errori}")

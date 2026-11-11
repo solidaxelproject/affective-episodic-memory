@@ -223,8 +223,19 @@ function opacitaBase() { archi.material.opacity = (scelto != null || evidIdx.len
 const pop = document.getElementById('pop');
 pop.addEventListener('mouseleave', () => pop.style.display = 'none');
 const esc = s => s.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+// 11/11: sul PC il popup sta sotto la barra della rotella (e sotto gli esiti della ricerca, se ci sono),
+// allineato a destra; sul telefono la colonna e' in basso, il popup resta vicino al dito
+const colonna = document.getElementById('cerca'), TELEFONO = matchMedia('(max-width:640px)');
 function apri(html, x, y) {
   pop.innerHTML = html; pop.style.display = 'block';
+  if (!TELEFONO.matches) {
+    const sotto = colonna.getBoundingClientRect().bottom + 8;
+    pop.style.maxHeight = Math.max(120, innerHeight - sotto - 12) + 'px';
+    pop.style.left = (innerWidth - pop.offsetWidth - 14) + 'px';
+    pop.style.top = sotto + 'px';
+    return;
+  }
+  pop.style.maxHeight = '';
   pop.style.left = Math.min(x - 10, innerWidth - pop.offsetWidth - 8) + 'px';
   pop.style.top = Math.min(y - 10, innerHeight - pop.offsetHeight - 8) + 'px';
 }

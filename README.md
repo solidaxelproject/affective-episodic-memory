@@ -89,6 +89,10 @@ python3 demo.py
 
 Six synthetic memories are cut into engrams, and the engrams they share are stored once: "harbour" belongs to three memories, "old lighthouse" to two. Every memory comes back word for word from its engrams and the arcs between them. A partial cue brings back the memory that holds it. After thirty lived days the memories that were never recalled fade, while the one that was recalled becomes easier to reach than when it was born, and it primes the memories that share its engrams. It is the same `engrammi/lux_engrammi.py` that runs in production, with two stand-ins: a simple rule cuts the engrams (spaCy does it in production) and a toy embedder takes the place of bge-m3.
 
+## Installing and upgrading
+
+Each version of the Lux has its own folder and its own migration (`da_precedente` in `engrammi/lux_engrammi.py`); the plans in `engrammi/` explain what changes from one version to the next. The step is not trivial: my advice is to do it with the help of a coding agent such as Claude Code, which reads the plan and the code, makes the backup and tests the migration on a copy before touching the real data.
+
 ## What is this
 
 An LLM, on its own, is a text generator that through training has absorbed and crystallized into its weights a vast amount of information, notions and patterns. In operation it exhibits emergent behaviors produced by the nature of the information crystallized inside it, by its shape, by its structure, and by the non-deterministic way it manipulates the information within.
@@ -285,7 +289,7 @@ The test procedure for per-layer emotional steering, with contexts up to ~140k t
 
 ## Acknowledgments
 
-This project was built with the help of Claude Code (Opus 4.8 and Fable 5 models), because I'm a total noob at writing code. The vision, the decisions and the stubbornness are mine; most of the code is theirs.
+This project was built with Claude Code (Opus 5.5 model), because I can't write Python or C++ code. The vision, the decisions and the stubbornness are mine; most of the code is theirs.
 
 ## License
 

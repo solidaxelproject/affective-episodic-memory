@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""verifica_post_versioning.py (16/10/2026): dopo ogni versione nuova del Lux, controlla che TUTTI i ricordi di
-memoria.db siano ricostruiti correttamente dal Lux (VERSIONE di lux_engrammi.py). Sola lettura.
+"""verifica_post_versioning.py (16/10/2026): dopo ogni versione nuova del Lux, controlla che TUTTI i ricordi
+siano ricostruiti correttamente dal Lux (VERSIONE di lux_engrammi.py): 1.20.0, il testo esatto e' nel meta del Lux (prima
+memoria.db), le correzioni restano fuori come prima. Sola lettura.
 Un ricordo e' corretto se la ricomposizione e' uguale al testo originale a meno delle trasformazioni volute dal taglio:
   formattazione tolta (taglia.FORMATO), virgolette tolte, spazi, maiuscole degli engrammi condivisi,
   forma canonica delle preposizioni (ad -> a, d' -> di, fra -> tra).
@@ -8,8 +9,8 @@ Per ogni ricordo dice a quale livello e' uguale; quelli che non tornano nemmeno 
 con il punto dove divergono. Uscita 1 se c'e' almeno un errore o un ricordo mancante.
 Uso: /data/venv-spacy/bin/python verifica_post_versioning.py"""
 import difflib
+import json
 import re
-import sqlite3
 import sys
 
 import lux_engrammi as X
@@ -45,8 +46,8 @@ def dove(a, b):
 
 def main():
     L = X.Lux()
-    c = sqlite3.connect(f"file:{T.DB}?mode=ro", uri=True)
-    orig = dict(c.execute("select id, testo from nodi where testo != ''"))
+    orig = {int(k): r["testo"] for k, r in json.load(open(X.META))["ricordi"].items()   # 1.20.0: dal meta del Lux
+            if r["classe"] != "correzione" and r.get("testo")}                       # (prima memoria.db)
     mancanti = sorted(set(orig) - set(L.ricordi))
     livelli = {"identico": [], "senza formattazione": [], "senza virgolette": [], "trasformazioni del taglio": [], "ERRORE": []}
     for nid in sorted(set(orig) & set(L.ricordi)):
@@ -61,7 +62,7 @@ def main():
             livelli["trasformazioni del taglio"].append(nid)
         else:
             livelli["ERRORE"].append(nid)
-    print(f"Lux {X.VERSIONE}: {len(orig)} ricordi in memoria.db, {len(L.ricordi)} nel Lux")
+    print(f"Lux {X.VERSIONE}: {len(orig)} ricordi col testo nel meta, {len(L.ricordi)} nel Lux")
     for k, v in livelli.items():
         print(f"  {k:28} {len(v)}")
     if mancanti:

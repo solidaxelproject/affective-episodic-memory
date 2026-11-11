@@ -14,7 +14,6 @@ import hashlib
 import json
 import os
 import re
-import sqlite3
 import sys
 import tempfile
 import types
@@ -30,7 +29,6 @@ os.environ["LUX_DIR"] = str(TMP / "lux")
 # ---- stand-in for engrammi/taglia.py (spaCy): function words and punctuation are arcs, the rest are engrams
 ARCHI = {"the", "a", "an", "of", "in", "on", "at", "to", "and", "with", "from", "by", "for", "that", "was", "is"}
 taglia = types.ModuleType("taglia")
-taglia.DB = str(TMP / "memoria.db")
 taglia.PREPOSIZIONI, taglia.SIMBOLI, taglia.codice = {}, [], lambda testo: None
 taglia.FORMATO = re.compile(r"\*\*|`")
 
@@ -56,7 +54,7 @@ import lux_engrammi as X   # noqa: E402
 import salienza as SA   # noqa: E402
 
 LUX.FILE = TMP / "lux.npz"   # the lived-days clock lives next to it
-X.PRECEDENTE = str(TMP / "none")
+X.PRECEDENTE = str(TMP / "before")   # 1.20.0: the memories come from the meta of the previous Lux
 
 
 def embed(testi):   # stand-in for bge-m3: sum of one random vector per word
@@ -81,11 +79,10 @@ MEMORIE = [
     ("We repaired the window with my sister on a cold morning.", {"trust": 2.1}),
     ("At the harbour, the bakery opened again with warm bread.", {"joy": 2.0}),
 ]
-c = sqlite3.connect(taglia.DB)
-c.execute("create table nodi (id integer primary key, testo text, firma text, classe text, ts real, fonte text, cattura real)")
-for i, (t, f) in enumerate(MEMORIE, 1):
-    c.execute("insert into nodi values (?, ?, ?, 'vissuto', ?, 'chat', null)", (i, t, json.dumps(f), 1.7e9 + i))
-c.commit()
+os.makedirs(X.PRECEDENTE)
+json.dump({"engrammi": [], "altri_parametri": [], "ricordi": {
+    str(i): {"testo": t, "firma": f, "classe": "vissuto", "ts": 1.7e9 + i, "fonte": "chat", "cattura": None}
+    for i, (t, f) in enumerate(MEMORIE, 1)}}, open(f"{X.PRECEDENTE}/lux-meta.json", "w"))
 SA.RIFERIMENTI = str(TMP / "riferimenti.json")   # salience reference set: here just the first two memories
 json.dump({"1": MEMORIE[0][0], "2": MEMORIE[1][0]}, open(SA.RIFERIMENTI, "w"))
 

@@ -89,6 +89,10 @@ python3 demo.py
 
 Sei ricordi sintetici vengono tagliati in engrammi, e gli engrammi che hanno in comune si salvano una volta sola: "harbour" appartiene a tre ricordi, "old lighthouse" a due. Ogni ricordo torna parola per parola dai suoi engrammi e dagli archi che li legano. Un indizio parziale riporta il ricordo che lo contiene. Dopo trenta giorni vissuti i ricordi mai richiamati sbiadiscono, mentre quello richiamato diventa più facile da raggiungere di quando è nato, e predispone i ricordi che condividono i suoi engrammi. È lo stesso `engrammi/lux_engrammi.py` che gira in produzione, con due sostituti: una regola semplice taglia gli engrammi (in produzione lo fa spaCy) e un embedder giocattolo prende il posto di bge-m3.
 
+## Installare e aggiornare
+
+Ogni versione del Lux ha la sua cartella e la sua migrazione (`da_precedente` in `engrammi/lux_engrammi.py`); i piani in `engrammi/` spiegano cosa cambia da una versione all'altra. Il passaggio non è banale: il mio consiglio è di farlo con l'aiuto di un agente di programmazione come Claude Code, che legge piano e codice, fa il backup e prova la migrazione su una copia prima di toccare i dati veri.
+
 ## Cos'è
 
 Un LLM, da solo, è un generatore di testo che attraverso l'addestramento ha assorbito e cristallizzato nei propri pesi una vasta quantità di informazioni, nozioni, pattern. Nel proprio funzionamento manifesta comportamenti emergenti prodotti dalla natura delle informazioni in esso cristallizzate, dalla loro forma, dalla loro struttura e dal comportamento non deterministico attraverso cui manipola l'informazione al suo interno.
@@ -285,7 +289,7 @@ La procedura di test dello steering emotivo per layer, con contesti fino a ~140k
 
 ## Ringraziamenti
 
-Questo progetto è stato realizzato con l'ausilio di Claude Code (modelli Opus 4.8 e Fable 5), perché io sono una nabba a scrivere codice. La visione, le decisioni e la testardaggine sono mie; gran parte del codice è loro.
+Questo progetto è stato realizzato con Claude Code (modello Opus 5.5), perché io non so scrivere codice python o C++. La visione, le decisioni e la testardaggine sono mie; gran parte del codice è loro.
 
 ## Licenza
 

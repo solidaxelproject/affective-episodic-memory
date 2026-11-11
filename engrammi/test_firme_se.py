@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Stress-test di B3 (PIANO-FIRMA-ENGRAMMI.md): rifirma di tutti i ricordi coi vettori se'.
   09/11 (PIANO-FIRMA-44-ASSI.md): assi dai vettori scritti nelle statistiche (44, variante C), emo_tag =
-  memoria.dominante, letture = differenze per strato (letture-diff.pt); numero dei nodi e delle voci da memoria.db.
-  dopo --scrivi:  tutti i nodi con firma sugli assi delle statistiche, emo_tag nei vettori del riflesso, salienza = max z,
-                  statistiche coi metadati, quota della soglia nuova = quota vecchia (+-1 punto), addr_emo coerente
-  stress:         --scrivi due volte su una copia = stesso risultato; il backup riporta memoria.db identico;
+  memoria.dominante, letture = differenze per strato (letture-diff.pt); numero dei nodi e delle voci dal meta del Lux
+  (1.20.0, prima memoria.db; LUX_DIR = una copia migrata, altrimenti la versione in servizio; addr_emo e vettori.pt via).
+  dopo --scrivi:  tutti i nodi con firma sugli assi delle statistiche, dominante nei vettori del riflesso, salienza = max z,
+                  statistiche coi metadati, quota della soglia nuova = quota vecchia (+-1 punto)
+  stress:         --scrivi due volte su una copia = stesso risultato; il backup riporta il meta identico;
                   --leggi interrotto e ripreso = stesse letture di una corsa intera (server di prova acceso);
                   nodi senza contesto e nodi "letto" firmati come gli altri.
 Uso: cd /data/jspace && venv/bin/python /data/memoria-episodica-affettiva/engrammi/test_firme_se.py"""
@@ -12,7 +13,6 @@ import importlib.util
 import json
 import os
 import shutil
-import sqlite3
 import sys
 import tempfile
 
@@ -22,7 +22,7 @@ import torch
 sys.path.insert(0, "/data/memoria-episodica-affettiva/engrammi")
 import firma_se as F  # noqa: E402
 
-SCRIPT = "/data/memoria-episodica-affettiva/firme-occamy/ricalcola-firme-se.py"
+SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "firme-occamy", "ricalcola-firme-se.py")
 fallimenti = []
 
 
@@ -42,18 +42,10 @@ def modulo(**env):
     return m
 
 
-def righe(db):
-    c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    r = c.execute("SELECT id, firma, emo_tag, salienza FROM nodi ORDER BY id").fetchall()
-    c.close()
-    return r
-
-
-def dump(db):
-    c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    d = list(c.iterdump())
-    c.close()
-    return d
+def righe(meta):
+    """1.20.0: (nid, firma, dominante, salienza) dei ricordi del meta, correzioni fuori"""
+    r = json.load(open(meta))["ricordi"]
+    return sorted((int(k), x["firma"], x["dominante"], x["salienza"]) for k, x in r.items() if x["classe"] != "correzione")
 
 
 R = modulo()
@@ -63,30 +55,18 @@ assi, _ = F.vettori()
 voci_tutte = R.voci()[0]
 n_nodi = sum(1 for x in voci_tutte if x[0] == "nodo")
 
-print("1. memoria.db dopo la scrittura", flush=True)
-nodi = righe(R.DB)
-c = sqlite3.connect(f"file:{R.DB}?mode=ro", uri=True)
-classi = dict(c.execute("SELECT id, classe FROM nodi"))
-c.close()
+print("1. meta del Lux dopo la scrittura", flush=True)
+nodi = righe(R.META)
+classi = {int(k): x["classe"] for k, x in json.load(open(R.META))["ricordi"].items()}
 ok(len(nodi) == n_nodi, f"nodi {len(nodi)}, attesi {n_nodi}")
 cvec = [str(x) for x in np.load("/data/memoria-episodica-affettiva/emo-cvec-v2.npz")["nomi"]]
-for nid, firma, tag, sal in nodi:
-    f = json.loads(firma)
+for nid, f, tag, sal in nodi:
     ok(list(f) == assi, f"nodo {nid}: assi della firma {list(f)[:3]}...")
     ok(all(np.isfinite(x) for x in f.values()), f"nodo {nid}: firma non finita")
     ok(tag == R.memoria.dominante(f), f"nodo {nid}: emo_tag {tag} non e' la dominante (memoria.dominante)")
     ok(tag in cvec, f"nodo {nid}: emo_tag {tag} assente dai vettori del riflesso")
     ok(abs(sal - max(f.values())) < 1e-3, f"nodo {nid}: salienza {sal} != max z {max(f.values())}")
 ok(any(classi[n] == "letto" for n, *_ in nodi), "nessun nodo 'letto' controllato")
-
-print("2. addr_emo in vettori.pt", flush=True)
-vec = torch.load(R.VEC, weights_only=True)
-for nid, firma, *_ in nodi:
-    if nid in vec:
-        f = json.loads(firma)
-        a = vec[nid]["addr_emo"]
-        ok(torch.allclose(a, R.memoria.addr_emo(f), atol=1e-6),   # B7: 51 assi nell'ordine di emozioni.json
-           f"nodo {nid}: addr_emo diversa dalla firma")
 
 print("3. statistiche", flush=True)
 ok(stats["assi"] == assi and stats["strati"] == list(range(15, 32)), "assi o strati delle statistiche")
@@ -100,7 +80,7 @@ nuove, _, res = R.calcola()
 ok(abs(res["quota_nuova"] - res["quota"]) <= 0.01, f"quota nuova {res['quota_nuova']:.4f} contro {res['quota']:.4f}")
 ok(abs(res["soglia"] - stats["soglia"]) < 1e-12, "soglia ricalcolata diversa da quella salvata")
 for nid, firma, tag, sal in nodi:
-    ok(json.loads(firma) == nuove[nid][0], f"nodo {nid}: firma in memoria.db diversa dal ricalcolo")
+    ok(firma == nuove[nid][0], f"nodo {nid}: firma nel meta diversa dal ricalcolo")
 
 print("4. nodi senza contesto firmati", flush=True)
 v, chat = R.voci()
@@ -109,26 +89,25 @@ ok(len(soli) >= 1, "nessun nodo senza contesto da controllare")
 for _, nid, _, _ in soli:
     ok(nid in nuove and len(nuove[nid][0]) == len(assi), f"nodo senza contesto {nid} non firmato")
 
-print("5. --scrivi due volte su una copia = stesso risultato; il backup riporta memoria.db identico", flush=True)
+print("5. --scrivi due volte su una copia = stesso risultato; il backup riporta il meta identico", flush=True)
 tmp = tempfile.mkdtemp(prefix="test-b3-", dir="/data/memoria-episodica-affettiva/firme-occamy")
 try:
-    sqlite3.connect(R.DB).backup(sqlite3.connect(f"{tmp}/memoria.db"))
-    shutil.copy2(R.VEC, f"{tmp}/vettori.pt")
-    prima = dump(f"{tmp}/memoria.db")
-    C = modulo(MEM_SAM=tmp, STATS_SE=f"{tmp}/stats.pt")
+    shutil.copy2(R.META, f"{tmp}/lux-meta.json")
+    prima = open(f"{tmp}/lux-meta.json", "rb").read()
+    C = modulo(LUX_DIR=tmp, STATS_SE=f"{tmp}/stats.pt")
     C.scrivi(False)
-    uno = righe(f"{tmp}/memoria.db")
+    uno = righe(f"{tmp}/lux-meta.json")
     C.scrivi(False)
-    due = righe(f"{tmp}/memoria.db")
+    due = righe(f"{tmp}/lux-meta.json")
     ok(uno == due, "--scrivi lanciato due volte da' risultati diversi")
-    ok(uno == nodi, "--scrivi sulla copia diverso da memoria.db vero")
-    baks = sorted(p for p in os.listdir(tmp) if p.startswith("memoria.db.bak-pre-firme-se-"))
-    ok(len(baks) >= 1, "nessun backup di memoria.db")
+    ok(uno == nodi, "--scrivi sulla copia diverso dal meta vero")
+    baks = sorted(p for p in os.listdir(tmp) if p.startswith("lux-meta.json.bak-pre-firme-se-"))
+    ok(len(baks) >= 1, "nessun backup del meta")
     if baks:
-        ok(dump(f"{tmp}/{baks[-1]}") == prima, "il backup non riporta memoria.db com'era prima di --scrivi")
+        ok(open(f"{tmp}/{baks[0]}", "rb").read() == prima, "il backup non riporta il meta com'era prima di --scrivi")
 
     print("6. --leggi interrotto e ripreso = stesse letture (server di prova)", flush=True)
-    del os.environ["MEM_SAM"]
+    del os.environ["LUX_DIR"]
     L = modulo(LETTURE_SE=f"{tmp}/interrotta.pt")
     tutte, chat = L.voci()
     scelte = [x for x in tutte if x[0] == "nodo" and not L.contesto(chat, x[2])][:1]

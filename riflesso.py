@@ -19,11 +19,11 @@ import html
 import http.client
 import http.server
 import json
+import math
 import os
 import re
 import socket
 import subprocess
-import sqlite3
 import sys
 import threading
 import time
@@ -32,7 +32,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ponte  # noqa: E402  (unica porta verso :8090)
-from codice_ricordo import codice as _codice  # noqa: E402  (B7, P4: lo stesso di lux_engrammi)
+import steering  # noqa: E402  (modulo unico, 10/11: i vettori e le fasce dei test)
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "engrammi"))
+import via_emotiva as VE  # noqa: E402  (1.19.0, PIANO-1.19-VIA-EMOTIVA: J-lens, umore, diario delle letture)
 
 UPSTREAM = ("127.0.0.1", 8090)
 PORTA = 8091
@@ -68,6 +70,7 @@ _vettore_vivo = [False]
 # accende tiene questo lock fino a calma(), e ogni inoltro aspetta che sia libero:
 # nessun'altra richiesta passa mentre il ricordo si colora.
 _vettore_lock = threading.Lock()
+_vettore_di = [None]   # 11/11: il watchdog dell'ultimo vettore di un ricordo (quello rimandato non spegne il successivo)
 # issue #3 punto A, design dell'utente (18/10): il vettore appartiene alla KV cache
 # del suo flusso. Allo scambio se ne va con la cache messa in pausa; al ripristino
 # torna alla dose a cui era arrivato e la discesa riprende da li': il tempo della
@@ -92,6 +95,7 @@ _pens_conv = [None]     # pensiero in corso nel pensatoio (impronta del primo me
 # entrano insieme in un turno del tool, che
 # è dichiarato sempre (a consenso attivo) così il prefisso della cache non cambia.
 LUX = "http://127.0.0.1:8132/consegna"
+LUX_FORZA = "http://127.0.0.1:8132/forza"
 TOOL_RICORDO = "memorinvolontaria"
 TOOL = {"type": "function", "function": {
     "name": TOOL_RICORDO,
@@ -385,6 +389,99 @@ def _metti_blocco(d, righe):
         msgs[0]["content"] = _con_blocco(msgs[0]["content"], righe)
 
 
+# R6 (l'utente 24/10, PIANO-REVISIONI-FUORI-CACHE.md): la parte fissa del system (prima di ══, elenco skill compreso)
+# cambia nella chat solo quando nasce una CW del riepilogo nuova. Qui: la fissa con cui e' nata la chat in corso, quella
+# di riepilogo.kv in formazione e l'elenco skill adottato a meta' sessione (sotto 20 righe del log)
+FISSA = Path("/data/memoria-episodica-affettiva/riepilogo-fissa.json")
+ELENCO_DA = "## Skills (mandatory)\n"   # i marcatori fissi di prompt_builder.py (build_skills_system_prompt)
+ELENCO_A = "Only proceed without loading a skill if genuinely none are relevant to the task."
+ELENCO_RIGHE = 20
+_elenco_ok = [None]          # CONTROLLO della sessione: None = da fare, poi True/False
+_fissa_avvisata = [False]    # la sostituzione va nel diario una volta per sessione
+# l'elenco come lo compone Hermes (system_prompt.py:260-285, postura di default); model_tools riempie il registry
+SKILLS_HERMES = """import json, sys
+import model_tools
+from agent.prompt_builder import build_skills_system_prompt
+t = set(json.loads(sys.stdin.read()))
+ts = {x for x in map(model_tools.get_toolset_for_tool, t) if x}
+print("\\n" + json.dumps(build_skills_system_prompt(available_tools=t, available_toolsets=ts)))
+"""
+
+
+def _fissa_carica():
+    try:
+        st = json.loads(FISSA.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        st = {}
+    except Exception as e:
+        _diario({"riepilogo": f"riepilogo-fissa.json illeggibile: {e}"})
+        st = {}
+    return {k: st.get(k) for k in ("chat", "riepilogo", "elenco")}
+
+
+def _fissa_salva(st):
+    tmp = FISSA.with_suffix(".tmp")
+    tmp.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(FISSA)
+
+
+def _fissa(testo):
+    """la parte del system prima della riga ══, None se manca"""
+    i = _riga_separatore(testo)
+    return testo[:i] if i >= 0 else None
+
+
+def _elenco(testo):
+    """l'elenco skill dentro il system, None se mancano i marcatori"""
+    i = testo.find(ELENCO_DA)
+    j = testo.find(ELENCO_A, i)
+    return testo[i:j + len(ELENCO_A)] if i >= 0 and j >= 0 else None
+
+
+def _metti_fissa(d):
+    """in place sul corpo di una richiesta della chat: la parte fissa della cache al posto di quella di Hermes.
+    Torna il system e i nomi dei tool di Hermes com'erano (per il riepilogo e per l'elenco)"""
+    msgs = d.get("messages", [])
+    if not msgs or msgs[0].get("role") != "system":
+        return None
+    h = msgs[0]["content"]
+    hermes = {"system": h, "tools": [t["function"]["name"] for t in d.get("tools") or [] if t.get("function")]}
+    fc, i = _fissa_carica()["chat"], _riga_separatore(h)
+    if fc and i >= 0:
+        if h[:i] != fc and not _fissa_avvisata[0]:
+            _fissa_avvisata[0] = True
+            _diario({"riepilogo": "parte fissa della cache al posto di quella di Hermes (skill cambiate)"})
+        msgs[0]["content"] = fc + h[i:]
+    return hermes
+
+
+def _skills_da_hermes(tools):
+    p = subprocess.run(["docker", "exec", "-i", "agente", "python3", "-c", SKILLS_HERMES], input=json.dumps(tools),
+                       capture_output=True, text=True, timeout=5, check=True)
+    return json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def _elenco_hermes(hermes):
+    """l'elenco skill come lo comporrebbe Hermes adesso, se e' cambiato e il log del riepilogo ha meno di 20 righe;
+    None = niente da cambiare. Fuori dai lucchetti (docker exec ~0,5 s, misura 10/11; tetto 5 s: il riepilogo aspetta)"""
+    if not hermes or _elenco_ok[0] is False or len(_riepilogo_carica()["nuovi"]) >= ELENCO_RIGHE:
+        return None
+    in_uso = _fissa_carica()["elenco"] or _elenco(hermes["system"])
+    if in_uso is None:
+        return None
+    try:
+        uscita = _skills_da_hermes(hermes["tools"])
+    except Exception as e:      # es. durante lo switch: si salta il giro, il CONTROLLO resta da fare
+        _diario({"riepilogo": f"elenco skill non letto da Hermes: {e}"})
+        return None
+    if _elenco_ok[0] is None:   # CONTROLLO: a skill invariate Hermes deve dare l'elenco che sta nel system
+        _elenco_ok[0] = uscita == in_uso
+        if not _elenco_ok[0]:
+            _diario({"riepilogo": "elenco skill di Hermes diverso da quello del system: spento per la sessione"})
+        return None
+    return uscita if uscita != in_uso else None
+
+
 def _turno_finito(corpo, esito):
     """l'ultima risposta a un messaggio dell'utente nella chat, comunque sia finita, mai a meta' di un giro di tool:
     il background review e il memory flush di Hermes non cominciano con "[", il pensatoio si', ma il suo flusso
@@ -437,7 +534,7 @@ def _slot_libero(scadenza=None):
         _vettore_lock.release()
 
 
-def _riassumi(corpo, risposta, ragionamento="", senza=None, scadenza=None):
+def _riassumi(corpo, risposta, ragionamento="", senza=None, scadenza=None, hermes=None, elenco=None):
     """l'agente scrive il succo dello scambio nello slot della chat, la riga va in coda al blocco nella CW del
     riepilogo, la chat torna nello slot. Tutto dentro i lucchetti: una richiesta della chat che arriva intanto
     aspetta (~6 s). Gli errori vanno solo nel diario: mai bloccare la parola dell'agente.
@@ -484,8 +581,17 @@ def _riassumi(corpo, risposta, ragionamento="", senza=None, scadenza=None):
             _riepilogo_salva(st)
             with RIEPILOGO_LOG.open("a", encoding="utf-8") as f:
                 f.write(riga + "\n")
-            # il system della CW del riepilogo: lo stesso della chat, col blocco delle righe di questa sessione
-            sistema = d["messages"][0]["content"].replace(_blocco(st["blocco"]), "", 1)
+            # il system della CW del riepilogo: quello ORIGINALE di Hermes (R6), con l'elenco skill adottato,
+            # e il blocco delle righe di questa sessione
+            sistema = hermes["system"] if hermes else d["messages"][0]["content"].replace(_blocco(st["blocco"]), "", 1)
+            fs = _fissa_carica()
+            if elenco and elenco != fs["elenco"]:
+                fs["elenco"] = elenco
+                _fissa_salva(fs)
+                _diario({"riepilogo": "elenco skill nuovo nella CW del riepilogo"})
+            vecchio = _elenco(sistema)
+            if fs["elenco"] and vecchio:
+                sistema = sistema.replace(vecchio, fs["elenco"], 1)
             resa = _chiedi("/apply-template", {
                 "messages": [{"role": "system", "content": _con_blocco(sistema, _nel_tetto(st["nuovi"]))},
                              {"role": "user", "content": "."}],   # il template vuole un user: si taglia via
@@ -496,7 +602,8 @@ def _riassumi(corpo, risposta, ragionamento="", senza=None, scadenza=None):
             righe_blocco = _blocco(_nel_tetto(st["nuovi"]))
             if not resa[:i].endswith(righe_blocco):
                 raise ValueError("blocco del riepilogo non trovato nel prompt reso")
-            if (KV_RAM / RIEPILOGO_KV).exists():
+            # parte fissa cambiata (elenco nuovo): riepilogo.kv divergerebbe a meta', si riparte dalla base
+            if (KV_RAM / RIEPILOGO_KV).exists() and fs["riepilogo"] in (None, _fissa(sistema)):
                 _slot("restore", RIEPILOGO_KV)
             else:
                 _base_riepilogo(resa[:i - len(righe_blocco)])
@@ -504,6 +611,8 @@ def _riassumi(corpo, risposta, ragionamento="", senza=None, scadenza=None):
                                     "checkpoint_tag": "riepilogo"})   # K3: una riga, un checkpoint protetto
             if not _slot("save", RIEPILOGO_KV):
                 raise RuntimeError("save di riepilogo.kv fallita")
+            fs["riepilogo"] = _fissa(sistema)
+            _fissa_salva(fs)
             esito = "ok"
         except Exception as e:
             _diario({"riepilogo": f"fallito: {e}"})
@@ -567,7 +676,7 @@ def _forse_switch(cwswitch, esito_riepilogo="non fatto"):
     _diario({"cw": f"switch: {motivo} ({_tok_cw['chat']} tok), riepilogo {esito_riepilogo}"})
 
 
-def _fine_chat(corpo, esito, salva, senza=None):
+def _fine_chat(corpo, esito, salva, senza=None, hermes=None):
     """dopo l'ultima risposta di un turno dell'utente: riepilogo (se la risposta e' finita bene), poi lo switch.
     Uno switch rimandato parte alla fine di qualunque richiesta della chat fuori da un giro di tool (3.5.3, 3b)"""
     if not _turno_finito(senza or corpo, esito):
@@ -579,7 +688,13 @@ def _fine_chat(corpo, esito, salva, senza=None):
     cwswitch, fatto = False, "non fatto"
     try:
         if _deve_riassumere(senza or corpo, esito):
-            cwswitch, fatto = _riassumi(corpo, esito["testo"], esito["ragionamento"], senza)
+            try:
+                elenco = _elenco_hermes(hermes)
+            except Exception as e:     # mai saltare il riepilogo per l'elenco
+                elenco = None
+                _diario({"riepilogo": f"elenco skill: {e}"})
+            cwswitch, fatto = _riassumi(corpo, esito["testo"], esito["ragionamento"], senza, hermes=hermes,
+                                        elenco=elenco)
     except Exception as e:      # K18: lo switch parte comunque
         fatto = f"fallito: {e}"
         _diario({"riepilogo": fatto})
@@ -606,13 +721,17 @@ def _promuovi():
     _tok_cw["chat"] = 0     # il conteggio della chat vecchia non deve chiedere un altro switch
     _switch.update(motivo=None, chiesto=0.0)
     kv = KV_RAM / RIEPILOGO_KV
+    fs = {"chat": None, "riepilogo": None, "elenco": None}   # R6: la chat nuova ha la parte fissa di riepilogo.kv
     if kv.exists():
         if _cw[0] in KV_FLUSSO and _cw[0] != "chat":
             if _cw[0] == "pensatoio":
                 _interrompi_pensatoio()
             _slot("save", KV_FLUSSO[_cw[0]])
-        _slot("restore", RIEPILOGO_KV)
+        if _slot("restore", RIEPILOGO_KV):
+            fs["chat"] = _fissa_carica()["riepilogo"]
         _cambia_cw("chat")
+    _fissa_salva(fs)
+    _elenco_ok[0], _fissa_avvisata[0] = None, False
     for f in (kv, KV_RAM / (RIEPILOGO_KV + ".ckpt")):
         f.unlink(missing_ok=True)
     _diario({"riepilogo": f"dormita: {len(blocco)} righe nel blocco della chat nuova"})
@@ -736,24 +855,51 @@ def _rimetti(msgs, voci):
         msgs[i + 1:i + 1] = _turni_tool(v)
 
 
-MEMORIA_DB = Path("/data/workspace/memoria/memoria.db")
 LETTO_FATTORE = 0.5     # issue #3 punto H (18/10): un ricordo "letto" porta l'emozione dell'agente
                         # di quando l'ha letto (la firma del tagging), a meta' dose
 
 
-def _emo_del_ricordo(codice):
-    """(nid, emo_tag, fattore della dose) del ricordo consegnato: il servizio torna solo il codice"""
+def _emo_del_ricordo(info):
+    """(nid, emo_tag, fattore della dose) del ricordo consegnato. Lux 1.20.0: dalla voce di "ricordi" della risposta
+    di /consegna (prima da memoria.db); ricordo ignoto o correzione = (None, None, 1.0) come prima"""
+    return info.get("nid"), info.get("dominante"), LETTO_FATTORE if info.get("classe") == "letto" else 1.0
+
+
+# PIANO-STEERING-RIFLESSO 7b (11/11): dose del vettore del ricordo = D_e del punto 7 di PIANO-LUX-FASI (24/10)
+SOGLIA_E = 0.5   # provvisori di CC per il rodaggio (misura su 633 ricordi, piano punto 5): sotto, ~15%, niente vettore
+K_DOSE = 1.13    # la mediana di S_e: li' la dose e' al 63% della fascia
+IT = {en: it for it, en in steering.EN.items()}
+
+
+def _forza(codice, emo):
+    """S_e del ricordo sulla sua dominante (Lux, /forza), None se il Lux non risponde o non la sa"""
     try:
-        c = sqlite3.connect(f"file:{MEMORIA_DB}?mode=ro", uri=True)
-        try:
-            for nid, ts, emo, classe in c.execute("SELECT id, ts, emo_tag, classe FROM nodi"):
-                if _codice(ts) == codice:
-                    return nid, emo, LETTO_FATTORE if classe == "letto" else 1.0
-        finally:
-            c.close()
-    except Exception:
-        pass
-    return None, None, 1.0
+        req = urllib.request.Request(LUX_FORZA, json.dumps({"codice": codice, "emo": emo}).encode(),
+                                     {"Content-Type": "application/json"})
+        return json.load(urllib.request.urlopen(req, timeout=10)).get("forza")
+    except Exception as e:
+        _diario({"lux": f"forza non letta: {e}"})
+        return None
+
+
+def _dose(emo, forza, fattore=1.0):
+    """(emozione italiana, dose per steering.strati, posizione f nella fascia) o None. D_e = Dmin + (Dmax - Dmin) x (1 - exp(-S_e/k)); fattore
+    (ricordo letto) accorcia il tratto sopra Dmin. Diadi della ruota e terrore/stupore/vigilanza: emo_dose vuole la
+    posizione 0-1 nella fascia, non la dose"""
+    it = IT.get(emo)
+    if forza is None or forza < SOGLIA_E or it is None:
+        return None
+    f = (1 - math.exp(-forza / K_DOSE)) * fattore
+    pure, fasce = steering.pure(), steering.fasce()
+    if it in pure:
+        lo, hi = pure[it]
+    elif it in steering.RUOTA or it in steering.DIADI:
+        return it, f, f
+    elif it in fasce:
+        lo, hi = fasce[it]
+    else:
+        return None
+    return it, lo + (hi - lo) * f, f
 
 
 def _sam_accesa(dove=UPSTREAM):
@@ -771,11 +917,13 @@ def _sam_accesa(dove=UPSTREAM):
         up.close()
 
 
-def _lux_consegna(testo, esclusi):
-    """{codici, risposta} oppure {} = nessun ricordo. Mai bloccare la parola dell'agente."""
+def _lux_consegna(testo, esclusi, emozione=None):
+    """{codici, risposta} oppure {} = nessun ricordo (1.19.0: con l'emozione anche "traccia"). Mai bloccare la parola dell'agente."""
+    corpo = {"testo": testo, "esclusi": esclusi, "quanti": 1}   # 09/11: uno per volta
+    if emozione:
+        corpo["emozione"] = emozione
     try:
-        req = urllib.request.Request(LUX, json.dumps({"testo": testo, "esclusi": esclusi, "quanti": 1}).encode(),   # 09/11: uno per volta
-                                     {"Content-Type": "application/json"})
+        req = urllib.request.Request(LUX, json.dumps(corpo).encode(), {"Content-Type": "application/json"})
         return json.load(urllib.request.urlopen(req, timeout=30))
     except Exception as e:
         _diario({"lux": f"consegna fallita: {e}"})
@@ -854,6 +1002,91 @@ def _codici_nei_messaggi(msgs):
     ids = _ids_ricordo(msgs)
     return {c for m in msgs if _e_ricordo(m, ids) and isinstance(m.get("content"), str)
             for c in _CODICE_TOOL.findall(m["content"])}
+
+
+_lettura_lock = threading.Lock()   # 1.19.0: le letture in ordine (la risposta dell'agente prima del messaggio dopo)
+
+
+def _lettura(testo, flusso, chi):
+    """1.19.0: la lente legge il testo e la lettura imprime l'umore; -> (z, umore prima, riparazione, voce del diario)"""
+    z, tok = VE.leggi(testo)
+    prima, dopo, neg, rip = VE.imprimi(z)
+    return z, prima, rip, {"flusso": flusso, "chi": chi, "token": tok, "lettura": VE.tondo(z),
+                           "umore_prima": VE.tondo(prima), "umore_dopo": VE.tondo(dopo),
+                           "negativita": round(neg, 4), "riparazione": rip}
+
+
+def _da_leggere(msgs, i, flusso):
+    """1.19.0 (revisione 11/11): (testo, chi) che la lente legge per la fonte msgs[i], o None. Chat: solo il messaggio
+    dell'utente col suo "[handle] ", senza handle e senza ora, come lo legge la firma (Hermes, review e memory flush, senza
+    handle: niente); pensatoio: la riga dell'appunto del risveglio; strumenti: la prosa letta. Mai una fonte rimasta
+    indietro (ultimo messaggio dell'utente senza testo, es. un'immagine)"""
+    if any(m.get("role") == "user" for m in msgs[i + 1:]):
+        return None
+    c = msgs[i]["content"]
+    if msgs[i].get("role") == "tool":
+        return _leggibile(c), "strumento"
+    if flusso == "pensatoio":
+        return (query_riflesso(c), "pensatoio") if _MARCA_RISVEGLIO.search(c) else None
+    m = _HANDLE.match(_ORA.sub("", c).strip())
+    return (m.group(2).strip(), m.group(1)) if m and m.group(2).strip() else None
+
+
+def _via_emotiva(msgs, i, flusso):
+    """1.19.0 (l'utente 11/11, due tempi): la fonte passa dalla lente e imprime l'umore; l'indizio = meta' emozione della
+    fonte e meta' umore di PRIMA della sua lettura. -> (emozione per il Lux, voce del diario) o (None, None): mai bloccare
+    la parola dell'agente"""
+    try:
+        x = _da_leggere(msgs, i, flusso)
+        conv, _ = _chiavi(msgs)
+        chiave = f"{flusso}|{conv}|{i}|{_impronta(x[0])}" if x else None
+        if not x or VE.gia_letta(chiave):
+            return None, None
+        if not _lettura_lock.acquire(timeout=VE.TIMEOUT):   # la risposta dell'agente prima, ma mai oltre il tempo
+            raise TimeoutError("lente occupata")
+        try:
+            z, prima, rip, voce = _lettura(x[0], flusso, x[1])
+            VE.segna_letta(chiave)
+        finally:
+            _lettura_lock.release()
+        q, k, D = VE.indizio(z, prima, rip["accesa"])
+        voce.update(D=round(D, 4), k=round(k, 4), q=VE.tondo(q, 4))
+        return {"assi": VE.traduzione()["assi"], "q": q.tolist(), "k": k}, voce
+    except Exception as e:
+        try:
+            VE.diario({"flusso": flusso, "errore": repr(e)[:300]})
+        except Exception:
+            pass
+        return None, None
+
+
+def _leggi_risposta(flusso, ultimo, esito):
+    """1.19.0: la risposta finale dell'agente (chat e pensatoio) passa dalla lente a fine risposta, fuori dal percorso della
+    parola; il messaggio dopo aspetta (_lettura_lock) cosi' l'umore ha gia' la sua impronta"""
+    if flusso not in KV_FLUSSO or not esito or esito.get("finish") != "stop" or esito.get("tool_calls"):
+        return
+    if flusso == "chat":   # come la firma: la risposta a Hermes (review, memory flush, ultimo user senza handle) no
+        m = _HANDLE.match(ultimo.strip()) if isinstance(ultimo, str) else None
+        if not m or not m.group(2).strip():
+            return
+    testo = _senza_imitati(esito.get("testo") or "").strip()
+    if not testo or testo.startswith("[OUT-OF-BAND]"):
+        return
+
+    def leggi():   # il lucchetto lo rilascia il filo (threading.Lock lo permette)
+        try:
+            VE.diario(_lettura(testo, flusso, "agente")[3])
+        except Exception as e:
+            try:
+                VE.diario({"flusso": flusso, "chi": "agente", "errore": repr(e)[:300]})
+            except Exception:
+                pass
+        finally:
+            _lettura_lock.release()
+    if not _lettura_lock.acquire(timeout=VE.TIMEOUT):   # preso subito: un messaggio che arriva adesso aspetta
+        VE.diario({"flusso": flusso, "chi": "agente", "errore": "lente occupata: risposta non letta"})
+        return
+    threading.Thread(target=leggi, daemon=True).start()
 
 
 def _ammesso(ip):
@@ -1096,43 +1329,6 @@ def _cvec(payload):
         raise RuntimeError(f"/control-vector: HTTP {st}")
 
 
-# --- ASSUEFAZIONE (progetto 22/07 sera): lo stesso vettore ripetuto si attenua
-# da solo, come uno stimolo per un sistema nervoso. Ogni trigger recente della
-# STESSA emozione dimezza l'intensità; sotto il pavimento non parte proprio;
-# la sensibilità si ricarica col silenzio di quell'emozione. Nato per fermare
-# il triggering continuo della sorpresa (attrattore 581) senza regole a mano.
-ASSUEF_FINESTRA_S = 1800   # i trigger contano per 30 minuti
-ASSUEF_PAVIMENTO = 0.02    # sotto: il vettore non parte (vera assuefazione)
-_assuef = {}               # emo -> [ts dei trigger recenti]
-
-
-def inietta_emozione(tag, intensita=0.3):
-    """v2 (Damasio/Glover): re-inietta il marcatore emotivo del ricordo
-    affiorato. PATTO 14/07 clausola 1: MAI oltre 0.3x dell'alpha calibrata,
-    il tetto è nel codice, non nella buona volontà del chiamante.
-    Colora lo stato mentre l'agente valuta; la scelta resta sua.
-    ASSUEFAZIONE: l'emozione ripetuta di recente entra dimezzata a ogni
-    ripetizione, e sotto il pavimento tace del tutto."""
-    adesso = time.time()
-    recenti = [t for t in _assuef.get(tag, []) if adesso - t < ASSUEF_FINESTRA_S]
-    fattore = 0.5 ** len(recenti)
-    efficace = min(intensita, 0.3) * fattore
-    if efficace < ASSUEF_PAVIMENTO:
-        _diario({"assuefazione": {"emo": tag, "trigger_recenti": len(recenti),
-                                  "vettore": "taciuto"}})
-        return False
-    layers = ponte.dirs_emozione(tag, efficace)   # unica copia (gradino zero)
-    if layers is None:
-        return False
-    recenti.append(adesso)
-    _assuef[tag] = recenti
-    if fattore < 1.0:
-        _diario({"assuefazione": {"emo": tag, "trigger_recenti": len(recenti) - 1,
-                                  "intensita": round(efficace, 3)}})
-    _cvec({"layers": layers, "relative": True})
-    return efficace
-
-
 def calma():
     """La pulizia è l'unica azione che NON PUÒ fallire in silenzio
     (14/07 ~3:00: un vettore di collaudo rimasto acceso ha oversteerato l'agente
@@ -1206,11 +1402,11 @@ def _accoda_firma(flusso, ultimo, arrivo, esito):
         m = _HANDLE.match(ultimo.strip()) if isinstance(ultimo, str) else None
         if not m or not m.group(2).strip():
             return
-        righe.append({"ts": arrivo, "autore": f"@{m.group(1)}:localhost", "testo": m.group(2).strip()})
+        righe.append({"ts": arrivo, "autore": f"@{m.group(1)}:localhost", "testo": m.group(2).strip(), "flusso": flusso})
     elif flusso != "pensatoio":
         return
     if risposta and not risposta.startswith("[OUT-OF-BAND]"):   # orchestrazione, non esperienza (estrai-matrix)
-        righe.append({"ts": time.time(), "autore": "@agente:localhost", "testo": risposta})
+        righe.append({"ts": time.time(), "autore": "@agente:localhost", "testo": risposta, "flusso": flusso})
     if righe:
         fd = os.open(CODA_FIRMA, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
         try:
@@ -1241,15 +1437,16 @@ def _sentinella():
                 pass
 
 
-def _scaduto():
+def _scaduto(chi=None):
     """PATTO clausola 2: nessun vettore vive oltre DURATA_MAX_S, anche se la
     risposta è ancora in corso o il finally non arriva mai.
     23/07 sera: il clear a slot VIVO uccideva la generazione in corso (POST
     /control-vector durante il decode -> stream caduto, 'Streaming failed'
     su Hermes, consegne al pensatoio perse). Se lo slot sta generando, il
     kill si RIMANDA e spara appena lo slot molla: il vettore muore comunque
-    col turno (spirito della clausola), mai ammazzando la parola dell'agente."""
-    if not _vettore_vivo[0]:
+    col turno (spirito della clausola), mai ammazzando la parola dell'agente.
+    chi (11/11): il watchdog del vettore di un ricordo; se un altro ricordo ha acceso il suo dopo, questo tace."""
+    if not _vettore_vivo[0] or (chi is not None and _vettore_di[0] is not chi):
         return
     try:
         up = http.client.HTTPConnection(*UPSTREAM, timeout=3)
@@ -1259,7 +1456,7 @@ def _scaduto():
     except Exception:
         occupato = True    # server irraggiungibile/carico: non sparare al buio
     if occupato:
-        t = threading.Timer(20, _scaduto)
+        t = threading.Timer(20, _scaduto, args=(chi,))
         t.daemon = True
         t.start()
         _diario({"watchdog": "slot vivo: kill vettore rimandato 20s"})
@@ -1269,67 +1466,24 @@ def _scaduto():
 
 
 
-def _colora_ricordo(d, risposta, codici, emos, flusso=None, fattori=None):
-    """Design dell'autrice (10/10): ricordo scelto -> vettore
-    della sua emozione -> prefill del SOLO testo del ricordo -> vettore spento.
-    Il resto del prompt e la generazione restano senza vettore: la colorazione
-    vive nella cache KV del ricordo. Il prompt lo rende il server
-    (/apply-template, lo stesso del percorso chat), si taglia sui token speciali
-    <tool_response> e </tool_response>, e due /completion che si fermano al
-    primo token riempiono la cache: fino all'apertura del ricordo senza vettore,
-    poi il ricordo col vettore. L'inoltro dopo riusa la cache e prosegue senza.
-    1.10.0: con più ricordi nella stessa risposta ognuno si riempie col vettore
-    della SUA emozione (emos, None = senza vettore), un /completion per ricordo.
-    Le emozioni dei ricordi colorati, [] se nessuno.
-    issue #3 punto A (18/10): fuori dal ricordo vale il vettore del flusso
-    (_applica_flusso), e il vettore del ricordo resta al flusso per DURATA_S."""
-    corpo = {k: v for k, v in d.items()
-             if k in ("messages", "tools", "tool_choice", "chat_template_kwargs")}
-    st, r = ponte.post("/apply-template", corpo, timeout=30)
-    prompt = r.get("prompt") if st == 200 else None
-    i = prompt.rfind(risposta) if prompt else -1
-    a = prompt.rfind("<tool_response>", 0, i) if i >= 0 else -1
-    b = prompt.find("</tool_response>", i) if i >= 0 else -1
-    if a < 0 or b < 0:
-        _diario({"colora": "ricordo non trovato nel prompt reso: niente vettore"})
-        return []
-    a += len("<tool_response>")
-    # fine di ogni ricordo nel prompt: il ritorno a capo prima dell'etichetta del successivo ("2°" o, per una
-    # correzione, "1a°", poi il codice), l'ultimo fino a </tool_response>
-    fini = [i + risposta.rfind("\n", 0, risposta.index(f"°\n{c}\n")) for c in codici[1:]] + [b]
-    colorati = []
-    with _vettore_lock:
-        _applica_flusso(flusso)
-        if ponte.post("/completion", {"prompt": prompt[:a], "n_predict": 1,
-                                      "cache_prompt": True}, timeout=600)[0] != 200:
-            return []
-        for fine, emo, fattore in zip(fini, emos, fattori or [1.0] * len(emos)):
-            if flusso == "pensatoio" and _cw[0] != flusso:
-                _diario({"colora": "la chat ha preso lo slot: prefill del pensatoio interrotto"})
-                break
-            dose = inietta_emozione(emo, 0.3 * fattore) if emo else False
-            if not dose:
-                ponte.post("/completion", {"prompt": prompt[:fine], "n_predict": 1,
-                                           "cache_prompt": True}, timeout=600)
-                continue
-            _vettore_vivo[0] = True
-            watchdog = threading.Timer(DURATA_MAX_S, _scaduto)   # PATTO clausola 2
-            watchdog.daemon = True
-            watchdog.start()
-            try:
-                ponte.post("/completion", {"prompt": prompt[:fine], "n_predict": 1,
-                                           "cache_prompt": True}, timeout=600)
-                colorati.append(emo)
-                if DURATA_S > 0 and flusso in _vettori:
-                    _vettori[flusso].append({"emo": emo, "dose": dose, "nato": _orologio(flusso),
-                                             "durata": DURATA_S})
-            finally:
-                try:
-                    _applica_flusso(flusso)   # durata 0: nessun vettore vivo -> calma(), come prima
-                except Exception:
-                    calma()
-                watchdog.cancel()
-    return colorati
+def _accendi_ricordo(body, vettore):
+    """PIANO-STEERING-RIFLESSO 7d (l'utente 09/11 + 11/11): il ricordo si legge SENZA vettore (prefill del corpo finale,
+    reso dal server con /apply-template come nel percorso chat, e /completion che si ferma al primo token), poi il
+    vettore della sua emozione si accende per il ragionamento e luxifer lo spegne quando il modello genera </think>
+    (cvec_solo_ragionamento, strada B). Solo dentro _vettore_lock. Torna (corpo da inoltrare, watchdog)"""
+    d = json.loads(body)
+    st, r = ponte.post("/apply-template", d, timeout=30)   # tutto il corpo: lo stesso parse della chat, stesso prompt
+    if st != 200 or not r.get("prompt"):
+        raise RuntimeError(f"/apply-template: HTTP {st}")
+    if ponte.post("/completion", {"prompt": r["prompt"], "n_predict": 1, "cache_prompt": True}, timeout=600)[0] != 200:
+        raise RuntimeError("prefill del ricordo fallito")
+    _cvec({"layers": vettore[2], "relative": True})
+    _vettore_vivo[0] = True
+    watchdog = threading.Timer(DURATA_MAX_S, lambda: _scaduto(watchdog))   # PATTO clausola 2
+    watchdog.daemon = True
+    watchdog.start()
+    _vettore_di[0] = watchdog
+    return json.dumps({**d, "reasoning_control": True, "cvec_solo_ragionamento": True}).encode(), watchdog
 
 
 # 25/07, progetto: nel pensatoio l'ultimo messaggio user NON è una frase, è tutto
@@ -1450,10 +1604,35 @@ class Proxy(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _inoltra(self, body, flusso=None):
+    def _inoltra(self, body, flusso=None, vettore=None):
+        """revisione 11/11: col vettore del ricordo acceso _vettore_lock resta preso fino a fine stream, cosi' nessun
+        altro inoltro (cron, review di Hermes) lo spegne a meta' ragionamento o prende lo slot col vettore dell'agente"""
+        watchdog = None
         if flusso is not None:
-            with _vettore_lock:   # issue #3 punto A: mai dentro un prefill colorato
+            _vettore_lock.acquire()   # issue #3 punto A: mai dentro un prefill colorato
+            try:
                 _applica_flusso(flusso)   # il vettore del flusso che genera, nessun altro
+                # pensatoio: prefill sotto _cw_lock, se no la chat puo' prendere lo slot a meta' e il prefill finisce
+                # sulla sua cache (revisione del codice 11/11)
+                with _cw_lock if vettore and flusso == "pensatoio" else contextlib.nullcontext():
+                    if vettore and not (flusso == "pensatoio" and _cw[0] != flusso):
+                        try:
+                            body, watchdog = _accendi_ricordo(body, vettore)
+                        except Exception as e:
+                            calma()
+                            _diario({"vettore": f"non acceso: {e}"})   # mai bloccare la parola dell'agente
+            finally:
+                if watchdog is None:
+                    _vettore_lock.release()
+        try:
+            self._manda(body, flusso)
+        finally:
+            if watchdog:   # luxifer l'ha gia' spento a </think>: pulizia sicura, anche se lo stream e' caduto
+                watchdog.cancel()
+                calma()
+                _vettore_lock.release()
+
+    def _manda(self, body, flusso):
         up = http.client.HTTPConnection(*UPSTREAM, timeout=600)
         if flusso == "pensatoio":
             with _cw_lock:     # o la chat ci trova fra i vivi e ci taglia, o noi vediamo lo slot suo
@@ -1532,8 +1711,8 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         """20/10: dopo la risposta finale all'utente il riepilogo, quando lo specchio della chat e' gia' salvato
         (cosi' il conteggio dei token resta quello della chat); 10/11 poi lo switch (blocco B)"""
         if self._esito and self._inoltrato:
-            threading.Thread(target=_fine_chat, args=(self._inoltrato, self._esito, self._salva, self._senza),
-                             daemon=True).start()
+            threading.Thread(target=_fine_chat, args=(self._inoltrato, self._esito, self._salva, self._senza,
+                                                      self._hermes), daemon=True).start()
 
     def do_GET(self):
         self._inoltra(None)
@@ -1560,10 +1739,11 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         A consenso spento il richiamo gira lo stesso e rinforza gli archi (WIRING
         NON DISATTIVABILE, decisione di progetto), ma niente entra nel prompt.
         10/11 (blocco A): con righe, il blocco metadati entra DOPO la query e l'impronta "dopo" ma PRIMA della
-        colorazione del ricordo (la cache colorata e' quella che l'inoltro riusa); fuori["senza"] = corpo senza."""
+        vettore del ricordo; fuori["senza"] = corpo senza. PIANO-STEERING-RIFLESSO 7c (11/11): fuori["vettore"] = (emozione,
+        dose, strati) del ricordo nuovo, lo accende _inoltra dopo il prefill senza vettore."""
         d = json.loads(body)
         msgs = d.get("messages", [])
-        if not msgs or not _sam_accesa():
+        if not msgs or flusso not in KV_FLUSSO or not _sam_accesa():   # 11/11: niente ricordi ai cron
             return _con_metadati(body, righe, fuori, flusso)
         attivo = consenso_attivo()
         stop = _stop_chiesto(msgs)   # prima di _rimetti: stessa finestra del controllo in do_POST
@@ -1587,7 +1767,17 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             with _esclusi_lock:
                 _esclusi_chat[0] = set(visti)
         if fonte:
-            r = _lux_consegna(query_riflesso(fonte), sorted(visti))
+            emozione, voce = _via_emotiva(msgs, i, flusso)
+            r = _lux_consegna(query_riflesso(fonte), sorted(visti), emozione)
+            if voce:
+                try:
+                    tr = r.get("traccia") or {}
+                    voce.update(candidati=[[n, round(p, 5), round(a, 4)] for n, p, a in tr.get("candidati", [])],
+                                scelto=tr.get("scelti", []), senza=tr.get("senza", []),
+                                oltre_soglia=tr.get("oltre_soglia", False))
+                    VE.diario(voce)
+                except Exception as e:
+                    _diario({"via emotiva": f"diario non scritto: {e}"})
             if r.get("codici") and attivo:
                 nuova = {"dopo": _impronta(msgs[i]["content"]), "indice": i,
                          "codici": r["codici"], "risposta": r["risposta"]}
@@ -1610,24 +1800,29 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             fuori["senza"] = json.dumps(d).encode()
             _metti_metadati(msgs, righe, flusso)
         if nuova:
-            nids, emos, fattori = zip(*(_emo_del_ricordo(c) for c in nuova["codici"]))
-            colorati = []
+            ricordi = [(x["codice"], *_emo_del_ricordo(x)) for x in r.get("ricordi", [])]
+            vettore = None
             # RIFLESSO_COLLAUDO=1 blocca i vettori: mai più test che iniettano
             # sulla produzione (incidente del 14/07)
-            # clausola 3 (issue #3 punto E): con la parola di emergenza il ricordo arriva senza colore
-            if any(emos) and vettori_attivi() and not os.environ.get("RIFLESSO_COLLAUDO") \
-                    and not stop:
+            # clausola 3 (issue #3 punto E): con la parola di emergenza il ricordo arriva senza vettore
+            # PIANO-STEERING-RIFLESSO 7c (11/11): il vettore lo accende _inoltra, nel ragionamento; con piu' codici
+            # (catena di correzioni) quello a dose piu' alta (09/11: il massimo, niente media)
+            if vettori_attivi() and not os.environ.get("RIFLESSO_COLLAUDO") and not stop:
                 try:
-                    colorati = _colora_ricordo(d, nuova["risposta"], nuova["codici"], emos, flusso, fattori)
+                    dosi = [x for c, _, emo, fat in ricordi if emo for x in [_dose(emo, _forza(c, emo), fat)] if x]
+                    if dosi:
+                        emo, dose, _ = max(dosi, key=lambda x: x[2])   # dosi assolute e posizioni: si confronta f
+                        vettore = (emo, dose, steering.strati(emo, dose))
+                        fuori["vettore"] = vettore
                 except Exception as e:
-                    _diario({"colora": f"fallito: {e}"})
+                    _diario({"vettore": f"non preparato: {e}"})
             # 30/09 persistenza: gli id servono alla notturna (solo diario)
-            _diario({TOOL_RICORDO: nuova["codici"], "vettore": colorati or None,
-                     "nid": [int(n) for n in nids if n is not None]})
+            _diario({TOOL_RICORDO: nuova["codici"], "vettore": [vettore[0], round(vettore[1], 5)] if vettore else None,
+                     "nid": [int(n) for _, n, _, _ in ricordi if n is not None], "flusso": flusso})   # 1.14.0: il momento
         return json.dumps(d).encode()
 
     def do_POST(self):
-        self._inoltrato = self._esito = self._salva = self._senza = None   # keep-alive: piu' richieste
+        self._inoltrato = self._esito = self._salva = self._senza = self._hermes = None   # keep-alive: piu' richieste
         self._altro = False
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if self.path == "/memorinvolontaria":   # 09/11: il plugin di Hermes, mai inoltrato al 35B
@@ -1675,6 +1870,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 _accoda_firma(flusso, ultimo, arrivo, self._esito)
             except Exception as e:
                 _diario({"firma": f"coda non scritta: {e}"})   # mai toccare la parola dell'agente
+            try:
+                _leggi_risposta(flusso, ultimo, self._esito)
+            except Exception as e:
+                _diario({"via emotiva": f"risposta non letta: {e}"})
 
     def _post_chat(self, body, chat, flusso):
         ora = None
@@ -1731,11 +1930,10 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 _diario({"cw": f"pensatoio trattenuto {time.time()-inizio:.0f}s (chat calda)"})
             if flusso == "chat":
                 try:
-                    blocco = _riepilogo_carica()["blocco"]
-                    if blocco:
-                        d = json.loads(body)
-                        _metti_blocco(d, blocco)
-                        body = json.dumps(d).encode()
+                    d = json.loads(body)
+                    self._hermes = _metti_fissa(d)    # R6: prima la parte fissa della cache, poi il blocco
+                    _metti_blocco(d, _riepilogo_carica()["blocco"])
+                    body = json.dumps(d).encode()
                 except Exception as e:
                     _diario({"riepilogo": f"blocco non messo: {e}"})   # mai bloccare la parola dell'agente
         coda = []   # PENSATOIO_DOVE passa nel blocco metadati (M3, l'utente 10/11)
@@ -1773,7 +1971,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                     _diario({"cw": f"avviso 100k -> {flusso} ({_tok_cw[flusso]} tok)"})
             except Exception:
                 pass
-        self._inoltra(body, flusso)
+        self._inoltra(body, flusso, fuori.get("vettore") if chat else None)
 
 
 if __name__ == "__main__":
@@ -1793,6 +1991,6 @@ if __name__ == "__main__":
     threading.Thread(target=_sentinella, daemon=True).start()  # PATTO clausola 3
     print(f"riflesso in ascolto su :{PORTA} -> {UPSTREAM[0]}:{UPSTREAM[1]} "
           f"(consenso: {'ATTIVO' if consenso_attivo() else 'spento'}, "
-          f"vettori: {'SÌ' if vettori_attivi() else 'no'}, dose max 0.3, "
+          f"vettori: {'SÌ' if vettori_attivi() else 'no'}, dose del punto 7 nel ragionamento, "
           f"watchdog {DURATA_MAX_S}s)")
     http.server.ThreadingHTTPServer(("0.0.0.0", PORTA), Proxy).serve_forever()

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Stress-test di B6 (PIANO-FIRMA-ENGRAMMI.md): il ricordo entra subito (firma_subito.py, riflesso._accoda_firma,
-memoria.add_node col lucchetto, Lux con soglia nuova e trascinati). Tutto su COPIE (memoria.db, vettori.pt, Lux 1.13.0)
+Lux con soglia nuova e trascinati; Lux 1.20.0: il ricordo lo crea il servizio del Lux, POST /aggiungi). Tutto su
+COPIE (Lux 1.19.0 migrato alla 1.20.0 con da_precedente, memoria.db di produzione letto in sola lettura)
 e su un finto server (/props, /tokenize, /detokenize, /lux-read con "layers" e "somme") sulla porta 18099: la produzione
 si legge e basta (bge-m3 su :8094 solo in lettura).
 La firma vera passa dal finto server (punto 8); per la logica (soglia, trascinamento, raffiche, crash) la firma e' finta:
@@ -11,7 +12,6 @@ import os
 import re
 import shutil
 import signal
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -20,7 +20,6 @@ import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
 import numpy as np
 
@@ -33,19 +32,14 @@ FINTO = "--servizio-finto" in sys.argv
 if not FINTO:
     TMP = tempfile.mkdtemp(prefix="test-b6-")
     os.makedirs(f"{TMP}/mem")
-    shutil.copy2("/data/workspace/memoria/memoria.db", f"{TMP}/mem/memoria.db")
-    shutil.copy2("/data/workspace/memoria/vettori.pt", f"{TMP}/mem/vettori.pt")
-    shutil.copytree(f"{QUI}/lux-1.13.0", f"{TMP}/lux")
+    subprocess.run([SPACY, "-c", "import lux_engrammi as X; X.da_precedente()"], cwd=QUI, check=True,
+                   capture_output=True, env=dict(os.environ, LUX_DIR=f"{TMP}/lux"))   # 1.20.0: copia migrata
     os.environ.update(MEM_SAM=f"{TMP}/mem", LUX_DIR=f"{TMP}/lux", URL_FIRMA=f"http://127.0.0.1:{PORTA}", GIRO_S="0.2",
                       MARKER_NOTTE=f"{TMP}/nessun-marker",   # B7: senza marker la potatura tiene tutto
                       LUX_URL="http://127.0.0.1:18132", LUX_PORTA="18132")   # servizio del Lux sulla copia (cattura)
 
-import torch  # noqa: E402
-
 import firma_subito as FS  # noqa: E402
-import memoria  # noqa: E402
 
-memoria.DB, memoria.VEC = Path(f"{os.environ['MEM_SAM']}/memoria.db"), Path(f"{os.environ['MEM_SAM']}/vettori.pt")
 SOGLIA = FS.stats()["s"]["soglia"]
 ASSI = FS.stats()["s"]["assi"]
 firma_vera = FS.firma
@@ -141,19 +135,18 @@ def pulisci_coda():
             os.remove(f)
 
 
-def db():
-    return sqlite3.connect(f"file:{memoria.DB}?mode=ro", uri=True)
+def ricordi():
+    """1.20.0: i ricordi stanno nel meta del Lux (prima memoria.db)"""
+    return {int(k): r for k, r in json.load(open(f"{TMP}/lux/lux-meta.json"))["ricordi"].items()}
 
 
 def nodi_con(pezzo):
-    c = db()
-    r = c.execute("select id, testo, fonte, voluto, classe from nodi where testo like ?", (f"%{pezzo}%",)).fetchall()
-    c.close()
-    return r
+    return [(n, r["testo"], r.get("fonte"), r.get("voluto"), r["classe"]) for n, r in sorted(ricordi().items())
+            if pezzo.lower() in r.get("testo", "").lower()]
 
 
 def nel_lux():
-    return {int(k) for k in json.load(open(f"{TMP}/lux/lux-meta.json"))["ricordi"]}
+    return set(ricordi())
 
 
 def esiti():
@@ -190,8 +183,7 @@ def aspetta_vuota(limite=300):
 
 
 def sentinella(attesa=0):
-    """ogni nodo di memoria.db nel Lux della copia e con i suoi vettori; attesa: secondi concessi al servizio, che mette
-    nel Lux i nodi a fine giro"""
+    """ogni nodo del registro nel Lux della copia (1.20.0: entra subito, l'attesa resta per i servizi in corsa)"""
     fine = time.time() + attesa
     while True:
         try:
@@ -203,12 +195,8 @@ def sentinella(attesa=0):
 
 
 def _sentinella():
-    c = db()
-    ids = {r[0] for r in c.execute("select id from nodi where testo != ''")}
-    c.close()
+    ids = {v["nid"] for v in FS.registro().values() if v["esito"] in ("nodo", "trascinato")}
     assert ids <= nel_lux(), f"nodi fuori dal Lux: {sorted(ids - nel_lux())[:10]}"
-    v = torch.load(memoria.VEC, weights_only=True)
-    assert ids <= set(v), f"nodi senza vettori: {sorted(ids - set(v))[:10]}"
 
 
 T0 = time.time() - 30 * 86400   # ts lontani dai messaggi veri: nessun contesto o doppione dalla chat vera
@@ -220,6 +208,17 @@ print("0. soglia del Lux = soglia delle stats", flush=True)
 out = subprocess.run([SPACY, "-c", "import lux_engrammi as X; print(X.SOGLIA_FIRMA, X.TRASCINATO_S0)"], cwd=QUI,
                      capture_output=True, text=True, check=True).stdout.split()
 assert float(out[0]) == round(SOGLIA, 3) and float(out[1]) == 0.5, out
+
+LUXSRV = subprocess.Popen([SPACY, "servizio_lux.py"], cwd=QUI, env=os.environ.copy(), stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL)   # 1.20.0: serve dal primo ricordo (POST /aggiungi)
+import atexit  # noqa: E402
+atexit.register(LUXSRV.kill)   # anche se il test cade: niente servizi orfani su una copia cancellata
+for _ in range(120):
+    try:
+        urllib.request.urlopen("http://127.0.0.1:18132/salute", timeout=2).read()
+        break
+    except OSError:
+        time.sleep(0.5)
 
 # ---------- 1-4. forte, debole, forzato, doppione ----------
 print("1-4. forte, debole, forzato, doppione", flush=True)
@@ -248,24 +247,12 @@ assert q[3] == 1                                               # forzato corto: 
 cinque, = nodi_con("B6cinque")
 assert cinque[4] == "letto"
 assert {uno[0], tre[0], q[0], cinque[0]} <= nel_lux()
-c = db()
-f = json.loads(c.execute("select firma from nodi where id = ?", (uno[0],)).fetchone()[0])
-c.close()
+f = ricordi()[uno[0]]["firma"]
 assert list(f) == ASSI
 sentinella()
 
 # ---------- 5. behavioral tagging ----------
 print("5. cattura: tempo + sovrapposizione parziale, stabilita' graduale, URL, finestra, nodo non forte", flush=True)
-LUXSRV = subprocess.Popen([SPACY, "servizio_lux.py"], cwd=QUI, env=os.environ.copy(), stdout=subprocess.DEVNULL,
-                          stderr=subprocess.DEVNULL)
-import atexit  # noqa: E402
-atexit.register(LUXSRV.kill)   # anche se il test cade: niente servizi orfani su una copia cancellata
-for _ in range(120):
-    try:
-        urllib.request.urlopen("http://127.0.0.1:18132/salute", timeout=2).read()
-        break
-    except OSError:
-        time.sleep(0.5)
 tb = T0 + 100000
 FORTE_T = "Stamattina al mercato di via Roma ho comprato le arance rosse di Sicilia per la marmellata della nonna"
 LEGATO = "Le arance rosse di Sicilia per la marmellata della nonna le ho pulite stasera, e domani accendo il fuoco"
@@ -301,11 +288,10 @@ for t in (f"{LEGATO} prima Z=0.3", f"{LEGATO} dopo Z=0.4"):   # g ricalcolato a 
 w1, = nodi_con("le ho pulite stasera, e domani accendo il fuoco prima")
 assert w1[2] == "trascinato" and w1[0] in nel_lux()
 codice = f"""
-import json, sqlite3, numpy as np, taglia as T, lux_engrammi as X, salienza as SA
-T.DB = {str(memoria.DB)!r}
-c = sqlite3.connect(T.DB)
-firme = dict(c.execute("select id, firma from nodi"))
-g = c.execute("select cattura from nodi where id = {w1[0]}").fetchone()[0]
+import json, numpy as np, lux_engrammi as X, salienza as SA
+ricordi = json.load(open(X.META))["ricordi"]
+firme = {{int(k): r.get("firma") for k, r in ricordi.items()}}
+g = ricordi["{w1[0]}"]["cattura"]
 z = np.load(X.NPZ); st = np.load(X.STATO)
 for n in ({w1[0]}, {forte["nid"]}):
     s0 = X.s0_ricordi(firme, SA.ranghi(z), [n])[n]
@@ -444,15 +430,13 @@ proc.kill()
 proc.wait()
 proc = servizio(RITARDO="0.05")
 FS.accoda([voce(T0 + 700000 + i * 10, f"B6insieme {i:02d} Z={2.0 if i % 2 else 0.2}") for i in range(40)])
-ab = [memoria.add_node(f"B6abitudine {i:02d} della notte", {a: 0.1 for a in ASSI},
-                       torch.tensor(FS.persistenza.vettore([f"B6abitudine {i:02d}"])[0]), "joy", None, 0.1,
-                       fonte="abitudine", ts=T0 + 700000 + i) for i in range(20)]
-subprocess.run([SPACY, "-c", f"import taglia as T; T.DB = {str(memoria.DB)!r}; import lux_engrammi as X; X.aggiungi()"],
-               cwd=QUI, check=True, capture_output=True)
+ab = [FS.nodo({"testo": f"B6abitudine {i:02d} della notte", "firma": {a: 0.1 for a in ASSI}, "dominante": "joy",
+              "ts": T0 + 700000 + i, "salienza": 0.1}, "abitudine") for i in range(20)]   # 1.20.0: come promuovi
 aspetta_vuota()
 assert len(set(ab)) == 20
 assert len(nodi_con("B6insieme")) == 20
-sentinella(30)   # nessuna scrittura persa: ogni nodo ha i suoi vettori ed e' nel Lux
+assert all(ricordi()[n]["fonte"] == "abitudine" for n in ab)
+sentinella(30)   # nessuna scrittura persa: ogni nodo e' nel Lux
 
 # ---------- 13. recupero notturno ----------
 print("13. recupera: solo i mancanti, uscita 1 a servizio fermo, niente due volte", flush=True)
@@ -558,7 +542,51 @@ r = subprocess.run(["python3", "-c", codice], capture_output=True, text=True,
                    env=dict(os.environ, CODA_FIRMA=f"{TMP}/coda-riflesso.jsonl"))
 assert r.returncode == 0 and "riflesso ok" in r.stdout, r.stdout + r.stderr
 
-SRV.giu()
+# ---------- 16. servizio del Lux 1.20.0 ----------
+print("16. Lux 1.20.0: dedup, rifiuto, servizio giu', /ricordo e ricordi in /consegna", flush=True)
+
+
+def post(rotta, corpo):
+    r = urllib.request.Request("http://127.0.0.1:18132" + rotta, json.dumps(corpo).encode(),
+                               {"Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(r, timeout=120))
+
+
+v16 = {"testo": "B6sedici il gatto rosso dorme sul davanzale della cucina al sole di novembre", "firma": f,
+       "dominante": "joy", "ts": T0 + 800000, "salienza": 2.0}
+n16 = FS.nodo(v16, "@utente:localhost")
+assert FS.nodo(dict(v16, ts=T0 + 800500), "@utente:localhost") == n16   # stesso testo = stesso ricordo
+for male in ({"testo": ""}, dict(v16, testo="B6sedici bis", firma="non un dict"), dict(v16, testo="B6sedici ter", classe="x")):
+    try:
+        post("/aggiungi", male)
+        assert False, f"accettato: {male}"
+    except urllib.error.HTTPError as err:
+        assert err.code == 400
+vero_lux = FS._lux
+FS._lux = lambda rotta, corpo, attesa=30: (_ for _ in ()).throw(urllib.error.HTTPError(rotta, 400, "no", {}, None))
+try:
+    FS.nodo(dict(v16, testo="B6sedici rifiutato"), "@utente:localhost")
+    assert False, "rifiuto del Lux non diventato ValueError"
+except ValueError:
+    pass
+FS._lux = vero_lux
+r16 = ricordi()[n16]
+cod16 = r16["codice"]
+d = post("/ricordo", {"codice": cod16})
+assert d == {"nid": n16, "testo": v16["testo"], "dominante": "joy", "firma": f, "classe": "vissuto"}, d
+assert post("/ricordo", {"codice": "zzzzinesistente"}) == {}
+c16 = post("/consegna", {"testo": v16["testo"], "quanti": 1, "soglia": 0})
+assert c16["ricordi"] and c16["ricordi"][0]["codice"] == c16["codici"][0], c16
+x = c16["ricordi"][0]
+assert x["nid"] == next(n for n, r in ricordi().items() if r["codice"] == x["codice"]) and "dominante" in x and "classe" in x
 LUXSRV.kill()
+LUXSRV.wait()
+try:
+    FS.nodo(dict(v16, testo="B6sedici con il Lux spento"), "@utente:localhost")
+    assert False, "Lux spento: doveva aspettare"
+except FS.Aspetta:
+    pass
+
+SRV.giu()
 shutil.rmtree(TMP)
 print("TUTTO VERDE")

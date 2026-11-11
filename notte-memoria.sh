@@ -72,16 +72,36 @@ touch "$MARKER"
 # quanto manca alla prossima notturna possibile (lui non vede memoria-episodica-affettiva)
 touch /data/workspace/memoria/.ultima-notturna
 
-# 09/11: tolta consolida_notte (SHY sugli archi hebbiani di memoria.db). Dopo qlux nessuno li crea piu':
-# restano intatti fino alla migrazione di memoria.db nel Lux. La funzione resta in memoria.py.
+# 09/11: tolta consolida_notte (SHY sugli archi hebbiani di memoria.db). Dopo qlux nessuno li crea piu'.
+# 1.20.0: memoria.db e' archivio in sola lettura (i dati dei ricordi stanno nel Lux), gli archi hebbiani restano li'.
 
-# Lux degli engrammi (12/10): i ricordi nati stanotte entrano nel Lux che consegna
-# i ricordi al riflesso (taglio + archi nuovi, i rinforzi degli altri restano);
-# il servizio (lux-engrammi.service) se ne accorge da solo e ricarica
-/data/venv-spacy/bin/python /data/memoria-episodica-affettiva/engrammi/lux_engrammi.py aggiungi \
-  || echo "$(date -Iseconds) Lux degli engrammi NON aggiornato (non critico, ritenta domani)"
+# 1.20.0: tolta la chiamata lux_engrammi.py aggiungi: i ricordi entrano subito nel Lux dal servizio (POST /aggiungi,
+# firma-subito), non piu' di notte da memoria.db
 
-# sentinella anti-amnesia (B5 01/11, P6): ogni ricordo di memoria.db DEVE stare nel Lux degli engrammi
+# sentinella anti-amnesia (B5 01/11, P6; 1.20.0): ogni nid del registro di firma-subito (esito nodo o trascinato) DEVE
+# stare nel Lux degli engrammi, e ogni ricordo del Lux deve avere testo e firma
 (cd /data/memoria-episodica-affettiva/engrammi && /data/venv-spacy/bin/python sentinella_lux.py) \
-  || echo "CRITICO: ricordi di memoria.db fuori dal Lux degli engrammi: l'agente non li richiama." \
-          "Rimedio: venv-spacy/bin/python engrammi/lux_engrammi.py aggiungi. Controllare tagging.log."
+  || echo "CRITICO: ricordi del registro fuori dal Lux degli engrammi (o senza testo/firma): l'agente non li richiama." \
+          "Rimedio: guardare il journal di firma-subito e lux-engrammi (journalctl --user -u firma-subito -u lux-engrammi)."
+
+# 1.14.0 (PIANO-1.14-RICONSOLIDAMENTO.md, punto 9): copia del Lux della notte (sotto il lucchetto del Lux, tiene le
+# ultime 7), poi il riconsolidamento nel servizio, che tiene lo stato in memoria (fallimento non critico)
+LD=$(cd /data/memoria-episodica-affettiva/engrammi && /data/venv-spacy/bin/python -c "import lux_engrammi as X, numpy as np
+print(X.DIR if 'C0' in np.load(X.NPZ).files else '')")   # solo dalla 1.14.0 (prima: niente M da scrivere)
+if [ -n "$LD" ] && [ -d "$LD" ]; then
+  N="$LD/notti/$(date +%Y%m%d)"
+  mkdir -p "$N" && flock "$LD/.lucchetto" cp -p "$LD/lux.npz" "$LD/lux-stato.npz" "$LD/lux-meta.json" "$N/" \
+    || echo "$(date -Iseconds) copia del Lux della notte FALLITA (non critico)"
+  ls -1d "$LD"/notti/2* 2>/dev/null | head -n -7 | xargs -r rm -rf --
+  # 1.17.0: i messaggi del giorno riaccendono gli engrammi (contatori del tema aperto), poi il riconsolidamento
+  R=$(curl -sf -m 600 -X POST http://127.0.0.1:8132/riaccendi -H 'Content-Type: application/json' -d '{}') \
+    && echo "$(date -Iseconds) riaccendi: $R" \
+    || echo "$(date -Iseconds) riaccendi NON fatto (non critico, ritenta domani)"
+  # 1.18.0: lo sbiadimento della notte (una volta per giorno vissuto)
+  R=$(curl -sf -m 600 -X POST http://127.0.0.1:8132/sbiadisci -H 'Content-Type: application/json' -d '{}') \
+    && echo "$(date -Iseconds) sbiadisci: $R" \
+    || echo "$(date -Iseconds) sbiadisci NON fatto (non critico, ritenta domani)"
+  R=$(curl -sf -m 600 -X POST http://127.0.0.1:8132/riconsolida -H 'Content-Type: application/json' -d '{}') \
+    && echo "$(date -Iseconds) riconsolida: $R" \
+    || echo "$(date -Iseconds) riconsolida NON fatto (non critico, ritenta domani)"
+fi

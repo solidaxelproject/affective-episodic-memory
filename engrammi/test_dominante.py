@@ -1,13 +1,8 @@
 """09/11: l'emozione dominante di un ricordo ha sempre un vettore di steering. 09/11 sera: la piu' forte;
 se non ha vettore, la vicina nello stesso petalo che lo ha (la media), altrimenti la piu' forte fra quelle con vettore.
 Uso: /data/jspace/venv/bin/python test_dominante.py"""
-import json
 import os
-import shutil
-import sqlite3
-import subprocess
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # la cartella di memoria.py
 import memoria  # noqa: E402
@@ -42,26 +37,4 @@ assert memoria.dominante({"outrage": 3.0, "joy": 1.0, "fear": 2.0}) == "fear"
 # ogni dominante ha il vettore, anche con firme di soli assi senza vettore
 assert memoria.dominante({"boredom": 0.2, "annoyance": 0.9}) == "anger"
 
-# migrazione su una copia: cambia solo emo_tag dei ricordi con dominante senza vettore, salienza e firma intatte
-d = tempfile.mkdtemp()
-db = os.path.join(d, "memoria.db")
-c = sqlite3.connect(db)
-c.execute("CREATE TABLE nodi (id INTEGER PRIMARY KEY, emo_tag TEXT, firma TEXT, salienza REAL)")
-c.executemany("INSERT INTO nodi VALUES (?, ?, ?, ?)", [
-    (1, "distraction", json.dumps(f), 2.1),
-    (2, "joy", json.dumps({"joy": 1.5, "boredom": 0.4}), 1.5),
-    (3, "annoyance", json.dumps({"annoyance": 0.9, "boredom": 0.2}), 0.9)])   # 09/11 sera: -> rabbia (petalo)
-c.commit()
-c.close()
-qui = os.path.dirname(os.path.abspath(__file__))
-out = subprocess.run([sys.executable, os.path.join(qui, "migra_dominante.py"), db], capture_output=True, text=True)
-assert out.returncode == 0, out.stderr
-c = sqlite3.connect(db)
-righe = c.execute("SELECT id, emo_tag, salienza FROM nodi ORDER BY id").fetchall()
-assert righe == [(1, "surprise", 2.1), (2, "joy", 1.5), (3, "anger", 0.9)], righe
-assert os.path.exists(db + ".bak-pre-dominante"), "manca la copia del db"
-# idempotente
-out = subprocess.run([sys.executable, os.path.join(qui, "migra_dominante.py"), db], capture_output=True, text=True)
-assert out.returncode == 0 and "0 ricordi" in out.stdout, out.stdout
-shutil.rmtree(d)
 print("test_dominante: TUTTO VERDE")

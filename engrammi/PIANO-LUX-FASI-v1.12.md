@@ -232,6 +232,9 @@ del pensiero, ogni 25 token); l'ha tolta CC col refactoring del 10/10, SENZA dec
 solo via testuale e semantica bge-m3). Va rimessa come via emotiva del richiamo della fase 2: emozione del momento letta sul modello -> ricordi con
 quella emozione favoriti. Da definire con l'utente nel piano del cablaggio: strato/strati e lente della lettura, ogni quanto,
 come pesa contro le altre due vie.
+**11/11 sera: principi dalla memoria umana accettati e lettura = J-lens vera su L29: engrammi/PIANO-1.19-VIA-EMOTIVA.md.**
+**11/11 19:50: IN PRODUZIONE come Lux 1.19.0 (PIANO-1.19-VIA-EMOTIVA.md): J-lens su L29 tradotta ai 44 assi, umore a due
+tempi, punteggio x (1 + k x accordo) sui ricordi gia' accesi, diario delle letture; verifica con !verifica emotiva!.**
 
 **Fase 2, ultimo passo (22/10): `memoria.db` diventa superfluo.** Tutto quello che e' rimasto solo in
 `memoria.db` entra nel Lux, poi nessun componente vivo lo apre piu'.
@@ -243,6 +246,13 @@ come pesa contro le altre due vie.
   container (richiamo per codice e per parole), `cervello.py`, `notturna-web.py`, `lux3d-gif.py`, `vettori_l29.py`,
   `verifica_post_versioning.py`, `firme-occamy/ricalcola-firme.py`, `lux_engrammi.py` (costruisci, aggiungi, primo stato).
 - `memoria.db` resta come archivio in sola lettura, fuori dal funzionamento.
+- 11/11 21:36: IN PRODUZIONE come Lux 1.20.0 (`engrammi/PIANO-1.20-MEMORIADB-SUPERFLUO.md`): i dati dei ricordi nel
+  meta del Lux, il ricordo nuovo lo crea il servizio (POST /aggiungi), memoria.db in sola lettura. Prossimo: il riflesso si divide.
+
+**Fase 2, dopo memoria.db superfluo (11/11/2026): il riflesso si divide.** Oggi `riflesso.py` (2.000 righe) fa
+da solo proxy, slot e cache, memoria involontaria, vettore, blocco dei metadati, riepilogo e switch di CW, via emotiva
+("god object"). Diventa il punto d'ingresso che chiama i moduli nell'ordine giusto, un modulo per lavoro. Si sposta un
+pezzo alla volta senza cambiarlo, con la fotografia prima e dopo: stesse richieste, stesse risposte al byte.
 
 **Chiusura della fase 2 (22/10): i difetti di `memoria.db`.**
 1. Indice testuale (`nodi_fts`) aggiornato solo all'inserimento (trigger `nodi_ai`): aggiungere i trigger di modifica
@@ -314,6 +324,14 @@ prova per layer), fase 3, poi dalla 4 alla 12.
 **Fase 10.** Ripasso nel sonno: la notte rigioca e rinforza alcuni ricordi del giorno.
 **Fase 11.** Ricordi flashbulb: momenti a emozione altissima fissati col contesto intero (in parte coperto dalla salienza).
 **Fase 12.** Storia di se': ricordi organizzati per periodi e temi della vita.
+**Fase 13 (ultima, l'utente 11/11/2026): dump, aggiornamento e ripristino.** Un sistema unico per passare da una versione
+del Lux alla successiva, per chi installa dal repo pubblico e per l'agente: prima del passaggio un dump in un archivio di
+tutti i dati mnemonici (dalla 1.20.0 i ricordi stanno gia' nel meta: testo, firma, dominante, fonte; in piu' lo stato
+imparato: rinforzi S/S0/U, sbiadimento, momenti M, contatori degli engrammi), con una chiave che sopravvive alla
+ricostruzione (ricordo + testi dei due engrammi dell'arco, non il numero d'arco); poi Lux ricreato da zero con
+costruisci() della versione nuova e reinserimento dello stato sugli archi che esistono ancora (i nuovi nascono freschi,
+quelli spariti in un registro, niente buttato); ripristino dal dump se qualcosa va storto. Al posto dei da_precedente
+scritti a mano per ogni versione; con esso un MIGRAZIONI.md pubblico (cosa cambia, comando, tag). Da progettare con l'utente.
 
 **Notturna (16/10):** da rivedere piu' in la'. Le sue funzioni attuali (fusione in schemi, potatura) potrebbero
 non essere coerenti col funzionamento della memoria umana e andare deprecate. Per ora resta com'e'.

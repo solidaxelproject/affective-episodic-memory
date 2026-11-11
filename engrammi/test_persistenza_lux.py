@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Stress-test di B5 (PIANO-FIRMA-ENGRAMMI.md): vecchio Lux in archivio, persistenza e sincronia sul Lux degli engrammi.
-Tutto su COPIE (Lux 1.13.0, memoria.db, vettori.pt, diario) e su un servizio del Lux di prova (porta 8133, LUX_DIR):
+Tutto su COPIE (Lux 1.19.0 migrato alla 1.20.0 con da_precedente, diario) e su un servizio del Lux di prova (porta 8133, LUX_DIR):
 la produzione si legge e basta.
   servizio:     /richiama = Lux.richiama in processo; /rinforza a peso 1 e 0.5 = crescita FSRS attesa; errori (ricordo
                 sconosciuto, peso fuori da (0, 1], NaN) = 400; ricordo corretto = non si rinforza
   persistenza:  eco vera (ricordo vero) rinforza a 0.5, tre eco nella stessa notte = un rinforzo; messaggio estraneo =
-                tema; tema che torna a giorni alterni matura e diventa ricordo (tagging35b.persistenza_notte, su copia di
-                memoria.db), poi entra nel Lux con S0 >= S_ABITUDINE (aggiungi) e la sentinella e' verde; settimanale
+                tema; tema che torna a giorni alterni matura e diventa ricordo (persistenza.notte con promuovi di firma_subito:
+                1.20.0, POST /aggiungi), entra nel Lux con S0 >= S_ABITUDINE e la sentinella e' verde; settimanale
                 matura; tema isolato dimenticato; migrazione dei 47 temi vecchi
   stress:       50 /rinforza in parallelo su 50 ricordi = 50 rinforzi giusti; 50 sullo stesso = uno solo; notte ripetuta
                 (kill e rilancio) = nessuna crescita in piu'; servizio giu' = errore e buffer non salvato
@@ -16,7 +16,6 @@ Uso: cd /data/memoria-episodica-affettiva/engrammi && /data/jspace/venv/bin/pyth
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -30,14 +29,12 @@ import numpy as np
 
 sys.path.insert(0, "/data/memoria-episodica-affettiva")
 import lux as LUX  # noqa: E402
-import memoria  # noqa: E402
 import persistenza as P  # noqa: E402
 
-QUI = "/data/memoria-episodica-affettiva/engrammi"
+QUI = os.path.dirname(os.path.abspath(__file__))
 SPACY = "/data/venv-spacy/bin/python"
 PORTA = 8133
 URL = f"http://127.0.0.1:{PORTA}"
-VERSIONE = "1.13.0"
 fallimenti = []
 
 
@@ -71,20 +68,17 @@ def atteso(S, U, js, oggi, peso):
 
 
 tmp = tempfile.mkdtemp(prefix="test-b5-")
-copia = f"{tmp}/lux-{VERSIONE}"
-shutil.copytree(f"{QUI}/lux-{VERSIONE}", copia, ignore=shutil.ignore_patterns(".lucchetto"))
-shutil.copy2(memoria.DB, f"{tmp}/memoria.db")
-shutil.copy2(memoria.VEC, f"{tmp}/vettori.pt")
+copia = f"{tmp}/lux"
+subprocess.run([SPACY, "-c", "import lux_engrammi as X; X.da_precedente()"], cwd=QUI, check=True, capture_output=True,
+               env=dict(os.environ, LUX_DIR=copia))   # 1.20.0: copia migrata
 S, S0, U = stato(copia)
 np.savez(f"{copia}/lux-stato.npz", S=S, S0=S0, U=U - 30)   # 30 giorni vissuti fa: un rinforzo deve crescere
 OGGI = LUX.orologio()
 orologio_vero = LUX.orologio
 env = dict(os.environ, LUX_DIR=copia, LUX_PORTA=str(PORTA))
 # un ricordo corretto, per vedere che non si rinforza (sulla copia, prima del servizio)
-db = sqlite3.connect(f"file:{tmp}/memoria.db?mode=ro", uri=True)
-testi = dict(db.execute("select id, testo from nodi where testo != '' and classe = 'vissuto'"))
-db.close()
 meta = json.load(open(f"{copia}/lux-meta.json"))
+testi = {int(k): r["testo"] for k, r in meta["ricordi"].items() if r["classe"] == "vissuto"}   # 1.20.0: dal meta
 corretto = sorted(int(k) for k in meta["ricordi"])[5]
 subprocess.run([SPACY, "-c", f"import lux_engrammi as X; X.correggi({meta['ricordi'][str(corretto)]['codice']!r}, "
                 "'correzione di prova del test B5')"], cwd=QUI, env=env, check=True, capture_output=True)
@@ -149,53 +143,43 @@ try:
     ok(r["eco"] == 0 and r["temi_nuovi"] == 1 and r["temi"] == 1, f"estraneo: {r}")
     ok(np.array_equal(stato(copia)[0], Sd), "il messaggio estraneo ha rinforzato")
 
-    print("3. abitudine: tema a giorni alterni -> ricordo (tagging35b) -> Lux con S0 >= S_ABITUDINE", flush=True)
-    import tagging35b as TG
-    import torch
-    memoria.DB, memoria.VEC = Path(f"{tmp}/memoria.db"), Path(f"{tmp}/vettori.pt")
-    cvec = np.load("/data/memoria-episodica-affettiva/emo-cvec-v2.npz")   # B7: solo per i nomi dei 51 assi
-    emos = [str(x) for x in cvec["nomi"]]
-    Z = torch.zeros(1, len(emos))
-    Z[0, emos.index("joy")] = 0.9
-    Z[0, emos.index("trust")] = 0.5
-    ritorni = None
-    for k, giorno in enumerate(range(OGGI + 1, OGGI + 61, 2)):
-        validi = [{"testo": f"Stamattina sono passata al mercato di via Roma a prendere le arance ({giorno}).",
-                   "ts": float(giorno)}]
-        LUX.orologio = lambda g=giorno: g   # il tagger non passa oggi: la notte e' quella dell'orologio vissuto
-        promossi = TG.persistenza_notte([0], validi, Z, emos)
-        if promossi:
-            ritorni = k + 1
-            break
-    LUX.orologio = orologio_vero
-    ok(ritorni is not None, "il tema a giorni alterni non matura mai")
-    nid_ab = promossi[0][1] if promossi else None
-    db = sqlite3.connect(f"{tmp}/memoria.db")
-    riga = db.execute("select fonte, classe, emo_tag, firma from nodi where id = ?", (nid_ab,)).fetchone()
-    db.close()
-    ok(riga is not None and riga[0] == "abitudine" and riga[1] == "vissuto" and riga[2] == "joy"
-       and abs(json.loads(riga[3])["joy"] - 0.9) < 1e-3, f"nodo dell'abitudine: {riga}")
-    v = torch.load(f"{tmp}/vettori.pt", weights_only=True)[nid_ab]["addr_sem"]
-    ok(v.shape == (1024,) and abs(float(v.norm()) - 1) < 1e-3, f"addr_sem dell'abitudine {tuple(v.shape)}")
-    ok(not any("mercato di via Roma" in t for t in P.Temi().testi), "il tema promosso resta nel buffer")
+    print("3. abitudine: tema a giorni alterni -> ricordo (promuovi di firma_subito) -> Lux con S0 >= S_ABITUDINE", flush=True)
+    os.environ.update(LUX_URL=URL, MEM_SAM=tmp)
+    import firma_subito as FS
+    firma_ab = {**{a: 0.0 for a in FS.stats()["s"]["assi"]}, "joy": 0.9, "trust": 0.5}
+
+    def promuovi(testo, firma, vettore, ts, giorni):   # come firma_subito.notte (1.20.0)
+        return FS.nodo({"testo": testo, "firma": firma, "dominante": FS.memoria.dominante(firma), "ts": ts,
+                        "salienza": max(firma.values())}, "abitudine")
     n_a = len(np.load(f"{copia}/lux.npz")["A"])
-    subprocess.run([SPACY, "-c", f"import taglia as T; T.DB = '{tmp}/memoria.db'; import lux_engrammi as X; X.aggiungi()"],
-                   cwd=QUI, env=env, check=True, capture_output=True)
+    ritorni, promossi = None, []
+    for k, giorno in enumerate(range(OGGI + 1, OGGI + 61, 2)):
+        r = P.notte([(f"Stamattina sono passata al mercato di via Roma a prendere le arance ({giorno}).", firma_ab,
+                      float(giorno))], oggi=giorno, promuovi=promuovi)
+        if r["promossi"]:
+            ritorni, promossi = k + 1, r["promossi"]
+            break
+    ok(ritorni is not None, "il tema a giorni alterni non matura mai")
+    m = json.load(open(f"{copia}/lux-meta.json"))["ricordi"]
+    nid_ab = next((int(k) for k, x in m.items() if x.get("fonte") == "abitudine" and "mercato di via Roma" in x["testo"]), None)
+    riga = m.get(str(nid_ab), {})
+    ok(riga.get("classe") == "vissuto" and riga.get("dominante") == "joy" and abs(riga["firma"]["joy"] - 0.9) < 1e-3,
+       f"ricordo dell'abitudine: {riga}")
+    ok(not any("mercato di via Roma" in t for t in P.Temi().testi), "il tema promosso resta nel buffer")
     S2, S02, U2 = stato(copia)
     js = archi(copia, nid_ab)
     ok(len(js) > 0 and (js >= n_a).all(), "l'abitudine non e' entrata nel Lux")
     ok((S02[js] >= P.S_ABITUDINE - 1e-9).all() and (S2[js] == S02[js]).all() and (U2[js] == OGGI).all(),
        f"S0 dell'abitudine {S02[js][:3]} sotto {P.S_ABITUDINE}")
-    sent = subprocess.run([sys.executable, "sentinella_lux.py"], cwd=QUI, capture_output=True, text=True,
-                          env=dict(env, MEMORIA_DB=f"{tmp}/memoria.db"))
-    ok(sent.returncode == 0, f"sentinella sulla copia: {sent.stdout}")
-    db = sqlite3.connect(f"{tmp}/memoria.db")
-    db.execute("insert into nodi (ts, testo, fonte, emo_tag, emo_alpha, firma, salienza, classe, voluto) "
-               "values (1, 'ricordo fuori dal Lux', '', 'joy', 0, '{}', 0, 'vissuto', 0)")
-    db.commit()
-    db.close()
-    sent = subprocess.run([sys.executable, "sentinella_lux.py"], cwd=QUI, capture_output=True, text=True,
-                          env=dict(env, MEMORIA_DB=f"{tmp}/memoria.db"))
+    reg = f"{tmp}/giornata.jsonl"
+    with open(reg, "w") as fh:
+        fh.write(json.dumps({"esito": "nodo", "nid": nid_ab}) + "\n")
+    senv = dict(env, GIORNATA_FIRMA=reg)
+    sent = subprocess.run([sys.executable, "sentinella_lux.py"], cwd=QUI, capture_output=True, text=True, env=senv)
+    ok(sent.returncode == 0, f"sentinella sulla copia: {sent.stdout}{sent.stderr}")
+    with open(reg, "a") as fh:
+        fh.write(json.dumps({"esito": "nodo", "nid": 999999}) + "\n")
+    sent = subprocess.run([sys.executable, "sentinella_lux.py"], cwd=QUI, capture_output=True, text=True, env=senv)
     ok(sent.returncode == 1 and "CRITICO" in sent.stdout, f"sentinella non vede il ricordo mancante: {sent.stdout}")
 
     print("4. settimanale matura, tema isolato dimenticato", flush=True)

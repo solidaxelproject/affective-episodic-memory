@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """GIF della formazione del Lux degli engrammi per il README (17/10/2026). Solo lettura di lux-<versione>/.
-I ricordi entrano in ordine cronologico (data del nodo in memoria.db): ogni engramma nasce col primo ricordo che lo
-contiene, gli archi compaiono col loro ricordo. Poi un giro completo sul Lux finito.
+I ricordi entrano in ordine cronologico (ts nel meta del Lux in servizio; prima di 1.20.0 da memoria.db): ogni
+engramma nasce col primo ricordo che lo contiene, gli archi compaiono col loro ricordo. Poi un giro completo sul Lux finito.
 Stessa geometria di lux3d.py (PCA 3D dei vettori bge-m3, colore = emozione principale della firma). Nessun testo:
 solo sfere, archi, data e conteggi, quindi pubblicabile.
   /data/jspace/venv/bin/python lux3d-gif.py [out.gif]"""
 import json
 import os
-import sqlite3
 import sys
 import time
 
@@ -16,7 +15,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 VERSIONE = "1.12.0"
 DIR = f"/data/memoria-episodica-affettiva/engrammi/lux-{VERSIONE}"
-DB = "/data/workspace/memoria/memoria.db"
+# 1.20.0: dal meta del Lux (prima memoria.db): il meta della 1.12.0 non ha i ts, si prendono da quello in servizio
+import meta_lux  # noqa: E402
+
+META = meta_lux.percorso()
 W, H, MS = 640, 480, 90
 F_NASCITA, F_PAUSA, F_GIRO = 90, 8, 48
 BG = (11, 14, 26)
@@ -25,7 +27,8 @@ EMOZIONI = [e["en"] for e in json.load(open(os.path.join(os.path.dirname(os.path
 
 z = np.load(f"{DIR}/lux.npz")
 V, F, A = z["V"].astype(np.float32), z["F"], z["A"]
-ts = dict(sqlite3.connect(f"file:{DB}?mode=ro", uri=True).execute("select id, ts from nodi"))
+ts = {int(k): float(r["ts"]) for k, r in json.load(open(META))["ricordi"].items()
+      if r["classe"] != "correzione"}   # le correzioni senza ts come prima: entrano alla fine
 quando = {int(r): ts.get(int(r), np.nan) for r in np.unique(A[:, 0])}
 t_arco = np.array([quando[int(r)] for r in A[:, 0]])
 t_arco[np.isnan(t_arco)] = np.nanmax(t_arco)   # correzioni (fuori da memoria.db): entrano alla fine

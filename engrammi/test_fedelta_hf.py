@@ -4,13 +4,14 @@ test_firma_se.py) contro le stesse lette col modello HF. GPU: solo con llama-35b
 Uso: cd /data/jspace && HF_HOME=/data/jspace/hf MODELLO_35B=Accio-Lab/occamy-1.0 OUT_35B=/data/jspace/out-occamy \
      PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True venv/bin/python /data/memoria-episodica-affettiva/engrammi/test_fedelta_hf.py"""
 import json
+import os
 import sys
 
 import numpy as np
 
-sys.path.insert(0, "/data/memoria-episodica-affettiva/engrammi")
-sys.path.insert(0, "/data/memoria-episodica-affettiva")
-import tagging35b as T  # noqa: E402,F401  (percorsi di jspace e jlens, ambiente offline)
+os.environ.setdefault("HF_HUB_OFFLINE", "1")   # come faceva tagging35b.py (in archivio-20261111 dal Lux 1.20.0)
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+sys.path[:0] = ["/data/memoria-episodica-affettiva", "/data/memoria-episodica-affettiva/engrammi", "/data/jspace/jacobian-lens", "/data/jspace"]
 import firma_se as F    # noqa: E402
 import mixed35b as M    # noqa: E402
 
