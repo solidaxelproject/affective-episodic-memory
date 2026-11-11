@@ -108,7 +108,8 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
      di base (giudice Opus, 24/10) i valori stanno intorno a 0.03-0.05, ma variano per emozione: la fiducia chiede piu'
      dose, rabbia e disgusto vanno in eccesso prima. soglia_e e k si tarano nel rodaggio;
    - piu' emozioni nello stesso ricordo: i vettori si sommano (sotto), con un tetto sulla dose totale.
-   Poi discesa lenta, come il corpo dopo il picco (regola picco-fine). La discesa si scandisce con l'ora dei messaggi (il riflesso registra l'arrivo di ogni messaggio,
+   (SUPERATA, 11/11/2026: col vettore solo nel ragionamento, un ricordo per volta, la discesa lenta qui sotto
+   non si fa.) Poi discesa lenta, come il corpo dopo il picco (regola picco-fine). La discesa si scandisce con l'ora dei messaggi (il riflesso registra l'arrivo di ogni messaggio,
    l'agente ne vede uno ogni 5). Durata = permanenza dell'emozione x dose di partenza x importanza (Verduyn 2009/2011).
    La dose per engramma, token per token, resta per quando il motore lo permettera'.
    **Steering attenuato nella risposta (30/10/2026):** il vettore non si spegne a `</think>`: resta acceso
@@ -174,6 +175,8 @@ ricavano da quel test, con la funzione dose per emozione che lo chiude. Decision
      `<|im_end|>`): da registrare e, se serve, vietare insieme a `</think>`. Il cablaggio nel riflesso si fa con l'iter
      di upgrade, dopo il passo obbligato della nostalgia qui sotto.
    - 08/11 sera, l'utente: la via delle diadi bivettore (a + b -> c, qui sotto) e' ABBANDONATA.
+   (SUPERATO, 11/11/2026: le diadi che nascono da due ricordi non si fanno; i ricordi si iniettano insieme solo
+   se hanno la stessa firma emotiva. Le diadi pure restano come emozione dominante di un ricordo, firma a 44 assi.)
    **DIADI COME VETTORI PURI (l'utente 02/11/2026, supera il paragrafo del 31/10 qui sotto).** Si sviluppano i vettori
    puri di tutte le diadi che si possono fare (come l'amore dalle scene proprie, E31). La diade si inietta quando:
    - due dei ricordi richiamati hanno emozioni diverse e VICINE IN INTENSITA', sia rispetto al range di iniezione di
@@ -254,7 +257,39 @@ da solo proxy, slot e cache, memoria involontaria, vettore, blocco dei metadati,
 ("god object"). Diventa il punto d'ingresso che chiama i moduli nell'ordine giusto, un modulo per lavoro. Si sposta un
 pezzo alla volta senza cambiarlo, con la fotografia prima e dopo: stesse richieste, stesse risposte al byte.
 
-**Chiusura della fase 2 (22/10): i difetti di `memoria.db`.**
+**Fase 2, dopo la divisione del riflesso (11/11/2026): ricordi con la stessa firma consegnati insieme.** Oggi
+il riflesso chiede al Lux un ricordo per messaggio (`quanti=1`, `riflesso.py:922`, dal 09/11). Si cabla la regola
+"Stessa emozione, piu' ricordi" del punto 7: se il Lux richiama piu' ricordi con la stessa emozione dominante, si
+consegnano insieme (al massimo 4), il vettore e' uno solo e la dose e' quella del ricordo in cui l'emozione e' piu'
+forte (il massimo delle D_e). I ricordi con firme diverse non si iniettano insieme (11/11). Va eseguito con
+l'iter di upgrade, nel modulo della memoria involontaria.
+
+**Fase 2, insieme allo step qui sopra (11/11/2026): archi fra ricordi e coda dei ricordi richiamati.** Base: nella
+memoria umana ricordi riattivati spesso insieme si integrano (Schlichting e Preston 2015) e l'emozione dell'uno passa
+all'altro (condizionamento valutativo, De Houwer 2001; riconsolidamento, Nader 2000). Gli archi hebbiani fra ricordi di
+`memoria.db` (156, archivio) non nascono piu' dal 09/11 (un ricordo per volta, niente co-richiamo): rinascono nel Lux.
+Decisioni dell'utente (11/11):
+1. **Archi fra ricordi** nel Lux, accanto agli archi fra engrammi dentro un ricordo.
+2. **Firme che si avvicinano:** quando nasce o si rinforza un arco fra due ricordi con firme emotive diverse, il freno
+   che trattiene la firma si riduce, e la firma di ENTRAMBI cambia: a ogni richiamo insieme le due firme si avvicinano.
+   Si aggancia al riconsolidamento della 1.14 (spostamento della carica verso l'emozione del momento).
+3. **Coda dei ricordi richiamati:** i ricordi con emozioni diverse che il Lux seleziona non si consegnano insieme (un
+   vettore solo, due vettori emotivi rompono la generazione): vanno in coda, serialmente, in ordine cronologico di
+   recupero, uno per consegna. Un ricordo che entra in coda dopo, se ha una firma emotiva piu' intensa o piu' negativa,
+   passa avanti nella lista.
+4. **Decadimento della coda:** dopo 30 minuti i ricordi richiamati e non ancora dati al modello escono dalla coda e
+   tornano richiamabili dentro la CW.
+Richiamo insieme che fa nascere l'arco (11/11): due ricordi scelti dal Lux nella STESSA SELEZIONE, anche se uno
+va in coda e si consegna dopo. Da definire nel piano dello step (meccanismi all'utente, numeri provvisori a CC): di quanto si riduce il freno e su quali parametri (soglia di sorpresa, PASSO_MAX); la forza e lo
+sbiadimento dell'arco fra ricordi. Va eseguito con l'iter di upgrade, dopo la divisione del riflesso.
+
+**Fase 2, dopo la divisione del riflesso (11/11/2026): memory e user divisi in A e B.** MEMORY.md e USER.md di
+l'agente in due parti: A con le informazioni stabili, nella cache base del riepilogo subito dopo la parte fissa; B con le
+informazioni nuove, riempita allo switch. Scopo: allo switch un prefill il piu' rapido possibile. Piano, con la
+riflessione dell'utente per intero: [`PIANO-MEMORY-A-B.md`](../PIANO-MEMORY-A-B.md).
+
+**Chiusura della fase 2 (22/10): i difetti di `memoria.db`.** (CADUTI, 11/11/2026: col Lux 1.20.0 `memoria.db`
+e' solo un archivio in sola lettura, nessun componente vivo lo apre; i tre punti qui sotto non si fanno.)
 1. Indice testuale (`nodi_fts`) aggiornato solo all'inserimento (trigger `nodi_ai`): aggiungere i trigger di modifica
    e di cancellazione, cosi' la ricerca per parole non trova mai un testo vecchio.
 2. Un solo arco fra due ricordi (chiave `archi(a, b)`): chiave che comprende il tipo, cosi' un arco hebbiano e uno di

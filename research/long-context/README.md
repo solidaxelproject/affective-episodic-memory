@@ -25,6 +25,8 @@ Launcher: `lancia.sh` (`./lancia.sh` = tests 1 and 2, `./lancia.sh taratura`, `.
 
 ## Test procedure for per-layer steering
 
+Superseded: the protocol in use is in [`STEERING-VECTOR-PROTOCOL.md`](STEERING-VECTOR-PROTOCOL.md) (Italian: [`PROTOCOLLO-VETTORI-STEERING.md`](PROTOCOLLO-VETTORI-STEERING.md)).
+
 - One emotion at a time on all contexts: each of the 51 emotions on each layer L15-L32.
 - Dose from 0.02 to 1.0 in steps of 0.02 (HF units; the server receives dose x sqrt(2048) in relative mode).
 - Early stop on oversteering (broken text, or the emotion's Italian word appearing in the text, singular or
