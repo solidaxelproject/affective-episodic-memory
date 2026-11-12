@@ -727,8 +727,12 @@ passi.clear()
 S._altro_in_volo[0] = 1
 assert RP._riassumi(json.dumps(inoltrato).encode(), "ciao l'utente!", scadenza=orologio[0] - 1) == (False, "fallito")
 assert passi == [], "riepilogo con una richiesta estranea nello slot"
+dormi_vero = R.time.sleep   # 12/11: le due sostituzioni qui sotto si rimettono subito: time.sleep e' di tutto il processo
+# e la sentinella (thread avviato in testa) lo chiama a ogni giro; lasciata, azzerava _chat_in_volo durante il punto 3b
+# dello switch rimandato (test instabile sulla CI del 12/11)
 R.time.sleep = lambda x: S._altro_in_volo.__setitem__(0, 0)   # la richiesta estranea finisce mentre aspetta
 RP._riassumi(json.dumps(inoltrato).encode(), "ciao l'utente!")
+R.time.sleep = dormi_vero
 assert ("restore", "chat.kv") in passi and S._altro_in_volo[0] == 0
 S._cw[0] = "pensatoio"
 interrotti = []
@@ -745,6 +749,7 @@ S._chat_in_volo[0] = 1
 S._salva_ultimo[0] = types.SimpleNamespace(join=lambda: passi.append("join"))
 R.time.sleep = lambda x: S._chat_in_volo.__setitem__(0, 0)
 RP._riassumi(json.dumps(inoltrato).encode(), "ciao l'utente!")
+R.time.sleep = dormi_vero
 assert S._chat_in_volo[0] == 0 and passi[0] == "join" and ("restore", "chat.kv") in passi, passi
 S._salva_ultimo[0] = None
 
