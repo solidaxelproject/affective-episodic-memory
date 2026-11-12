@@ -3,7 +3,6 @@
 # CPU, host-side (usa numpy per Lux). Uno sguardo solo su tutto l'organismo.
 import json
 import sys
-import time
 from pathlib import Path
 
 MEM = Path("/data/workspace/memoria")
@@ -28,16 +27,16 @@ if META.exists():
         if r["classe"] == "vissuto":
             conta[r.get("dominante")] = conta.get(r.get("dominante"), 0) + 1
     top = sorted(conta.items(), key=lambda x: -x[1])[:5]
-    print(f"\nGRAFO (memoria episodica testuale)")
+    print("\nGRAFO (memoria episodica testuale)")
     print(f"  {len(ric)} nodi: {vis} vissuti, {let} letti")
-    print(f"  emozioni: " + ", ".join(f"{e} {q}" for e, q in top))
+    print("  emozioni: " + ", ".join(f"{e} {q}" for e, q in top))
 
 # --- Lux v0: sezione tolta il 10/11 (il vecchio Lux e' archiviato dal 31/10, la classe in archivio-20261110/lux.py)
 
 # --- stato emotivo
 try:
     import stato as omeostato
-    print(f"\nSTATO EMOTIVO (omeostato)")
+    print("\nSTATO EMOTIVO (omeostato)")
     print(f"  {omeostato.descrivi(6)}")
     esito, motivo = omeostato.gate()
     print(f"  gate: {esito} — {motivo}")

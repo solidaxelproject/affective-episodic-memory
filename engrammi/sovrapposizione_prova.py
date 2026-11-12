@@ -6,7 +6,6 @@ sono nuovi. Poi quanti verrebbero catturati con varie regole. Solo lettura sulla
 Uso: cd /data/memoria-episodica-affettiva/engrammi && LUX_DIR=prova-selezione/copia/lux /data/venv-spacy/bin/python sovrapposizione_prova.py"""
 import collections
 import json
-import os
 
 import numpy as np
 

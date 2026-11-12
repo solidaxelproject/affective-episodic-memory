@@ -20,4 +20,8 @@ jobs:
         run: |
           pip install numpy
           pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: ruff (nomi non definiti, import e variabili non usati, sintassi; regole in ruff.toml)
+        run: |
+          pip install ruff==0.17.4
+          ruff check .
       - run: python collaudi.py

@@ -87,7 +87,6 @@ def estrai():
 def main(quanti):
     import lux_engrammi as LE   # param_id, chiave (sola lettura: il Lux dell'agente non si tocca)
     eid, testi, tab, A, P, ricordi = {}, [], {}, [], [], {}
-    testo_tot = []
     t0 = time.time()
     with Pool(4) as pool:
         for nid, (titolo, pezzi) in enumerate(pool.imap(lavora, articoli(quanti), chunksize=4)):

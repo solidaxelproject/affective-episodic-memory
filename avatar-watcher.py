@@ -3,7 +3,6 @@
 # aggiorna l'avatar Matrix dell'agente a ogni cambio di stato, MA carica solo
 # quando l'emozione DOMINANTE cambia (l'avatar visibile sarebbe identico
 # altrimenti: niente spam su Matrix). Polling leggero sul mtime.
-import json
 import os
 import subprocess
 import sys

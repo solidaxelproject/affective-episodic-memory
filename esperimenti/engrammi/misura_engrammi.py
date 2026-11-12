@@ -140,7 +140,7 @@ def cmd_misura(a):
                     "ricordi_senza_bivi": round(float(np.mean([b == 0 for b in bivi])), 3)}
         print(g, json.dumps(esiti[g]), flush=True)
     json.dump({"soglia_arco": a.soglia, "k": a.k, "ricordi": len(dati), "esiti": esiti}, open(OUT, "w"), indent=1)
-    print(f"| granularita' | frammenti | token medi | autoriconoscimento | con arco | grado max | bivi (mediana) | ricordi senza bivi |\n|---|---|---|---|---|---|---|---|")
+    print("| granularita' | frammenti | token medi | autoriconoscimento | con arco | grado max | bivi (mediana) | ricordi senza bivi |\n|---|---|---|---|---|---|---|---|")
     for g, e in esiti.items():
         print(f"| {g} | " + " | ".join(str(x) for x in e.values()) + " |")
 

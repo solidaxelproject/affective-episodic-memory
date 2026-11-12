@@ -1,0 +1,11 @@
+# 12/11 (l'utente, PIANO-STANDARD-TEST-E-CONTROLLI.md punto 1): linter del riflesso e dei suoi test.
+# F = pyflakes (nomi non definiti, import e variabili non usati), E9 = errori di sintassi.
+line-length = 120
+extend-exclude = ["archivio*", "engrammi/backup", "engrammi/archivio*", "manutenzione/backup", "*.bak*", "prove-contesto-lungo"]
+
+[lint]
+select = ["F", "E9"]
+
+[lint.per-file-ignores]
+# frammenti di esperimento: i nomi arrivano da exec(esperimenti_t1d_corti.py), come dice il commento accanto
+"engrammi/esperimenti_t1[ef]_*.py" = ["F821"]

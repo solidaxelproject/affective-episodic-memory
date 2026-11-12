@@ -22,7 +22,6 @@
 #   R_RICONOSCIMENTO, esce dal buffer. Niente N e W scelti a mano: numero di ritorni e finestra escono dalla curva.
 import json
 import urllib.request
-from pathlib import Path
 
 import numpy as np
 

@@ -21,7 +21,6 @@ os.environ.update(MEM_SAM=f"{TMP}/mem", MARKER_NOTTE=f"{TMP}/marker")
 sys.path.insert(0, "/data/memoria-episodica-affettiva")
 import codice_ricordo  # noqa: E402
 import firma_subito as FS  # noqa: E402
-import memoria  # noqa: E402
 
 # ---------- 1. P4: codice(ts) ----------
 print("1. codice(ts): modulo, Lux, codici del Lux in servizio", flush=True)

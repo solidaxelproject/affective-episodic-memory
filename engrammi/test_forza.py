@@ -3,7 +3,6 @@
 lettura; la dominante e' emo_tag di memoria.db (memoria.dominante dal 09/11, memoria vuole torch e il Lux no). Uso: cd engrammi && /data/venv-spacy/bin/python test_forza.py"""
 import sqlite3
 
-import numpy as np
 
 import lux_engrammi as X
 

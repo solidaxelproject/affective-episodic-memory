@@ -19,23 +19,23 @@ import contextlib
 import http.client
 import http.server
 import json
-import math
+import math  # noqa: F401  (i test leggono R.math)
 import os
 import sys
 import threading
 import time
-from pathlib import Path
+from pathlib import Path  # noqa: F401  (i test leggono R.Path)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ponte  # noqa: E402  (unica porta verso :8090)
-import steering  # noqa: E402  (modulo unico, 10/11: i vettori e le fasce dei test)
+import ponte  # noqa: E402, F401  (unica porta verso :8090; i test sostituiscono R.ponte.post)
+import steering  # noqa: E402, F401  (modulo unico, 10/11: i vettori e le fasce dei test)
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "engrammi"))
-import via_emotiva as VE  # noqa: E402  (1.19.0, PIANO-1.19-VIA-EMOTIVA: J-lens, umore, diario delle letture)
+import via_emotiva as VE  # noqa: E402, F401  (ordine di import di prima della divisione; 1.19.0, PIANO-1.19-VIA-EMOTIVA: J-lens, umore, diario delle letture)
 import riflesso_stato as S
 import riflesso_comune as C
 import riflesso_barra as B
 import riflesso_firma as FI
-import riflesso_fonte as FO
+import riflesso_fonte as FO  # noqa: F401  (ordine di import di prima della divisione)
 import riflesso_vettore as VT
 import riflesso_metadati as MD
 import riflesso_via_emotiva as RVE

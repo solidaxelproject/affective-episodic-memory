@@ -42,14 +42,14 @@ scrivi(X.DIARIO_RIFLESSO, [{"ts": 1000.0, "memorinvolontaria": ["a"], "nid": [n1
                            {"ts": 5000.0, "memorinvolontaria": ["d"], "nid": [n1], "flusso": "chat"},
                            {"ts": 9000.0, "memorinvolontaria": ["e"], "nid": [n1]},   # voce di prima: senza flusso
                            {"ts": 4000.0, "kill": "altro"}])
-L'AGENTE = "@agente:localhost"
-scrivi(X.GIORNATA, [{"ts": 1500.0, "autore": L'AGENTE, "testo": "r1", "firma": F1, "flusso": "chat"},
+AGENTE = "@agente:localhost"
+scrivi(X.GIORNATA, [{"ts": 1500.0, "autore": AGENTE, "testo": "r1", "firma": F1, "flusso": "chat"},
                     {"ts": 1500.0, "autore": "@utente:localhost", "testo": "l", "firma": F2},
-                    {"ts": 2500.0, "autore": L'AGENTE, "testo": "r2p", "firma": F2, "flusso": "pensatoio"},
-                    {"ts": 2600.0, "autore": L'AGENTE, "testo": "r2", "esito": "corto", "flusso": "chat"},
-                    {"ts": 3100.0, "autore": L'AGENTE, "testo": "forzato", "firma": F2, "forzato": True, "flusso": "pensatoio"},
-                    {"ts": 3200.0, "autore": L'AGENTE, "testo": "r3", "firma": F2, "flusso": "pensatoio"},
-                    {"ts": 9000.0 + X.FINESTRA_MOMENTO + 1, "autore": L'AGENTE, "testo": "tardi", "firma": F1}])
+                    {"ts": 2500.0, "autore": AGENTE, "testo": "r2p", "firma": F2, "flusso": "pensatoio"},
+                    {"ts": 2600.0, "autore": AGENTE, "testo": "r2", "esito": "corto", "flusso": "chat"},
+                    {"ts": 3100.0, "autore": AGENTE, "testo": "forzato", "firma": F2, "forzato": True, "flusso": "pensatoio"},
+                    {"ts": 3200.0, "autore": AGENTE, "testo": "r3", "firma": F2, "flusso": "pensatoio"},
+                    {"ts": 9000.0 + X.FINESTRA_MOMENTO + 1, "autore": AGENTE, "testo": "tardi", "firma": F1}])
 prima = {k: np.load(X.NPZ)[k] for k in ("C", "C0", "F", "A")}
 stato = {k: np.load(X.STATO)[k] for k in ("S", "S0", "U")}
 
@@ -72,9 +72,9 @@ t = os.path.getmtime(X.NPZ)
 assert X.riconsolida(oggi=100.0)["momenti"] == 0 and os.path.getmtime(X.NPZ) == t, "rifatto o riscritto senza novita'"
 
 # la consegna delle 5000 senza risposta si riprende quando la risposta arriva, anche dopo una piu' nuova (9000, senza flusso)
-scrivi(X.GIORNATA, [{"ts": 9500.0, "autore": L'AGENTE, "testo": "r9", "firma": F2, "flusso": "pensatoio"}])
+scrivi(X.GIORNATA, [{"ts": 9500.0, "autore": AGENTE, "testo": "r9", "firma": F2, "flusso": "pensatoio"}])
 assert X.riconsolida(oggi=100.0)["momenti"] == 1
-scrivi(X.GIORNATA, [{"ts": 5100.0, "autore": L'AGENTE, "testo": "r5", "firma": F1, "flusso": "chat"}])
+scrivi(X.GIORNATA, [{"ts": 5100.0, "autore": AGENTE, "testo": "r5", "firma": F1, "flusso": "chat"}])
 assert X.riconsolida(oggi=100.0)["momenti"] == 1 and len(np.load(X.NPZ)["M"]) == 5
 
 # rodaggio (punto 9)
@@ -96,7 +96,7 @@ np.savez(X.NPZ + ".tmp.npz", **zz)
 os.replace(X.NPZ + ".tmp.npz", X.NPZ)
 X.SOGLIA_SORPRESA = 0.0
 scrivi(X.DIARIO_RIFLESSO, [{"ts": 15000.0, "memorinvolontaria": ["x"], "nid": [n1], "flusso": "chat"}])
-scrivi(X.GIORNATA, [{"ts": 15100.0, "autore": L'AGENTE, "testo": "r15", "firma": F1, "flusso": "chat"}])
+scrivi(X.GIORNATA, [{"ts": 15100.0, "autore": AGENTE, "testo": "r15", "firma": F1, "flusso": "chat"}])
 r = X.riconsolida(oggi=90.0)
 assert r["momenti"] == 1 and r["spostati"] == 0, r
 zz = dict(np.load(X.NPZ))
@@ -109,7 +109,7 @@ stato = {k: np.load(X.STATO)[k] for k in ("S", "S0")}
 scrivi(X.DIARIO_RIFLESSO, [{"ts": 20000.0, "memorinvolontaria": ["f"], "nid": [n1], "flusso": "chat"},
                            {"ts": 20001.0, "memorinvolontaria": ["g"], "nid": [n2], "flusso": "chat"},
                            {"ts": 20002.0, "memorinvolontaria": ["h"], "nid": [nc], "flusso": "chat"}])
-scrivi(X.GIORNATA, [{"ts": 20100.0, "autore": L'AGENTE, "testo": "r20", "firma": F1, "flusso": "chat"}])
+scrivi(X.GIORNATA, [{"ts": 20100.0, "autore": AGENTE, "testo": "r20", "firma": F1, "flusso": "chat"}])
 r = X.riconsolida(oggi=90.0)
 assert r["momenti"] == 3 and r["effetto"] == 1.0, r
 z, s = np.load(X.NPZ), np.load(X.STATO)

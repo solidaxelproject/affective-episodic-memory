@@ -1,5 +1,5 @@
 """float16 contro float32 sui vettori del Lux dell'agente (15/10): scarto dei coseni e richiamo sugli stessi indizi."""
-import sys, numpy as np, random
+import sys, numpy as np
 sys.path.insert(0, "/data/memoria-episodica-affettiva/engrammi"); sys.path.insert(0, ".")
 import io, contextlib
 with contextlib.redirect_stdout(io.StringIO()):

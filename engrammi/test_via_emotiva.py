@@ -123,7 +123,7 @@ print("consegna con traccia OK: scelto", [x[0] for x in c], "senza emozione", tr
 
 # ---------- 5. riflesso: letture con la lente finta ----------
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import riflesso as R  # noqa: E402
+import riflesso as R  # noqa: E402, F401  (prepara sys.path e gli import come il servizio)
 import riflesso_via_emotiva as RVE  # noqa: E402
 
 RVE.VE = VE
