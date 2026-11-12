@@ -500,41 +500,42 @@ codice = r"""
 import json, os, sys
 sys.path.insert(0, "/data/memoria-episodica-affettiva")
 import riflesso as R
+import riflesso_firma as FI
 C = os.environ["CODA_FIRMA"]
 def righe():
     r = [json.loads(x) for x in open(C)] if os.path.exists(C) else []
     if os.path.exists(C): os.remove(C)
     return r
 fin = lambda t="Ciao l'utente, sto bene.": {"finish": "stop", "tool_calls": False, "testo": t}
-R._accoda_firma("chat", "[utente] ciao l'agente, come stai oggi?", 100.0, fin())
+FI._accoda_firma("chat", "[utente] ciao l'agente, come stai oggi?", 100.0, fin())
 r = righe()
 assert [(x["autore"], x["testo"]) for x in r] == [("@utente:localhost", "ciao l'agente, come stai oggi?"),
                                                    ("@agente:localhost", "Ciao l'utente, sto bene.")], r
 assert r[0]["ts"] == 100.0 and r[1]["ts"] > 100.0
-R._accoda_firma("chat", "[utente] ciao", 1.0, {"finish": "tool_calls", "tool_calls": True, "testo": ""})
-R._accoda_firma("chat", "[utente] ciao", 1.0, {"finish": "stop", "tool_calls": True, "testo": "x"})
-R._accoda_firma("chat", "[utente] ciao", 1.0, {"finish": "length", "tool_calls": False, "testo": "x"})
-R._accoda_firma("chat", "[IMPORTANT: usa la skill]", 1.0, fin())
-R._accoda_firma("chat", "[CONTEXT COMPACTION] riassunto", 1.0, fin())
-R._accoda_firma("chat", "Review the conversation above", 1.0, fin())
-R._accoda_firma("chat", [{"type": "text", "text": "[utente] x"}], 1.0, fin())
-R._accoda_firma("chat", "[utente]   ", 1.0, fin())
-R._accoda_firma("altro", "[utente] ciao", 1.0, fin())
-R._accoda_firma("chat", "[utente] ciao", 1.0, None)
+FI._accoda_firma("chat", "[utente] ciao", 1.0, {"finish": "tool_calls", "tool_calls": True, "testo": ""})
+FI._accoda_firma("chat", "[utente] ciao", 1.0, {"finish": "stop", "tool_calls": True, "testo": "x"})
+FI._accoda_firma("chat", "[utente] ciao", 1.0, {"finish": "length", "tool_calls": False, "testo": "x"})
+FI._accoda_firma("chat", "[IMPORTANT: usa la skill]", 1.0, fin())
+FI._accoda_firma("chat", "[CONTEXT COMPACTION] riassunto", 1.0, fin())
+FI._accoda_firma("chat", "Review the conversation above", 1.0, fin())
+FI._accoda_firma("chat", [{"type": "text", "text": "[utente] x"}], 1.0, fin())
+FI._accoda_firma("chat", "[utente]   ", 1.0, fin())
+FI._accoda_firma("altro", "[utente] ciao", 1.0, fin())
+FI._accoda_firma("chat", "[utente] ciao", 1.0, None)
 assert righe() == []
-R._accoda_firma("pensatoio", "[IMPORTANT: pensa]", 1.0, fin("Un pensiero mio."))
+FI._accoda_firma("pensatoio", "[IMPORTANT: pensa]", 1.0, fin("Un pensiero mio."))
 assert [x["testo"] for x in righe()] == ["Un pensiero mio."]
-R._accoda_firma("chat", "[utente] dimmi", 1.0, fin("[OUT-OF-BAND] The user is asking"))
+FI._accoda_firma("chat", "[utente] dimmi", 1.0, fin("[OUT-OF-BAND] The user is asking"))
 assert [x["autore"] for x in righe()] == ["@utente:localhost"]
-R._accoda_firma("chat", "[utente] dimmi", 1.0, fin("   "))
+FI._accoda_firma("chat", "[utente] dimmi", 1.0, fin("   "))
 assert [x["autore"] for x in righe()] == ["@utente:localhost"]
 lungo = "parola " * 5000
-R._accoda_firma("chat", "[utente] lungo", 1.0, fin(lungo))
+FI._accoda_firma("chat", "[utente] lungo", 1.0, fin(lungo))
 assert righe()[1]["testo"] == lungo.strip()
 src = open("/data/memoria-episodica-affettiva/riflesso.py").read()
 i = src.index("_accoda_firma(flusso, ultimo, arrivo, self._esito)")
 assert "try:" in src[i - 40:i] and "except Exception" in src[i:i + 120]   # un errore non tocca la risposta
-j, k = src.index("ultimo = next("), src.index("ora = _ora_arrivo(d.get(\"messages\"")
+j, k = src.index("ultimo = next("), src.index("ora = MD._ora_arrivo(d.get(\"messages\"")
 assert j < k   # il messaggio dell'utente si prende prima dell'ora e dei metadati
 print("riflesso ok")
 """

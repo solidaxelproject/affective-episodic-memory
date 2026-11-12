@@ -124,43 +124,44 @@ print("consegna con traccia OK: scelto", [x[0] for x in c], "senza emozione", tr
 # ---------- 5. riflesso: letture con la lente finta ----------
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import riflesso as R  # noqa: E402
+import riflesso_via_emotiva as RVE  # noqa: E402
 
-R.VE = VE
+RVE.VE = VE
 lette = []
 VE.ponte._post = lambda path, payload, timeout=0: lette.append(payload["content"]) or {"mean": G[5].tolist(), "n_tokens": 3}
 json.dump({"ts": time.time(), "stato": {e: 0.0 for e in assi + altre}}, open(VE.omeostato.FILE, "w"))
 open(VE.DIARIO, "w").close()
 msgs = [{"role": "user", "content": "[utente] ciao"}, {"role": "assistant", "content": "ciao l'utente"},
         {"role": "user", "content": "[11/11/2026|20:00] [utente] come stai?"}]
-e1, v1 = R._via_emotiva(msgs, 2, "chat")
-e2, v2 = R._via_emotiva(msgs, 2, "chat")   # Hermes rimanda la stessa richiesta: non si rilegge
+e1, v1 = RVE._via_emotiva(msgs, 2, "chat")
+e2, v2 = RVE._via_emotiva(msgs, 2, "chat")   # Hermes rimanda la stessa richiesta: non si rilegge
 assert lette == ["come stai?"] and e2 is None, lette   # senza handle e senza ora, come la firma
 assert e1["assi"] == assi and len(e1["q"]) == 44 and 0.1 <= e1["k"] <= 0.4 and v1["chi"] == "utente"
-assert R._via_emotiva([{"role": "user", "content": "Review the conversation above"}], 0, "chat") == (None, None)
-assert R._via_emotiva(msgs + [{"role": "user", "content": [{"type": "image_url"}]}], 2, "chat") == (None, None)
+assert RVE._via_emotiva([{"role": "user", "content": "Review the conversation above"}], 0, "chat") == (None, None)
+assert RVE._via_emotiva(msgs + [{"role": "user", "content": [{"type": "image_url"}]}], 2, "chat") == (None, None)
 prompt = "[IMPORTANT: blocco-appunti ...]\nLa riga è:\n[curiosita'] [stelle]{perche' brillano?}\naltro testo fisso"
-_, vp = R._via_emotiva([{"role": "user", "content": prompt}], 0, "pensatoio")
+_, vp = RVE._via_emotiva([{"role": "user", "content": prompt}], 0, "pensatoio")
 assert lette[-1] == "stelle perche' brillano?" and vp["chi"] == "pensatoio", lette[-1]
-assert R._via_emotiva([{"role": "user", "content": "[IMPORTANT: blocco-appunti] niente riga"}], 0, "pensatoio") == (None, None)
+assert RVE._via_emotiva([{"role": "user", "content": "[IMPORTANT: blocco-appunti] niente riga"}], 0, "pensatoio") == (None, None)
 msgs2 = msgs + [{"role": "assistant", "content": None, "tool_calls": [{}]}, {"role": "tool", "content": "pagina letta"}]
-_, v3 = R._via_emotiva(msgs2, 4, "chat")
+_, v3 = RVE._via_emotiva(msgs2, 4, "chat")
 assert v3["chi"] == "strumento" and lette[-1] == "pagina letta"
 # la risposta finale dell'agente: letta a fine risposta, il messaggio dopo aspetta
-R._leggi_risposta("chat", "[utente] come stai?", {"finish": "stop", "tool_calls": False, "testo": "sto bene"})
-R._leggi_risposta("chat", "[utente] e poi?", {"finish": "tool_calls", "tool_calls": True, "testo": "x"})
-R._leggi_risposta("altro", None, {"finish": "stop", "tool_calls": False, "testo": "cron"})
-R._leggi_risposta("chat", "Review the conversation above", {"finish": "stop", "tool_calls": False, "testo": "a Hermes"})
-with R._lettura_lock:
+RVE._leggi_risposta("chat", "[utente] come stai?", {"finish": "stop", "tool_calls": False, "testo": "sto bene"})
+RVE._leggi_risposta("chat", "[utente] e poi?", {"finish": "tool_calls", "tool_calls": True, "testo": "x"})
+RVE._leggi_risposta("altro", None, {"finish": "stop", "tool_calls": False, "testo": "cron"})
+RVE._leggi_risposta("chat", "Review the conversation above", {"finish": "stop", "tool_calls": False, "testo": "a Hermes"})
+with RVE._lettura_lock:
     pass
 assert lette[-1] == "sto bene", lette
 VE.ponte._post = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("/lux-read: HTTP 503"))
 msgs3 = msgs + [{"role": "assistant", "content": "ok"}, {"role": "user", "content": "[utente] altro"}]
-assert R._via_emotiva(msgs3, 4, "chat") == (None, None)
+assert RVE._via_emotiva(msgs3, 4, "chat") == (None, None)
 VE.ponte._post = lambda path, payload, timeout=0: lette.append(payload["content"]) or {"mean": G[5].tolist(), "n_tokens": 3}
-e4, _ = R._via_emotiva(msgs3, 4, "chat")   # la lente era rotta: al rinvio di Hermes si rilegge
+e4, _ = RVE._via_emotiva(msgs3, 4, "chat")   # la lente era rotta: al rinvio di Hermes si rilegge
 assert e4 is not None and lette[-1] == "altro"
 VE.ponte._post = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("/lux-read: HTTP 503"))
-R._via_emotiva(msgs3 + [{"role": "user", "content": "[utente] ultimo"}], 6, "chat")
+RVE._via_emotiva(msgs3 + [{"role": "user", "content": "[utente] ultimo"}], 6, "chat")
 diario = [json.loads(x) for x in open(VE.DIARIO)]
 assert "errore" in diario[-1] and [x["chi"] for x in diario if x.get("chi") == "agente"] == ["agente"], diario[-2:]
 print("riflesso OK: testo come la firma, niente doppioni, riga dell'appunto, l'agente a fine risposta, lente rotta = senza emozione")

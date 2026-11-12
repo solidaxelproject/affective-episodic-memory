@@ -11,13 +11,18 @@ import urllib.error
 import urllib.request
 
 import riflesso as R
+import riflesso_memoria as M
+import riflesso_metadati as MD
+import riflesso_fonte as FO
+import riflesso_firma as FI
+import riflesso_comune as C
 
 TMP = R.Path(tempfile.mkdtemp())
 diario = []
-R._diario = diario.append
-R.CODA_FIRMA = str(TMP / "coda-firma.jsonl")
-R.CONSENSO = TMP / "consenso.md"
-R.CONSENSO.write_text("[attivo: *sì*]\n", encoding="utf-8")
+C._diario = diario.append
+FI.CODA_FIRMA = str(TMP / "coda-firma.jsonl")
+C.CONSENSO = TMP / "consenso.md"
+C.CONSENSO.write_text("[attivo: *sì*]\n", encoding="utf-8")
 T0 = time.mktime((2026, 11, 9, 15, 0, 0, 0, 0, -1))   # lunedi' 9/11/2026, 15:00 ora locale
 
 
@@ -47,11 +52,11 @@ casi = {
     "appoggi e maggiore": ("appoggi e maggiore", None, None),
 }
 for q, atteso in casi.items():
-    r = R._data(q, T0)
+    r = M._data(q, T0)
     assert r == atteso, (q, r, atteso)
 
 # ---------- 2. codici e chiamate di memorinvolontaria nei messaggi ----------
-finto = R._turni_tool({"codici": ["aaaaaaaaaaaaaaaa"], "risposta": "1°\naaaaaaaaaaaaaaaa\nun ricordo"})
+finto = M._turni_tool({"codici": ["aaaaaaaaaaaaaaaa"], "risposta": "1°\naaaaaaaaaaaaaaaa\nun ricordo"})
 msgs = [{"role": "user", "content": "[utente] ciao"}] + finto + [
     {"role": "assistant", "content": "", "tool_calls": [{"id": "call_7", "type": "function",
                                                         "function": {"name": "memorinvolontaria", "arguments": "{\"qlux\": \"mare\"}"}}]},
@@ -59,13 +64,13 @@ msgs = [{"role": "user", "content": "[utente] ciao"}] + finto + [
     {"role": "assistant", "content": "", "tool_calls": [{"id": "call_8", "type": "function",
                                                         "function": {"name": "read_file", "arguments": "{}"}}]},
     {"role": "tool", "tool_call_id": "call_8", "content": "un file letto dall'agente, " * 30}]
-assert R._codici_nei_messaggi(msgs) == {"aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"}
-i, fonte = R._fonte_indice(msgs)
+assert FO._codici_nei_messaggi(msgs) == {"aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"}
+i, fonte = FO._fonte_indice(msgs)
 assert i == len(msgs) - 1, "la lettura vera e' la fonte"
-i, fonte = R._fonte_indice(msgs[:-2])
+i, fonte = FO._fonte_indice(msgs[:-2])
 assert i == 0, "il risultato di qlux non e' fonte della memoria involontaria"
 d = {"messages": msgs[:-2]}
-assert R._code(json.dumps(d).encode(), ["coda"])[1] is False, "niente coda attaccata al risultato di qlux"
+assert MD._code(json.dumps(d).encode(), ["coda"])[1] is False, "niente coda attaccata al risultato di qlux"
 
 # ---------- 3. la route, con un Lux finto ----------
 chiamate = []
@@ -92,7 +97,7 @@ class LuxFinto(http.server.BaseHTTPRequestHandler):
 
 lux = http.server.ThreadingHTTPServer(("127.0.0.1", 0), LuxFinto)
 threading.Thread(target=lux.serve_forever, daemon=True).start()
-R.LUX = f"http://127.0.0.1:{lux.server_port}/consegna"
+M.LUX = f"http://127.0.0.1:{lux.server_port}/consegna"
 rif = http.server.ThreadingHTTPServer(("127.0.0.1", 0), R.Proxy)
 threading.Thread(target=rif.serve_forever, daemon=True).start()
 URL = f"http://127.0.0.1:{rif.server_port}/memorinvolontaria"
@@ -103,29 +108,29 @@ def chiedi(args):
     return json.load(urllib.request.urlopen(req, timeout=10))["testo"]
 
 
-R._esclusi_chat[0] = {"aaaaaaaaaaaaaaaa"}
+M._esclusi_chat[0] = {"aaaaaaaaaaaaaaaa"}
 assert chiedi({"qlux": "il mare il 9/11"}) == "1°\ncccccccccccccccc\ntrovato"
 q = chiamate[-1]
 assert q["quanti"] == 1 and q["soglia"] == 0 and q["testo"] == "il mare" and q["esclusi"] == ["aaaaaaaaaaaaaaaa"]
-assert q["da"] == R._data("9/11", time.time())[1]
+assert q["da"] == M._data("9/11", time.time())[1]
 chiedi({"qlux": "il mare"})
 assert set(chiamate[-1]["esclusi"]) == {"aaaaaaaaaaaaaaaa", "cccccccccccccccc"}, "la seconda volta escluso il primo"
 assert "da" not in chiamate[-1]
-assert chiedi({"qlux": "niente"}) == R.R_NESSUNO
-assert chiedi({"qlux": "rompi"}) == R.R_GIU
-assert chiedi({}) == R.R_SENZA
-assert chiedi({"+lux": "   "}) == R.R_VUOTO
-assert not os.path.exists(R.CODA_FIRMA)
-assert chiedi({"+lux": "  il giorno del mare  "}) == R.R_AGGIUNTO
-riga, = [json.loads(r) for r in open(R.CODA_FIRMA, encoding="utf-8")]
+assert chiedi({"qlux": "niente"}) == M.R_NESSUNO
+assert chiedi({"qlux": "rompi"}) == M.R_GIU
+assert chiedi({}) == M.R_SENZA
+assert chiedi({"+lux": "   "}) == M.R_VUOTO
+assert not os.path.exists(FI.CODA_FIRMA)
+assert chiedi({"+lux": "  il giorno del mare  "}) == M.R_AGGIUNTO
+riga, = [json.loads(r) for r in open(FI.CODA_FIRMA, encoding="utf-8")]
 assert riga["testo"] == "il giorno del mare" and riga["forzato"] is True and riga["autore"] == "@agente:localhost"
-assert chiedi({"+lux": "secondo", "qlux": "il mare"}) == R.R_AGGIUNTO + "\n\n1°\ncccccccccccccccc\ntrovato"
+assert chiedi({"+lux": "secondo", "qlux": "il mare"}) == M.R_AGGIUNTO + "\n\n1°\ncccccccccccccccc\ntrovato"
 # consenso spento: niente entra, niente si scrive
-R.CONSENSO.write_text("[attivo: *no*]\n", encoding="utf-8")
-n = len(open(R.CODA_FIRMA).readlines())
-assert chiedi({"+lux": "terzo"}) == R.R_GIU and chiedi({"qlux": "il mare"}) == R.R_GIU
-assert len(open(R.CODA_FIRMA).readlines()) == n
-R.CONSENSO.write_text("[attivo: *sì*]\n", encoding="utf-8")
+C.CONSENSO.write_text("[attivo: *no*]\n", encoding="utf-8")
+n = len(open(FI.CODA_FIRMA).readlines())
+assert chiedi({"+lux": "terzo"}) == M.R_GIU and chiedi({"qlux": "il mare"}) == M.R_GIU
+assert len(open(FI.CODA_FIRMA).readlines()) == n
+C.CONSENSO.write_text("[attivo: *sì*]\n", encoding="utf-8")
 # il plugin di Hermes contro questo riflesso: stessi testi, argomenti estranei tolti
 import importlib.util  # noqa: E402
 os.environ["MEMORINVOLONTARIA_URL"] = URL
@@ -133,24 +138,24 @@ spec = importlib.util.spec_from_file_location("plugin_mi", os.path.join(os.path.
 P = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(P)
 assert P.memorinvolontaria({"qlux": "il mare", "altro": 1}) == "1°\ncccccccccccccccc\ntrovato"
-assert P.memorinvolontaria({}) == R.R_SENZA and P.R_GIU == R.R_GIU
+assert P.memorinvolontaria({}) == M.R_SENZA and P.R_GIU == M.R_GIU
 assert P.SCHEMA["parameters"]["required"] == [] and set(P.SCHEMA["parameters"]["properties"]) == {"+lux", "qlux"}
 # Lux spento
 lux.shutdown()
 lux.server_close()
-assert chiedi({"qlux": "il mare"}) == R.R_GIU
+assert chiedi({"qlux": "il mare"}) == M.R_GIU
 # solo dal PC e dalla rete docker
 P.URL = "http://127.0.0.1:1/memorinvolontaria"
-assert P.memorinvolontaria({"qlux": "x"}) == R.R_GIU   # riflesso giu'
-assert R._ammesso("127.0.0.1") and R._ammesso("172.18.0.2") and not R._ammesso("192.168.1.20") and not R._ammesso("100.64.0.2")
+assert P.memorinvolontaria({"qlux": "x"}) == M.R_GIU   # riflesso giu'
+assert M._ammesso("127.0.0.1") and M._ammesso("172.18.0.2") and not M._ammesso("192.168.1.20") and not M._ammesso("100.64.0.2")
 
 # ---------- 4. stress: 200 +lux da 8 fili, righe intere e nessuna persa ----------
-os.remove(R.CODA_FIRMA)
+os.remove(FI.CODA_FIRMA)
 fili = [threading.Thread(target=lambda k=k: [chiedi({"+lux": f"ricordo {k}-{j} " + "x" * 300}) for j in range(25)])
         for k in range(8)]
 [f.start() for f in fili]
 [f.join() for f in fili]
-righe = [json.loads(r) for r in open(R.CODA_FIRMA, encoding="utf-8")]
+righe = [json.loads(r) for r in open(FI.CODA_FIRMA, encoding="utf-8")]
 assert len(righe) == 200 and len({r["testo"] for r in righe}) == 200
 rif.shutdown()
 print("TUTTO VERDE")

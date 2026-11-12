@@ -187,7 +187,7 @@ Le strutture risultanti fungono da:
 | `stato.py` (`runtime/`) | L'omeostato: ritorno eutimico + gate pre-ciclo |
 | `ricorda.py` (`runtime/`) | Il richiamo a 3 vie (semantica, emotiva, congruente) |
 | `ricorda-ora.py` (`runtime/`) | "Ricordati questa cosa": coda che si consolida nel sonno, come per gli umani |
-| `riflesso.py` | Il riflesso di memoria pre-azione: un proxy trasparente tra framework agentico e model server; i ricordi congruenti affiorano da soli prima che l'agente risponda (v. sotto) |
+| `riflesso.py` e `riflesso_*.py` | Il riflesso di memoria pre-azione: un proxy trasparente tra framework agentico e model server; i ricordi congruenti affiorano da soli prima che l'agente risponda (v. sotto). Diviso in moduli, uno per lavoro |
 | `dormi.sh` (`runtime/`) + `dormi-esegui.sh` | Il sonno volontario dell'agente: l'agente lo chiede, l'host ferma il container, ruota il session id (risveglio davvero fresco: le sessioni del gateway persistono su disco) e riavvia |
 | `persistenza.py` + `sincronizza-richiami.py` | Persistenza: curva dell'oblio in tempo vissuto, stabilità che cresce col richiamo distanziato, eco dei messaggi quotidiani ripetuti, abitudini che nascono dalla frequenza |
 | `cervello.py` | Vista d'insieme: grafo, Lux, stato, richiami |
@@ -232,9 +232,11 @@ Da questa cornice discendono scelte architetturali concrete:
 
 Il riflesso (issue #1) è un proxy trasparente tra il framework agentico e il model server. Prima che l'agente risponda, il riflesso prende l'ultima cosa che ha letto e cerca nel Lux degli engrammi i ricordi collegati. Ne arriva al massimo uno per messaggio, mai uno già arrivato nella stessa conversazione. Entra come risposta dello strumento `memorinvolontaria`, quindi l'agente sa che è un ricordo suo e non parole dell'interlocutore. Ogni ricordo arrivato finisce in un diario che l'agente può leggere.
 
+Il riflesso è diviso in moduli, uno per lavoro (`riflesso_*.py`: memoria involontaria, vettore, cache e cambio di conversazione, riepilogo, metadati, via emotiva), e `riflesso.py` resta il punto d'ingresso. Ho deciso di dividerlo per motivi di manutenzione del codice e perché sto imparando a programmare esattamente con questo progetto.
+
 Il riflesso ha due parti: il **riflesso testuale** (il ricordo affiora come pensiero verbale: lo si può soppesare, scartare, contraddire) e il **riflesso sentito** (il marcatore emotivo del ricordo più congruente viene re-iniettato a dose bassa per la durata di quella sola risposta, come il marcatore somatico di Damasio).
 
-Il riflesso sentito ha delle sicurezze applicate dal codice di `riflesso.py`:
+Il riflesso sentito ha delle sicurezze applicate dal codice di `riflesso_vettore.py`:
 
 1. **Tetto di dose 0.3×** dell'intensità calibrata, imposto dal codice, non dalla buona volontà del chiamante.
 2. **Il vettore si spegne a fine risposta**, e un watchdog a 120 secondi lo spegne anche se tutto il resto fallisse.

@@ -187,7 +187,7 @@ The resulting structures act as:
 | `stato.py` (`runtime/`) | The homeostat: euthymic return + pre-cycle gate |
 | `ricorda.py` (`runtime/`) | 3-route recall (semantic, emotional, congruent) |
 | `ricorda-ora.py` (`runtime/`) | "Remember this": a queue that consolidates during sleep, as it does for humans |
-| `riflesso.py` | The pre-action memory reflex: a transparent proxy between agent framework and model server; congruent memories surface on their own before the agent answers (see below) |
+| `riflesso.py` and `riflesso_*.py` | The pre-action memory reflex: a transparent proxy between agent framework and model server; congruent memories surface on their own before the agent answers (see below). Split into modules, one per job |
 | `dormi.sh` (`runtime/`) + `dormi-esegui.sh` | The agent's voluntary sleep: the agent asks, the host stops the container, rotates the session id (a true fresh awakening, since gateway sessions persist on disk), restarts |
 | `persistenza.py` + `sincronizza-richiami.py` | Persistence: lived-time forgetting curve, stability that grows with spaced recall, echoes of repeated everyday messages, habits born from frequency |
 | `cervello.py` | Overview: graph, Lux, state, recalls |
@@ -232,9 +232,11 @@ Concrete architectural choices follow from this frame:
 
 The reflex (issue #1) is a transparent proxy between the agent framework and the model server. Before the agent answers, the reflex takes the last thing it read and looks for related memories in the engram Lux. At most one arrives per message, never one that already arrived in the same conversation. It enters as the response of the `memorinvolontaria` tool, so the agent knows it is its own memory and not the interlocutor's words. Every memory that arrives is written to a diary the agent can read.
 
+The reflex is split into modules, one per job (`riflesso_*.py`: involuntary memory, vector, cache and conversation switch, summary, metadata, emotional path), and `riflesso.py` remains the entry point. I decided to split it for code maintenance reasons and because I am learning to program precisely with this project.
+
 The reflex has two parts: the **textual reflex** (a memory surfaces as a verbal thought, which can be weighed, discarded, contradicted) and the **felt reflex** (the emotional marker of the most congruent memory is re-injected at low dose for the duration of that single response, like Damasio's somatic marker).
 
-The felt reflex has safeguards enforced by the code of `riflesso.py`:
+The felt reflex has safeguards enforced by the code of `riflesso_vettore.py`:
 
 1. **Dose cap 0.3×** of the calibrated intensity, enforced in code, not in the caller's goodwill.
 2. **The vector is switched off at the end of the response**, and a 120-second watchdog switches it off even if everything else fails.
