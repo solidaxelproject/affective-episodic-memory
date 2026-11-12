@@ -36,6 +36,9 @@ else
   touch /data/workspace/memoria/.dormi-richiesto
 fi
 # la lista dei ricordi consegnati (18/10) la svuota dormi-esegui.sh a sessione ruotata (10/11, vale per ogni switch)
+# step d (l'utente 12/11, PIANO-MEMORY-A-B.md): B = MEMORY.md e USER.md dell'agente, base della CW del riepilogo rifatta.
+# Qui e non dopo: l'agente scrive nel memory anche dal pensatoio, nei giorni senza chat. L'esito va nel diario del riflesso; un errore non ferma la notturna
+echo "$(date -Iseconds) memoria B: $(curl -sf -m 10 -X POST http://127.0.0.1:8091/memoria-b || echo 'chiamata fallita')"
 
 # REGOLA DI PROGETTO (19/07 sera): il marker avanza SOLO a lavoro riuscito: se
 # una notte salta o fallisce, la successiva riparte da dov'era il marker e
@@ -104,4 +107,8 @@ if [ -n "$LD" ] && [ -d "$LD" ]; then
   R=$(curl -sf -m 600 -X POST http://127.0.0.1:8132/riconsolida -H 'Content-Type: application/json' -d '{}') \
     && echo "$(date -Iseconds) riconsolida: $R" \
     || echo "$(date -Iseconds) riconsolida NON fatto (non critico, ritenta domani)"
+  # 1.21.0 (PIANO-FASE2-C-ARCHI-E-CODA.md): le firme dei ricordi legati si avvicinano, la dominante si ricalcola
+  R=$(curl -sf -m 600 -X POST http://127.0.0.1:8132/avvicina -H 'Content-Type: application/json' -d '{}') \
+    && echo "$(date -Iseconds) avvicina: $R" \
+    || echo "$(date -Iseconds) avvicina NON fatto (non critico, ritenta domani)"
 fi

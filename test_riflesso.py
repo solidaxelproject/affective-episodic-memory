@@ -76,7 +76,7 @@ assert C._stop_chiesto([m("assistant", "vectreflexstop"), m("system", "ora"), m(
 import json, tempfile  # noqa: E401,E402
 M.CONSEGNE = R.Path(tempfile.mkdtemp()) / "consegne.json"
 C.consenso_attivo = C.vettori_attivi = lambda: True
-M._lux_consegna = lambda testo, esclusi, emozione=None: {"codici": ["abc"], "risposta": "1°\nabc\nil mare",
+M._lux_consegna = lambda testo, esclusi, emozione=None, coda=None: {"codici": ["abc"], "risposta": "1°\nabc\nil mare",
                                                         "ricordi": [{"codice": "abc", "nid": 1, "dominante": "fear",
                                                                      "classe": "vissuto"}]}
 emo_vero = VT._emo_del_ricordo
@@ -89,14 +89,14 @@ assert not M._sam_accesa(("127.0.0.1", 9)), "porta chiusa vista come l'agente ac
 M._sam_accesa = lambda *a: False
 chiesti = []
 lux = M._lux_consegna
-M._lux_consegna = lambda testo, esclusi, emozione=None: chiesti.append(testo) or lux(testo, esclusi)
+M._lux_consegna = lambda testo, esclusi, emozione=None, coda=None: chiesti.append(testo) or lux(testo, esclusi)
 spenta = corpo([m("user", "[IMPORTANT: You are running as a scheduled cron job.] backup")])
 assert R.Proxy._memoria(None, spenta) == spenta and not chiesti and not M.CONSEGNE.exists(), "ricordo all'agente spenta"
 M._sam_accesa = lambda *a: True
 M._lux_consegna = lux
 # 11/11: i cron di Hermes (flusso "altro") non ricevono ricordi: niente richiamo, niente consegna, niente vettore
 chiesti.clear()
-M._lux_consegna = lambda testo, esclusi, emozione=None: chiesti.append(testo) or lux(testo, esclusi)
+M._lux_consegna = lambda testo, esclusi, emozione=None, coda=None: chiesti.append(testo) or lux(testo, esclusi)
 cron = corpo([m("user", "[IMPORTANT: You are running as a scheduled cron job.] guarda il mare")])
 fuori_c = {}
 assert R.Proxy._memoria(None, cron, "altro", None, fuori_c) == cron and not chiesti and not fuori_c, "ricordo a un cron"
@@ -147,6 +147,61 @@ VT._emo_del_ricordo = lambda c: (2, "submission", 0.5)
 colorati.clear()
 memoria([m("user", "un altro mare")])
 assert colorati and colorati[0][:2] == VT._dose("submission", 1.13, 0.5)[:2], "la meta' dose non arriva al vettore"
+
+# fase 2 step b (l'utente 09/11 + 11/11): piu' ricordi della stessa dominante, un vettore solo, quello a f massima
+tre = [{"codice": "b2", "nid": 12, "dominante": "fear", "classe": "letto"},   # il vincitore (a1) non e' il primo
+       {"codice": "a1", "nid": 11, "dominante": "fear", "classe": "vissuto"},
+       {"codice": "c3", "nid": 13, "dominante": "fear", "classe": "vissuto"},
+       {"codice": "d4", "nid": 14, "dominante": "fear", "classe": "vissuto"}]
+lux_prima = M._lux_consegna
+M._lux_consegna = lambda testo, esclusi, emozione=None, coda=None: {"codici": [x["codice"] for x in tre],
+                                                        "risposta": "1°\na1\nil faro", "ricordi": tre}
+VT._emo_del_ricordo, finto = emo_vero, VT._emo_del_ricordo
+forze = {"a1": 1.13, "b2": 9.0, "c3": None, "d4": 0.2}   # letto a meta' fascia, forza ignota, sotto soglia
+VT._forza = lambda codice, emo: forze[codice]
+colorati.clear()
+n0 = len(diario)
+memoria([m("user", "il faro di notte")])
+assert len(colorati) == 1 and colorati[0][:2] == VT._dose("fear", 1.13)[:2], ("non e' il vettore a f massima", colorati)
+assert any(v.get(R.FO.TOOL_RICORDO) == ["b2", "a1", "c3", "d4"] and v.get("nid") == [12, 11, 13, 14]
+           for v in diario[n0:] if isinstance(v, dict)), "codici e nid della consegna non a diario"
+VT._emo_del_ricordo, VT._forza = finto, (lambda codice, emo: 1.13)
+M._lux_consegna = lux_prima
+
+# 1.21.0 (l'utente 11/11 punti 3-4): la coda dei ricordi richiamati sta nella voce della conversazione, va al Lux a ogni
+# lettura nuova, chi c'era tiene l'ora del suo recupero, dopo 30 minuti esce
+mandate = []
+
+
+def lux_con_coda(testo, esclusi, emozione=None, coda=None):
+    mandate.append(coda)
+    k = f"q{len(mandate)}"
+    return {"codici": [k], "risposta": f"1°\n{k}\nil porto", "coda": None if coda is None else ["q2", "q3"] if coda == [] else coda[1:] + ["q9"],
+            "ricordi": [{"codice": k, "nid": 20 + len(mandate), "dominante": "fear", "classe": "vissuto"}]}
+
+
+M._lux_consegna = lux_con_coda
+orologio_m = [5000.0]
+tempo_vero, M.time.time = M.time.time, lambda: orologio_m[0]
+porto = [m("user", "il porto di sera")]
+memoria(porto)
+assert mandate == [[]], mandate
+assert M._voce_conv(porto)["coda"] == [["q2", 5000.0], ["q3", 5000.0]], M._voce_conv(porto)
+orologio_m[0] += 600
+porto += [m("assistant", "si'"), m("user", "e il faro lontano?")]
+memoria(porto)
+assert mandate[-1] == ["q2", "q3"], mandate
+assert M._voce_conv(porto)["coda"] == [["q3", 5000.0], ["q9", 5600.0]], "l'ora del recupero non e' rimasta"
+orologio_m[0] = 5000.0 + M.CODA_DURATA + 1          # q3 scaduta, q9 no
+porto += [m("assistant", "si'"), m("user", "e le barche ferme?")]
+memoria(porto)
+assert mandate[-1] == ["q9"], ("la coda non e' scaduta dopo 30 minuti", mandate)
+C.consenso_attivo = lambda: False                   # consenso spento: niente coda (step b)
+porto += [m("assistant", "si'"), m("user", "e il molo?")]
+memoria(porto)
+assert mandate[-1] is None, mandate
+C.consenso_attivo = lambda: True
+M.time.time, M._lux_consegna = tempo_vero, lux_prima
 
 # punto A (design dell'utente 18/10): il vettore appartiene alla KV cache del suo flusso
 import socket  # noqa: E402

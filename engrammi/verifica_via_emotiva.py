@@ -92,6 +92,8 @@ def main():
                 casi.append((r, cand))
         uguali, per_k, per_a = 0, {}, {}
         for r, cand in casi:
+            if r.get("da_coda"):   # 1.21.0: la testa arriva dalla coda di un messaggio prima, non da questa scelta
+                continue
             acc = [c[2] for c in cand]
             vero = (r.get("scelto") or [None])[0]
             x = scegli(cand, acc, r["k"], soglia)

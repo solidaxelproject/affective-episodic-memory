@@ -25,7 +25,7 @@ g, u = int(st["giorni"]), float(st["ultimo_avanzamento"])
 assert X.giorno_di(u + 1) == g and X.giorno_di(u - 1) == max(0, g - 1) and X.giorno_di(0) == max(0, g - 1)
 assert X.giorno_di(0, indietro=True) == 0 and X.giorno_di(u - 86400 * 1.5, indietro=True) == max(0, g - 2)
 
-X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.18.0"   # 1.19.0: copia identica, coi contatori veri
+X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"   # 1.21.0 (prima 1.18.0): copia identica, coi contatori veri
 X.GIORNATA = f"{T}/giornata.jsonl"
 t0 = time.time()
 X.da_precedente()

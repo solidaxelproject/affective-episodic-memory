@@ -45,7 +45,7 @@ cj = [(c[int(A[j, 2])] + c[int(A[j, 3])]) / 2 for j in js]
 assert int(np.argmax(cj)) == int(np.argmax(W[js])) and int(np.argmin(cj)) == int(np.argmin(W[js]))
 
 # un ricordo nuovo: carica = firma x fattore x peso, pesi a media 1, W allungata
-X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.18.0"   # 1.19.0: da_precedente = copia identica
+X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"   # 1.21.0 (prima 1.18.0): da_precedente = copia identica
 X.da_precedente()
 firma = {"joy": 2.5, "serenity": 2.0, "fear": -1.0}
 n_a = len(np.load(X.NPZ)["A"])

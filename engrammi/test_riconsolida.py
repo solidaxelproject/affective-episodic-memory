@@ -13,7 +13,7 @@ import numpy as np  # noqa: E402
 
 import lux_engrammi as X  # noqa: E402
 
-X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.18.0"   # 1.19.0: da_precedente = copia identica; la migrazione 1.17.0 e la prova test_contatori_117.py
+X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"   # 1.21.0 (prima 1.18.0): da_precedente = copia identica; la migrazione 1.17.0 e la prova test_contatori_117.py
 X.DIARIO_RIFLESSO, X.GIORNATA = f"{T}/diario.jsonl", f"{T}/giornata.jsonl"
 X.da_precedente()
 z = np.load(X.NPZ)

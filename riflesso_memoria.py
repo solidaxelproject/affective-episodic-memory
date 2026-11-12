@@ -21,8 +21,8 @@ import riflesso_via_emotiva as RVE
 _ultima_lettura = [""]  # 25/07: il freno vero, l'impronta del testo già affiorato
 
 # ---- MEMORIA INVOLONTARIA (l'utente 11/10, piano del refactoring Lux + richiamo):
-# il Lux degli engrammi sceglie un ricordo per messaggio (quanti=1, l'utente 09/11; erano fino a 4
-# dalla 1.10.0), sopra soglia, mai uno già consegnato nella conversazione; i ricordi
+# il Lux degli engrammi sceglie fino a 4 ricordi per messaggio, tutti con la stessa dominante (fase 2 step b, l'utente
+# 09/11 + 11/11; dal 09/11 era uno solo), sopra soglia, mai uno già consegnato nella conversazione; i ricordi
 # entrano insieme in un turno del tool, che
 # è dichiarato sempre (a consenso attivo) così il prefisso della cache non cambia.
 LUX = "http://127.0.0.1:8132/consegna"
@@ -46,10 +46,20 @@ def _consegne_carica():
         return {}
 
 
-def _voci(msgs):
+def _voce_conv(msgs):
     tutte = _consegne_carica()
     conv, vecchia = MD._chiavi(msgs)
-    return (tutte.get(conv) or tutte.get(vecchia) or {}).get("voci", [])
+    return tutte.get(conv) or tutte.get(vecchia) or {}
+
+
+def _voci(msgs):
+    return _voce_conv(msgs).get("voci", [])
+
+
+# 1.21.0 (l'utente 11/11 punti 3-4, PIANO-FASE2-C-ARCHI-E-CODA.md): i ricordi selezionati con un'emozione diversa
+# aspettano in coda nella voce della conversazione ([codice, ora del recupero]); dopo 30 minuti escono e tornano
+# richiamabili
+CODA_DURATA = 1800
 
 
 def _consegne_salva(tutte, tieni=None):
@@ -116,11 +126,14 @@ def _sam_accesa(dove=S.UPSTREAM):
         up.close()
 
 
-def _lux_consegna(testo, esclusi, emozione=None):
-    """{codici, risposta} oppure {} = nessun ricordo (1.19.0: con l'emozione anche "traccia"). Mai bloccare la parola dell'agente."""
-    corpo = {"testo": testo, "esclusi": esclusi, "quanti": 1}   # 09/11: uno per volta
+def _lux_consegna(testo, esclusi, emozione=None, coda=None):
+    """{codici, risposta} oppure {} = nessun ricordo (1.19.0: con l'emozione anche "traccia"; 1.21.0: con la coda
+    anche "coda", la coda nuova). Mai bloccare la parola dell'agente."""
+    corpo = {"testo": testo, "esclusi": esclusi, "quanti": 4}   # fase 2 step b: fino a 4, stessa dominante (la regola e' nel Lux)
     if emozione:
         corpo["emozione"] = emozione
+    if coda is not None:
+        corpo["coda"] = coda
     try:
         req = urllib.request.Request(LUX, json.dumps(corpo).encode(), {"Content-Type": "application/json"})
         return json.load(urllib.request.urlopen(req, timeout=30))
@@ -230,8 +243,8 @@ def memorinvolontaria(args):
 
 
 def memoria(body, flusso=None, righe=None, fuori=None):
-    """Memoria involontaria: a ogni lettura nuova il Lux sceglie un ricordo
-    (quanti=1, l'utente 09/11) nella risposta del tool; i ricordi già consegnati nella conversazione tornano al loro posto.
+    """Memoria involontaria: a ogni lettura nuova il Lux sceglie fino a 4 ricordi
+    con la stessa dominante (fase 2 step b) nella risposta del tool; i ricordi già consegnati nella conversazione tornano al loro posto.
     A consenso spento il richiamo gira lo stesso e rinforza gli archi (WIRING
     NON DISATTIVABILE, decisione di progetto), ma niente entra nel prompt.
     10/11 (blocco A): con righe, il blocco metadati entra DOPO la query e l'impronta "dopo" ma PRIMA della
@@ -245,7 +258,10 @@ def memoria(body, flusso=None, righe=None, fuori=None):
     stop = C._stop_chiesto(msgs)   # prima di _rimetti: stessa finestra del controllo in do_POST
     conv, vecchia = MD._chiavi(msgs)
     with _consegne_lock:
-        voci = _voci(msgs)
+        voce_conv = _voce_conv(msgs)
+    voci = voce_conv.get("voci", [])
+    adesso = time.time()
+    coda = [x for x in voce_conv.get("coda", []) if adesso - x[1] < CODA_DURATA] if attivo else None
     # 25/07, progetto: la familiarità deve arrivare su ciò che l'agente LEGGE, non
     # solo su ciò che gli viene detto (pagine, file, output dei tool).
     i, fonte = FO._fonte_indice(msgs)
@@ -264,13 +280,17 @@ def memoria(body, flusso=None, righe=None, fuori=None):
             _esclusi_chat[0] = set(visti)
     if fonte:
         emozione, voce = RVE._via_emotiva(msgs, i, flusso)
-        r = _lux_consegna(FO.query_riflesso(fonte), sorted(visti), emozione)
+        r = _lux_consegna(FO.query_riflesso(fonte), sorted(visti), emozione,
+                          None if coda is None else [c for c, _ in coda])
+        if coda is not None and isinstance(r.get("coda"), list):   # chi c'era tiene l'ora del suo recupero
+            prima = dict(map(tuple, coda))
+            coda = [[c, prima.get(c, adesso)] for c in r["coda"]]
         if voce:
             try:
                 tr = r.get("traccia") or {}
                 voce.update(candidati=[[n, round(p, 5), round(a, 4)] for n, p, a in tr.get("candidati", [])],
                             scelto=tr.get("scelti", []), senza=tr.get("senza", []),
-                            oltre_soglia=tr.get("oltre_soglia", False))
+                            oltre_soglia=tr.get("oltre_soglia", False), da_coda=tr.get("da_coda", []))
                 VE.diario(voce)
             except Exception as e:
                 C._diario({"via emotiva": f"diario non scritto: {e}"})
@@ -284,7 +304,7 @@ def memoria(body, flusso=None, righe=None, fuori=None):
             with _consegne_lock:
                 tutte = _consegne_carica()
                 tutte.pop(vecchia, None)     # la voce di prima del 10/11 passa alla chiave senza ora
-                tutte[conv] = {"ts": time.time(), "voci": voci}
+                tutte[conv] = {"ts": time.time(), "voci": voci, "coda": coda or []}
                 _consegne_salva(tutte, tieni=conv if flusso == "chat" else None)
     if not attivo:
         return MD._con_metadati(body, righe, fuori, flusso)
@@ -302,7 +322,7 @@ def memoria(body, flusso=None, righe=None, fuori=None):
         # sulla produzione (incidente del 14/07)
         # clausola 3 (issue #3 punto E): con la parola di emergenza il ricordo arriva senza vettore
         # PIANO-STEERING-RIFLESSO 7c (11/11): il vettore lo accende _inoltra, nel ragionamento; con piu' codici
-        # (catena di correzioni) quello a dose piu' alta (09/11: il massimo, niente media)
+        # (catena di correzioni o ricordi della stessa dominante) quello a dose piu' alta (09/11: il massimo, niente media)
         if C.vettori_attivi() and not os.environ.get("RIFLESSO_COLLAUDO") and not stop:
             try:
                 dosi = [x for c, _, emo, fat in ricordi if emo for x in [VT._dose(emo, VT._forza(c, emo), fat)] if x]

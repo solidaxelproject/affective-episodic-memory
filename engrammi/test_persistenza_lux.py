@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stress-test di B5 (PIANO-FIRMA-ENGRAMMI.md): vecchio Lux in archivio, persistenza e sincronia sul Lux degli engrammi.
-Tutto su COPIE (Lux 1.19.0 migrato alla 1.20.0 con da_precedente, diario) e su un servizio del Lux di prova (porta 8133, LUX_DIR):
+Tutto su COPIE (Lux 1.20.0 copiato alla 1.21.0 con da_precedente, diario) e su un servizio del Lux di prova (porta 8133, LUX_DIR):
 la produzione si legge e basta.
   servizio:     /richiama = Lux.richiama in processo; /rinforza a peso 1 e 0.5 = crescita FSRS attesa; errori (ricordo
                 sconosciuto, peso fuori da (0, 1], NaN) = 400; ricordo corretto = non si rinforza

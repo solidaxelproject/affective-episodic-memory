@@ -89,6 +89,14 @@ def _tee_sse(buf, chunk, fh, esito):
     return buf
 
 
+def _memoria_b_notte():
+    try:
+        esito = RP.rifai_master()
+    except Exception as e:
+        esito = f"fallita: {e}"
+    C._diario({"riepilogo": f"memoria B: {esito}"})
+
+
 class Proxy(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -222,6 +230,18 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def _memoria_b(self):
+        if self.client_address[0] != "127.0.0.1":
+            self.send_error(403)
+            return
+        threading.Thread(target=_memoria_b_notte, daemon=True).start()   # puo' aspettare minuti lo slot libero
+        b = json.dumps({"esito": "avviata, l'esito va nel diario"}, ensure_ascii=False).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
     def _memoria(self, body, flusso=None, righe=None, fuori=None):
         return M.memoria(body, flusso, righe, fuori)
 
@@ -231,6 +251,9 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if self.path == "/memorinvolontaria":   # 09/11: il plugin di Hermes, mai inoltrato al 35B
             self._ricordo(body)
+            return
+        if self.path == "/memoria-b":   # step d (12/11): la notturna, solo dal PC (mai dal container dell'agente)
+            self._memoria_b()
             return
         arrivo, ultimo = time.time(), None   # B6: il messaggio dell'utente prima di ora e coda
         chat = self.path.split("?")[0].endswith("/chat/completions")   # issue #3 punto E
@@ -335,8 +358,8 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             if flusso == "chat":
                 try:
                     d = json.loads(body)
-                    self._hermes = RP._metti_fissa(d)    # R6: prima la parte fissa della cache, poi il blocco
-                    RP._metti_blocco(d, RP._riepilogo_carica()["blocco"])
+                    # R6 + step d: la base della cache (parte fissa + B), il blocco, le informazioni aggiornate
+                    self._hermes = RP._metti_fissa(d, RP._riepilogo_carica()["blocco"])
                     body = json.dumps(d).encode()
                 except Exception as e:
                     C._diario({"riepilogo": f"blocco non messo: {e}"})   # mai bloccare la parola dell'agente

@@ -218,6 +218,7 @@ def scrivi(dry):
         log.info("backup %s fatti", bak)
         for nid, (firma, dom, salienza) in nuove.items():
             ricordi[nid].update(firma=firma, dominante=dom, salienza=salienza)
+            ricordi[nid].pop("dominante_nascita", None)   # 1.21.0: firma nuova = nascita nuova (D5 riparte da qui)
         json.dump(m, open(META + ".tmp", "w"), ensure_ascii=False)
         os.replace(META + ".tmp", META)   # mai un meta a meta'
         torch.save(stats, STATS + ".tmp")

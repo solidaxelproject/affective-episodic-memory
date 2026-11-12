@@ -1,5 +1,7 @@
 # riflesso_riepilogo.py: parte di riflesso.py, spostata con manutenzione/sposta_riflesso.py (PIANO-DIVISIONE-RIFLESSO.md).
 import contextlib
+import difflib
+import functools
 import json
 import re
 import subprocess
@@ -164,21 +166,216 @@ def _elenco(testo):
     return testo[i:j + len(ELENCO_A)] if i >= 0 and j >= 0 else None
 
 
-def _metti_fissa(d):
-    """in place sul corpo di una richiesta della chat: la parte fissa della cache al posto di quella di Hermes.
-    Torna il system e i nomi dei tool di Hermes com'erano (per il riepilogo e per l'elenco)"""
+# step d (l'utente 12/11, PIANO-MEMORY-A-B.md): nel system della chat B, la copia di MEMORY.md e USER.md tenuta dal
+# codice, al posto della copia di Hermes (A); B sta nella base della cache (parte fissa + B) e cambia solo di notte.
+# Le voci di A diverse da B vanno nel blocco "informazioni aggiornate", subito dopo il riepilogo
+MEMORIA_B = Path("/data/memoria-episodica-affettiva/memoria-b.json")
+MASTER = Path("/data/memoria-episodica-affettiva/master.json")   # parte fissa, coda e tools per rifare la base di notte
+CODA_HERMES = "\n\nConversation started:"   # system_prompt.py: dopo MEMORY e USER, la riga della data
+DELIM = "\n§\n"   # memory_tool.py ENTRY_DELIMITER
+_TESTATA = re.compile(r"^═{46}\n(MEMORY|USER) .*\n═{46}\n", re.M)
+TESTO_AGGIORNATE = "informazioni aggiornate"            # testi approvati dall'utente 12/11 sera
+TESTO_OBSOLETE = "avviso! informazioni obsolete:"
+SOGLIA_STESSA_VOCE = 0.5   # valore di CC: dentro un replace, la voce di A e' quella di B cambiata
+# la resa di A come la fa Hermes (filtro delle minacce, deduplica, limiti del config, unione come system_prompt.py)
+B_HERMES = """import json
+from hermes_cli.config import load_config
+from tools.memory_tool import MemoryStore
+m = load_config()["memory"]
+s = MemoryStore(memory_char_limit=m["memory_char_limit"], user_char_limit=m["user_char_limit"])
+s.load_from_disk()
+parti = [s.format_for_system_prompt("memory") if m.get("memory_enabled") else None,
+         s.format_for_system_prompt("user") if m.get("user_profile_enabled") else None]
+print("\\n" + json.dumps("\\n\\n".join(x.strip() for x in parti if x and x.strip())))
+"""
+HERMES_FERMO = ["docker", "run", "--rm", "-i", "--entrypoint", "python3",
+                "-v", "agente-dati:/home/agente/.hermes",
+                "-v", "/data/agente-docker/config.yaml:/home/agente/.hermes/config.yaml:ro",
+                "agente", "-"]
+
+
+def _parti(h):
+    """(F, A, T): parte fissa, blocchi MEMORY e USER, coda da "Conversation started:"; None senza la coda"""
+    j = h.rfind(CODA_HERMES)
+    if j < 0:
+        return None
+    i = _riga_separatore(h[:j])
+    i = i if i >= 0 else j + 2
+    return h[:i], h[i:j], h[j + 2:]
+
+
+def _base(f, b):
+    return f + (b + "\n\n" if b else "")
+
+
+def _voci(testo):
+    """{"MEMORY": [...], "USER": [...]} dai blocchi resi da Hermes, riconosciuti dall'intestazione"""
+    v, pezzi = {"MEMORY": [], "USER": []}, _TESTATA.split(testo)
+    for nome, corpo in zip(pezzi[1::2], pezzi[2::2]):
+        v[nome] = [x for x in corpo.rstrip("\n").split(DELIM) if x]
+    return v
+
+
+@functools.lru_cache(maxsize=4)
+def _aggiornate(a, b):
+    """le voci di A nuove o cambiate rispetto a B, nella forma nuova, e le voci tolte (testi dell'utente 12/11).
+    difflib allinea le voci uguali anche se le posizioni scalano; dentro un replace le coppie per somiglianza"""
+    va, vb = _voci(a), _voci(b)
+    nuove, tolte = [], []
+    for nome in ("MEMORY", "USER"):
+        A, B = va[nome], vb[nome]
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, B, A, autojunk=False).get_opcodes():
+            # una voce solo spostata non e' cambiata di contenuto
+            ii = [i for i in range(i1, i2) if B[i] not in A]
+            jj = [j for j in range(j1, j2) if A[j] not in B]
+            nuove += [(nome, j) for j in jj]
+            prese_i, prese_j = set(), set()
+            for r, i, j in sorted(((difflib.SequenceMatcher(None, B[i], A[j]).ratio(), i, j)
+                                   for i in ii for j in jj), reverse=True):
+                if r >= SOGLIA_STESSA_VOCE and i not in prese_i and j not in prese_j:
+                    prese_i.add(i)
+                    prese_j.add(j)
+            tolte += [B[i] for i in ii if i not in prese_i]
+    if not nuove and not tolte:
+        return ""
+    righe = [TESTO_AGGIORNATE]
+    for nome, j in nuove:
+        righe += [f"{nome}, voce {j + 1}", va[nome][j]]
+    if tolte:
+        righe += [TESTO_OBSOLETE] + tolte
+    return "\n".join(righe) + "\n\n"
+
+
+def _b_carica():
+    try:
+        return json.loads(MEMORIA_B.read_text(encoding="utf-8"))["testo"]
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        C._diario({"riepilogo": f"memoria-b.json illeggibile: {e}"})
+        return None
+
+
+def _b_o(a):
+    """B dal file; al primo avvio B = la A di questa sessione (l'agente non vede cambiare niente), mai un B vuoto salvato"""
+    b = _b_carica()
+    if b is None:
+        b = a
+        if a:
+            _b_salva(b)
+    return b
+
+
+def _b_salva(testo):
+    tmp = MEMORIA_B.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"testo": testo, "data": time.strftime("%Y-%m-%d %H:%M:%S")}, ensure_ascii=False),
+                   encoding="utf-8")
+    tmp.replace(MEMORIA_B)
+
+
+def _b_da_hermes():
+    """MEMORY.md e USER.md resi da Hermes: dal container acceso, se no da uno usa e getta sul volume"""
+    try:
+        p = subprocess.run(["docker", "exec", "-i", "agente", "python3", "-"], input=B_HERMES,
+                           capture_output=True, text=True, timeout=60, check=True)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):   # es. a meta' dello stop dello switch
+        p = subprocess.run(HERMES_FERMO, input=B_HERMES, capture_output=True, text=True, timeout=120)
+        if p.returncode:
+            raise RuntimeError(f"docker run: {p.stderr.strip()[-300:]}")
+    return json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def _master_salva(m):
+    try:
+        if json.loads(MASTER.read_text(encoding="utf-8")) == m:
+            return
+    except (FileNotFoundError, ValueError):
+        pass
+    tmp = MASTER.with_suffix(".tmp")
+    tmp.write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(MASTER)
+
+
+def _taglio(resa):
+    """nel prompt reso, dove comincia la coda di Hermes ("Conversation started:"); -1 se manca"""
+    return resa.rfind(CODA_HERMES[2:])
+
+
+def rifai_master():
+    """notturna (POST /memoria-b): B = A e base della CW del riepilogo (cache master) rifatta, all'agente addormentata"""
+    b = _b_da_hermes()
+    _b_salva(b)
+    try:
+        m = json.loads(MASTER.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return "B aggiornato; master.json assente, la base la rifa' il primo riepilogo"
+    with _slot_libero() as libero:
+        if not libero:
+            return "B aggiornato; slot occupato, la base la rifa' il primo riepilogo"
+        if S._vettore_vivo[0]:
+            VT.calma()
+        if S._cw[0] == "pensatoio":
+            CA._interrompi_pensatoio()
+        if S._cw[0] in S.KV_FLUSSO:
+            CA._slot("save", S.KV_FLUSSO[S._cw[0]])
+        CA._cambia_cw("altro")   # la prossima richiesta di ogni flusso rimette la sua cache (_scambia)
+        resa = C._chiedi("/apply-template", {
+            "messages": [{"role": "system", "content": _base(m["fissa"], b) + m["coda"]},
+                         {"role": "user", "content": "."}], "tools": m["tools"]})["prompt"]
+        i = _taglio(resa)
+        if i < 0:
+            raise ValueError("coda di Hermes non trovata nel prompt reso")
+        _base_riepilogo(resa[:i])
+    return "B aggiornato, base rifatta"
+
+
+def _avvisa_fissa(diversa):
+    if diversa and not _fissa_avvisata[0]:
+        _fissa_avvisata[0] = True
+        C._diario({"riepilogo": "parte fissa della cache al posto di quella di Hermes (skill cambiate)"})
+
+
+def _metti_fissa(d, righe=()):
+    """in place sul corpo di una richiesta della chat: la base della cache (parte fissa + B) al posto di quella di
+    Hermes, poi il blocco del riepilogo e le informazioni aggiornate (step d). Torna il system e i nomi dei tool di
+    Hermes com'erano (per il riepilogo e per l'elenco)"""
     msgs = d.get("messages", [])
     if not msgs or msgs[0].get("role") != "system":
         return None
     h = msgs[0]["content"]
     hermes = {"system": h, "tools": [t["function"]["name"] for t in d.get("tools") or [] if t.get("function")]}
-    fc, i = _fissa_carica()["chat"], _riga_separatore(h)
-    if fc and i >= 0:
-        if h[:i] != fc and not _fissa_avvisata[0]:
-            _fissa_avvisata[0] = True
-            C._diario({"riepilogo": "parte fissa della cache al posto di quella di Hermes (skill cambiate)"})
-        msgs[0]["content"] = fc + h[i:]
+    p = _parti(h)
+    if p is None:   # system senza "Conversation started:": come prima dello step d
+        fc, i = _fissa_carica()["chat"], _riga_separatore(h)
+        if fc and SEPARATORE in fc:   # base con B + A di Hermes = MEMORY due volte: system intatto
+            C._diario({"riepilogo": "system di Hermes senza 'Conversation started:': base non messa"})
+        elif fc and i >= 0:
+            _avvisa_fissa(h[:i] != fc)
+            msgs[0]["content"] = fc + h[i:]
+        _metti_blocco(d, righe)
+        return hermes
+    try:
+        msgs[0]["content"] = _system_chat(*p, righe)
+    except Exception as e:   # il riepilogo ha comunque il system di Hermes
+        C._diario({"riepilogo": f"base non messa: {e}"})
+        _metti_blocco(d, righe)
     return hermes
+
+
+def _system_chat(f, a, t, righe):
+    fs = _fissa_carica()
+    base = fs["chat"]
+    if base is not None:
+        _avvisa_fissa(not base.startswith(f))
+    else:
+        base = _base(f, _b_o(a))
+        fs["chat"] = base
+        _fissa_salva(fs)
+    if not a:   # Hermes senza memory (load_from_disk fallito): mai dire all'agente che e' tutto obsoleto
+        if SEPARATORE in base:
+            C._diario({"riepilogo": "system di Hermes senza MEMORY e USER: niente informazioni aggiornate"})
+        return base + _blocco(righe) + t
+    return base + _blocco(righe) + _aggiornate(a, base) + t
 
 
 def _skills_da_hermes(tools):
@@ -311,18 +508,28 @@ def _riassumi(corpo, risposta, ragionamento="", senza=None, scadenza=None, herme
             vecchio = _elenco(sistema)
             if fs["elenco"] and vecchio:
                 sistema = sistema.replace(vecchio, fs["elenco"], 1)
+            righe_blocco = _blocco(_nel_tetto(st["nuovi"]))
+            p = _parti(sistema)
+            if p and not hermes:   # quello inoltrato ha gia' B e le informazioni aggiornate al posto di A
+                raise ValueError("manca il system originale di Hermes")
+            if p:   # step d: parte fissa + B (la master), poi il blocco delle righe, poi la coda di Hermes
+                f, a, t = p
+                base = _base(f, _b_o(a))
+                sis = base + righe_blocco + t
+                _master_salva({"fissa": f, "coda": t, "tools": tools})
+            else:
+                base, sis = _fissa(sistema), _con_blocco(sistema, _nel_tetto(st["nuovi"]))
             resa = C._chiedi("/apply-template", {
-                "messages": [{"role": "system", "content": _con_blocco(sistema, _nel_tetto(st["nuovi"]))},
+                "messages": [{"role": "system", "content": sis},
                              {"role": "user", "content": "."}],   # il template vuole un user: si taglia via
                 "tools": tools})["prompt"]
-            i = _riga_separatore(resa)
+            i = _taglio(resa) if p else _riga_separatore(resa)
             if i < 0:
-                raise ValueError("riga ══ non trovata nel prompt reso")
-            righe_blocco = _blocco(_nel_tetto(st["nuovi"]))
+                raise ValueError("fine del blocco non trovata nel prompt reso")
             if not resa[:i].endswith(righe_blocco):
                 raise ValueError("blocco del riepilogo non trovato nel prompt reso")
-            # parte fissa cambiata (elenco nuovo): riepilogo.kv divergerebbe a meta', si riparte dalla base
-            if (CA.KV_RAM / RIEPILOGO_KV).exists() and fs["riepilogo"] in (None, _fissa(sistema)):
+            # parte fissa o B cambiate: riepilogo.kv divergerebbe a meta', si riparte dalla base
+            if (CA.KV_RAM / RIEPILOGO_KV).exists() and fs["riepilogo"] in (None, base):
                 CA._slot("restore", RIEPILOGO_KV)
             else:
                 _base_riepilogo(resa[:i - len(righe_blocco)])
@@ -330,7 +537,7 @@ def _riassumi(corpo, risposta, ragionamento="", senza=None, scadenza=None, herme
                                     "checkpoint_tag": "riepilogo"})   # K3: una riga, un checkpoint protetto
             if not CA._slot("save", RIEPILOGO_KV):
                 raise RuntimeError("save di riepilogo.kv fallita")
-            fs["riepilogo"] = _fissa(sistema)
+            fs["riepilogo"] = base
             _fissa_salva(fs)
             esito = "ok"
         except Exception as e:

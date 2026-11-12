@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stress-test di B6 (PIANO-FIRMA-ENGRAMMI.md): il ricordo entra subito (firma_subito.py, riflesso._accoda_firma,
 Lux con soglia nuova e trascinati; Lux 1.20.0: il ricordo lo crea il servizio del Lux, POST /aggiungi). Tutto su
-COPIE (Lux 1.19.0 migrato alla 1.20.0 con da_precedente, memoria.db di produzione letto in sola lettura)
+COPIE (Lux 1.20.0 copiato alla 1.21.0 con da_precedente)
 e su un finto server (/props, /tokenize, /detokenize, /lux-read con "layers" e "somme") sulla porta 18099: la produzione
 si legge e basta (bge-m3 su :8094 solo in lettura).
 La firma vera passa dal finto server (punto 8); per la logica (soglia, trascinamento, raffiche, crash) la firma e' finta:

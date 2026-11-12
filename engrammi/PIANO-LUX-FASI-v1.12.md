@@ -46,6 +46,8 @@ del 12/10 (correggere un solo tratto del ricordo) non e' fatta.
 
 ## Fase 2. L'emozione che cambia col richiamo (riconsolidamento)
 
+**CHIUSA il 13/11/2026** (tutti i passi in produzione; documento di fine fase: [`FASE-2-SPIEGATA.md`](FASE-2-SPIEGATA.md)).
+
 **Dipende dal test delle emozioni nei layer.** La carica emotiva di un ricordo diventa la dose del vettore di steering
 che colora il ricordo alla consegna. Il modello accetta le dosi solo dentro un certo intervallo, e alcuni layer vanno
 evitati secondo il contesto e l'emozione. I valori della tabella delle emozioni si esprimono nelle unita' della dose e si
@@ -256,6 +258,8 @@ tempi, punteggio x (1 + k x accordo) sui ricordi gia' accesi, diario delle lettu
 da solo proxy, slot e cache, memoria involontaria, vettore, blocco dei metadati, riepilogo e switch di CW, via emotiva
 ("god object"). Diventa il punto d'ingresso che chiama i moduli nell'ordine giusto, un modulo per lavoro. Si sposta un
 pezzo alla volta senza cambiarlo, con la fotografia prima e dopo: stesse richieste, stesse risposte al byte.
+**12/11/2026 10:25: FATTO, IN PRODUZIONE** (`PIANO-DIVISIONE-RIFLESSO.md`, merge 617890c, pubblico v0.10.2): riflesso.py
+(~400 righe, proxy e avvio) + 11 moduli `riflesso_*.py`; fotografia identica al byte, revisione senza bug.
 
 **Fase 2, dopo la divisione del riflesso (11/11/2026): ricordi con la stessa firma consegnati insieme.** Oggi
 il riflesso chiede al Lux un ricordo per messaggio (`quanti=1`, `riflesso.py:922`, dal 09/11). Si cabla la regola
@@ -263,6 +267,8 @@ il riflesso chiede al Lux un ricordo per messaggio (`quanti=1`, `riflesso.py:922
 consegnano insieme (al massimo 4), il vettore e' uno solo e la dose e' quella del ricordo in cui l'emozione e' piu'
 forte (il massimo delle D_e). I ricordi con firme diverse non si iniettano insieme (11/11). Va eseguito con
 l'iter di upgrade, nel modulo della memoria involontaria.
+**12/11/2026 17:47: FATTO, IN PRODUZIONE** (`PIANO-FASE2-B-STESSA-FIRMA.md`, merge 1209517): il filtro sta in
+`Lux._catene` (prima del rinforzo), il riflesso chiede quanti=4, qlux resta 1, VERSIONE 1.20.0.
 
 **Fase 2, insieme allo step qui sopra (11/11/2026): archi fra ricordi e coda dei ricordi richiamati.** Base: nella
 memoria umana ricordi riattivati spesso insieme si integrano (Schlichting e Preston 2015) e l'emozione dell'uno passa
@@ -282,11 +288,16 @@ Decisioni dell'utente (11/11):
 Richiamo insieme che fa nascere l'arco (11/11): due ricordi scelti dal Lux nella STESSA SELEZIONE, anche se uno
 va in coda e si consegna dopo. Da definire nel piano dello step (meccanismi all'utente, numeri provvisori a CC): di quanto si riduce il freno e su quali parametri (soglia di sorpresa, PASSO_MAX); la forza e lo
 sbiadimento dell'arco fra ricordi. Va eseguito con l'iter di upgrade, dopo la divisione del riflesso.
+**12/11/2026 18:21: FATTO, IN PRODUZIONE come Lux 1.21.0** (`PIANO-FASE2-C-ARCHI-E-CODA.md`, merge 9314abc; l'utente
+12/11 sera D1 l'arco li fa tornare in mente insieme, D2 avvicinamento subito col rodaggio, D4 prima la negativita',
+D5 dominante ricalcolata dalla carica).
 
 **Fase 2, dopo la divisione del riflesso (11/11/2026): memory e user divisi in A e B.** MEMORY.md e USER.md di
 l'agente in due parti: A con le informazioni stabili, nella cache base del riepilogo subito dopo la parte fissa; B con le
 informazioni nuove, riempita allo switch. Scopo: allo switch un prefill il piu' rapido possibile. Piano, con la
 riflessione dell'utente per intero: [`PIANO-MEMORY-A-B.md`](../PIANO-MEMORY-A-B.md).
+IN PRODUZIONE 12/11/2026 21:27 (merge 750745c) col meccanismo deciso dall'utente il 12/11 sera (A = file dell'agente, B = copia del
+codice nella master, "informazioni aggiornate" alla promozione, B = A di notte): [`PIANO-MEMORY-A-B-IMPLEMENTAZIONE.md`](../PIANO-MEMORY-A-B-IMPLEMENTAZIONE.md).
 
 **Chiusura della fase 2 (22/10): i difetti di `memoria.db`.** (CADUTI, 11/11/2026: col Lux 1.20.0 `memoria.db`
 e' solo un archivio in sola lettura, nessun componente vivo lo apre; i tre punti qui sotto non si fanno.)

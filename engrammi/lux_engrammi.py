@@ -17,8 +17,8 @@ import fcntl
 import json
 import os
 import random
+import itertools
 import shutil
-import sqlite3
 import sys
 import time
 import urllib.request
@@ -35,7 +35,7 @@ from codice_ricordo import codice  # noqa: E402,F401  (B7, P4: un solo posto; lo
 # VERSIONE MAJOR.MINOR.PATCH (11/10): MAJOR = formato dei dati incompatibile (lo stato dei rinforzi non si
 # porta), MINOR = ricostruzione con regole nuove (taglio, vettori) o funzione nuova, PATCH = correzione che non
 # cambia i dati. Ogni versione ha la sua cartella: le vecchie restano.
-VERSIONE = "1.20.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
+VERSIONE = "1.21.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
 # 1.6.0 (15/10): vettori bge-m3 in float16 su disco e in RAM (misurato sul Lux dell'agente: scarto coseni max 1.4e-4,
 # richiamo identico su 94/94 indizi); il coseno si calcola a blocchi riportati in float32
 # 1.7.0 (15/10): taglio per lingua (taglia.py: le frasi inglesi sicure vanno a en_core_web_lg); costruisci()
@@ -72,10 +72,11 @@ VERSIONE = "1.20.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engr
 # profili C0 dei ricordi e l'indizio della J-lens (via_emotiva.py, nel riflesso); dati identici alla 1.18.0
 # 1.20.0 (l'utente 22/10 + 11/11, PIANO-1.20-MEMORIADB-SUPERFLUO.md): i dati dei ricordi stanno nel Lux (testo, firma,
 # dominante, fonte, cattura, salienza, voluto in ricordi[nid]); il ricordo nuovo lo crea aggiungi_ricordo (servizio,
-# POST /aggiungi); memoria.db resta archivio in sola lettura (lo legge solo da_precedente, per la migrazione)
+# POST /aggiungi); memoria.db resta archivio in sola lettura
+# 1.21.0 (l'utente 11/11 + 12/11 D1-D5, PIANO-FASE2-C-ARCHI-E-CODA.md): archi fra ricordi (lux-stato.npz, RA_*), coda dei
+# ricordi richiamati (consegna con coda), predisposizione dall'arco, avvicina di notte con la dominante ricalcolata
 DIR = os.environ.get("LUX_DIR", f"/data/memoria-episodica-affettiva/engrammi/lux-{VERSIONE}")
-PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.19.0"   # da qui costruisci() riprende i vettori gia' calcolati, da_precedente() copia
-MEMORIA_DB = "/data/workspace/memoria/memoria.db"   # 1.20.0: archivio, solo per la migrazione dalla 1.19.0
+PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"   # da qui costruisci() riprende i vettori gia' calcolati, da_precedente() copia
 CAMPI = ("dominante", "fonte", "cattura", "salienza", "voluto")   # 1.20.0: in ricordi[nid] con testo e firma
 NPZ, META, STATO = f"{DIR}/lux.npz", f"{DIR}/lux-meta.json", f"{DIR}/lux-stato.npz"
 CRESCITA_PIENA = 100.0   # S/S0 a cui la facilita' tocca il tetto
@@ -118,6 +119,9 @@ POSITIVE = ["ecstasy", "joy", "serenity", "delight", "triumph", "pride", "admira
 NEUTRE = ["submission", "morbidness", "dominance", "cynicism", "distraction", "vigilance", "anticipation"]
 TABELLA_EMOZIONI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "PROPOSTA-TABELLA-EMOZIONI.md")
 TRACCIA_K_MAX = 0.5   # 1.19.0: il k piu' alto con cui !verifica emotiva! rigioca le scelte
+# 1.21.0 (l'utente 11/11 + 12/11 sera D1-D5, PIANO-FASE2-C-ARCHI-E-CODA.md): archi fra ricordi, coda, firme che si avvicinano
+PESO_ARCO_RICORDI = 1.0   # D1: spinta della predisposizione per arco fra ricordi = questo x forza dell'arco (provvisorio di CC)
+FRENO_LEGATI = 0.5        # D3: fra ricordi legati il termine della stabilita' del freno pesa la meta' (provvisorio di CC)
 INVERSO = {}
 for _k, _v in T.PREPOSIZIONI.items():   # forma canonica: la prima della tabella (di, non d'; a, non ad; tra, non fra)
     INVERSO.setdefault(_v, _k)
@@ -377,9 +381,9 @@ def costruisci():
 
 
 def da_precedente():
-    """1.20.0: la versione PRECEDENTE (1.19.0) identica, piu' in ricordi[nid] testo, firma e CAMPI presi da memoria.db
-    in sola lettura (dominante = emo_tag); le correzioni (non stanno nel db) prendono il testo ricomposto e firma None.
-    Si lancia alla messa in produzione, a servizi fermi: la PRECEDENTE cambia fino all'ultimo. La PRECEDENTE resta com'e'."""
+    """1.21.0: la versione PRECEDENTE (1.20.0) identica, piu' avvicina_da = oggi vissuto in lux.npz (D2: il rodaggio
+    dell'avvicinamento parte dalla produzione). Archi fra ricordi: nessuno (nascono con le consegne). Si lancia alla
+    messa in produzione, a servizi fermi: la PRECEDENTE cambia fino all'ultimo. La PRECEDENTE resta com'e'."""
     if os.path.exists(NPZ):
         sys.exit(f"{NPZ} esiste gia'")
     os.makedirs(DIR, exist_ok=True)
@@ -388,21 +392,13 @@ def da_precedente():
         shutil.copy2(f"{PRECEDENTE}/lux-stato.npz", STATO)
         if os.path.exists(f"{PRECEDENTE}/lux-l29.npz"):
             shutil.copy2(f"{PRECEDENTE}/lux-l29.npz", f"{DIR}/lux-l29.npz")
-        shutil.copy2(f"{PRECEDENTE}/lux.npz", NPZ + ".tmp.npz")
-        m = json.load(open(f"{PRECEDENTE}/lux-meta.json"))
-        c = sqlite3.connect(f"file:{MEMORIA_DB}?mode=ro", uri=True)
-        db = {r[0]: r[1:] for r in c.execute("select id, testo, firma, emo_tag, fonte, cattura, salienza, voluto from nodi")}
-        Lp = Lux.struttura(PRECEDENTE)
-        for k, r in m["ricordi"].items():
-            if r["classe"] == "correzione":
-                r.update(testo=Lp.ricomponi(int(k)), firma=None)
-                continue
-            testo, firma, *campi = db[int(k)]
-            r.update(testo=testo, firma=_firma(firma), **dict(zip(CAMPI, campi)))
-        json.dump(m, open(META + ".tmp", "w"), ensure_ascii=False)
+        z = dict(np.load(f"{PRECEDENTE}/lux.npz"))
+        z["avvicina_da"] = np.float64(LUX.orologio())
+        np.savez(NPZ + ".tmp.npz", **z)
+        shutil.copy2(f"{PRECEDENTE}/lux-meta.json", META + ".tmp")
         os.replace(NPZ + ".tmp.npz", NPZ)
         os.replace(META + ".tmp", META)
-    print(f"{DIR}: copia di {PRECEDENTE} con i dati dei ricordi da {MEMORIA_DB}")
+    print(f"{DIR}: copia di {PRECEDENTE}, avvicina_da = {float(z['avvicina_da'])}")
 
 
 def aggiungi_ricordo(v):
@@ -476,7 +472,7 @@ def _aggiungi(righe, legami=()):
                                         "U": np.concatenate([s["U"], oggi])})   # 1.17.0: R_nid e R_ts restano
     C0 = np.concatenate([z["C0"] if "C0" in z.files else z["C"], C[n_a:]])   # 1.14.0: alla nascita = C, poi ferma
     resto = {k: z[k] for k in ("M", "rodaggio_da", "fattore", "sbiadimento", "riacceso_fino", "sbiadimento_da",
-                               "sbiadito_fino") if k in z.files}
+                               "sbiadito_fino", "avvicina_da") if k in z.files}
     if "E_nato" in z.files:   # 1.17.0: engrammi nuovi nati oggi, quelli gia' noti ripresi da un ricordo nuovo si accendono
         k = len(testi) - n_e
         E = (np.concatenate([z["E_nato"], np.full(k, -1, np.int32)]), np.concatenate([z["E_acceso"], np.full(k, -1, np.int32)]),
@@ -567,19 +563,7 @@ def riconsolida(oggi=None):
                     alfa = ALFA / (1 + max(0.0, float(np.log(s["S"][j] / s["S0"][j]))))
                     passi[j] = passi.get(j, 0.0) + np.where(k, fattore * alfa * (np.nan_to_num(mc) * L.W[j] - L.C[j]), 0.0)
         if passi:
-            C, S, S0 = z["C"].copy(), s["S"].copy(), s["S0"].copy()
-            ranghi = SA.ranghi(z)
-            for j, p in passi.items():
-                vecchia = C[j].copy()
-                C[j] = vecchia + np.clip(p / L.W[j], -PASSO_MAX, PASSO_MAX) * L.W[j]   # 1.16.0: freno sulla firma grezza
-                rg = ranghi.get(int(z["A"][j, 0]), (0.0, 0.0))
-                g = (z["fattore"] if "fattore" in z else 1.0) * L.W[j]   # 1.15.0-1.16.0: la stabilita' vuole la firma grezza
-                q = (SA.stabilita_iniziale(C[j] / g, *rg, LUX.S_BASE, SOGLIA_FIRMA)
-                     / SA.stabilita_iniziale(vecchia / g, *rg, LUX.S_BASE, SOGLIA_FIRMA))
-                S0[j] *= q
-                S[j] *= q
-            z.update(C=C, F=firme_engrammi(z["A"], C, len(z["V"])))
-            s.update(S=S, S0=S0)
+            _applica_passi(z, s, L, passi)
         if nuove:
             z["M"] = np.concatenate([M, np.asarray(nuove, np.float64)])
         if nuove or passi:
@@ -592,6 +576,107 @@ def riconsolida(oggi=None):
     rms = [x[3] for x in nuove if not np.isnan(x[3])]
     return {"consegne": len(cons), "momenti": len(nuove), "spostati": len(passi),
             "sorpresa_media": round(float(np.mean(rms)), 3) if rms else None, "effetto": fattore}
+
+
+def _applica_passi(z, s, L, passi):
+    """passi {arco: spostamento della carica} con il tetto PASSO_MAX sulla firma grezza; F ricalcolata, S0 e S scalate
+    come la stabilita' iniziale (punto 8). Da riconsolida (1.14.0) e avvicina (1.21.0); z e s cambiano sul posto"""
+    C, S, S0 = z["C"].copy(), s["S"].copy(), s["S0"].copy()
+    ranghi = SA.ranghi(z)
+    for j, p in passi.items():
+        vecchia = C[j].copy()
+        C[j] = vecchia + np.clip(p / L.W[j], -PASSO_MAX, PASSO_MAX) * L.W[j]   # 1.16.0: freno sulla firma grezza
+        rg = ranghi.get(int(z["A"][j, 0]), (0.0, 0.0))
+        g = (z["fattore"] if "fattore" in z else 1.0) * L.W[j]   # 1.15.0-1.16.0: la stabilita' vuole la firma grezza
+        q = (SA.stabilita_iniziale(C[j] / g, *rg, LUX.S_BASE, SOGLIA_FIRMA)
+             / SA.stabilita_iniziale(vecchia / g, *rg, LUX.S_BASE, SOGLIA_FIRMA))
+        S0[j] *= q
+        S[j] *= q
+    z.update(C=C, F=firme_engrammi(z["A"], C, len(z["V"])))
+    s.update(S=S, S0=S0)
+
+
+def avvicina(oggi=None):
+    """1.21.0 (l'utente 11/11 punto 2 + 12/11 D2, D3, D5): per ogni arco fra ricordi con co-selezioni non ancora lavorate
+    (RA_P) fra due ricordi veri con dominanti diverse, la carica di ognuno si sposta verso il profilo dell'altro (media
+    di C/W sui suoi archi con C0): x = rodaggio x ALFA / (1 + FRENO_LEGATI x log(S/S0)) x forza dell'arco,
+    q = 1 - (1 - x)^P, passo = q x (profilo dell'altro x W - C), tetto PASSO_MAX (_applica_passi). Poi (D5) la
+    dominante dei ricordi toccati si ricalcola dalla carica (firma_ora, memoria.dominante); la prima volta che cambia
+    resta dominante_nascita. RA_P si azzera su tutti gli archi: le co-selezioni di oggi sono consumate anche quando
+    l'arco non sposta niente (stessa dominante, correzioni), cosi' non si accumulano per una notte futura. Sotto lucchetto rileggendo dal disco; META toccato: il servizio ricarica"""
+    import memoria   # dominante, CON_VETTORE, PETALO (sys.path ha gia' /data/memoria-episodica-affettiva)
+    oggi = LUX.orologio() if oggi is None else oggi
+    with lucchetto():
+        if not os.path.exists(STATO):
+            return {"archi": 0, "spostati": 0, "rodaggio": 0.0, "dominanti": 0}
+        z, s = dict(np.load(NPZ)), dict(np.load(STATO))
+        if "avvicina_da" not in z or "RA" not in s or not (s["RA_P"] > 0).any():
+            return {"archi": 0, "spostati": 0, "rodaggio": 0.0, "dominanti": 0}
+        L = Lux.struttura(DIR)
+        rod = _rodaggio(oggi - float(z["avvicina_da"]))
+        prof = {}
+
+        def profilo(n):
+            if n not in prof:
+                js = [j for j in L.per_ricordo.get(n, ()) if L.C0[j].any()]
+                prof[n] = (js, np.mean(L.C[js] / L.W[js, None], 0) if js else None)
+            return prof[n]
+
+        passi, toccati = {}, set()
+        P = s["RA_P"]
+        for (a, b), sr, u, p in zip(s["RA"].tolist(), s["RA_S"], s["RA_U"], P):
+            if p <= 0 or any(n >= PRIMO_CORREZIONE or n in L.errati or n not in L.ricordi for n in (a, b)):
+                continue
+            if L.ricordi[a].get("dominante") == L.ricordi[b].get("dominante"):
+                continue
+            forza = float(LUX.curva(max(oggi - float(u), 0.0), float(sr)))
+            (ja, pa), (jb, pb) = profilo(a), profilo(b)
+            if pa is None or pb is None:
+                continue
+            for js, verso in ((ja, pb), (jb, pa)):
+                for j in js:
+                    x = rod * ALFA / (1 + FRENO_LEGATI * max(0.0, float(np.log(s["S"][j] / s["S0"][j])))) * forza
+                    passi[j] = passi.get(j, 0.0) + (1 - (1 - x) ** int(p)) * (verso * L.W[j] - L.C[j])
+            toccati |= {a, b}
+        archi = int((P > 0).sum())
+        s["RA_P"] = np.zeros_like(P)
+        cambiate = 0
+        if passi:
+            _applica_passi(z, s, L, passi)
+            m = json.load(open(META))
+            fat = z["fattore"] if "fattore" in z else np.ones(len(EMOZIONI), np.float32)
+            for n in sorted(toccati):
+                r = m["ricordi"][str(n)]
+                js = profilo(n)[0]
+                v = np.mean(z["C"][js] / (L.W[js, None] * fat), 0)
+                f = {e: float(v[EMOZIONI.index(e)]) for e in (r.get("firma") or {}) if e in EMOZIONI}
+                d = memoria.dominante(f) if f else None
+                if d is not None and d != r.get("dominante"):
+                    r.setdefault("dominante_nascita", r.get("dominante"))
+                    r["dominante"] = d
+                    cambiate += 1
+            np.savez(NPZ + ".tmp.npz", **z)
+            os.replace(NPZ + ".tmp.npz", NPZ)
+            if cambiate:
+                json.dump(m, open(META + ".tmp", "w"), ensure_ascii=False)
+                os.replace(META + ".tmp", META)
+        np.savez(STATO + ".tmp.npz", **s)
+        os.replace(STATO + ".tmp.npz", STATO)
+        os.utime(META)
+    return {"archi": archi, "spostati": len(passi), "rodaggio": rod, "dominanti": cambiate}
+
+
+def in_coda(vecchi, nuovi, batte):
+    """1.21.0 (l'utente 11/11 punto 3 + 12/11 D4): la coda dei ricordi richiamati. vecchi = gia' in coda, in ordine; ogni
+    nuovo (in ordine di richiamo) parte dal fondo e passa avanti ai VECCHI che batte (batte(nuovo, vecchio)); i nuovi
+    della stessa selezione non si scavalcano"""
+    coda = [(n, True) for n in vecchi]
+    for n in nuovi:
+        i = len(coda)
+        while i > 0 and coda[i - 1][1] and batte(n, coda[i - 1][0]):
+            i -= 1
+        coda.insert(i, (n, False))
+    return [n for n, _ in coda]
 
 
 def riaccendi():
@@ -696,6 +781,7 @@ class Lux:
         self.V, self.F, self.A, self.C, self.P = z["V"].astype(VTIPO, copy=False), z["F"], z["A"], z["C"], z["P"]
         self.C0 = z["C0"] if "C0" in z.files else self.C   # una versione di prima della 1.14.0
         self.W = z["W"] if "W" in z.files else np.ones(len(self.A), np.float32)   # prima della 1.16.0
+        self.fattore = z["fattore"] if "fattore" in z.files else np.ones(self.C.shape[1], np.float32)   # 1.21.0: firma_ora
         # 1.18.0 (l'utente 11/11, "stessa proporzione"): nella forza la firma degli engrammi alla nascita, cosi' la dose scende
         # come la carica (D3 del 09/11) e non col quadrato (con F sbiadirebbero carica e firma insieme)
         self.F0 = firme_engrammi(self.A, self.C0, len(self.V))
@@ -738,11 +824,16 @@ class Lux:
         """S (stabilita') e U (ultimo giorno vissuto) per arco. Al primo avvio: S0 da firma e salienza del ricordo
         (salienza.py, fino a 3x), U = oggi vissuto"""
         self.R = {}   # 1.17.0: ultimo richiamo (ts della consegna) per ricordo
+        self.archi_ric = {}   # 1.21.0: (a, b) radici, a < b -> [S, U giorno vissuto, co-selezioni, non lavorate]
         if os.path.exists(STATO):
             z = np.load(STATO)
             self.S, self.S0, self.U = z["S"], z["S0"], z["U"]
             if "R_nid" in z.files:
                 self.R = dict(zip(z["R_nid"].tolist(), z["R_ts"].tolist()))
+            if "RA" in z.files:
+                self.archi_ric = {(a, b): [s_, u, n, p] for (a, b), s_, u, n, p in
+                                  zip(z["RA"].tolist(), z["RA_S"].tolist(), z["RA_U"].tolist(), z["RA_N"].tolist(),
+                                      z["RA_P"].tolist())}
             return
         firme = {n: r.get("firma") for n, r in self.ricordi.items()}   # 1.20.0: dal meta
         s0 = s0_ricordi(firme, SA.ranghi(np.load(NPZ)), self.ricordi)
@@ -757,8 +848,12 @@ class Lux:
                 d = np.load(STATO)
                 if len(d["S"]) > len(S):
                     S, S0, U = (np.concatenate([x, d[k][len(x):]]) for x, k in ((S, "S"), (S0, "S0"), (U, "U")))
+            ra = sorted(self.archi_ric.items())
             np.savez(STATO + ".tmp.npz", S=S, S0=S0, U=U, R_nid=np.asarray(list(self.R), np.int64),
-                     R_ts=np.asarray(list(self.R.values()), np.float64))
+                     R_ts=np.asarray(list(self.R.values()), np.float64),
+                     RA=np.asarray([k for k, _ in ra], np.int64).reshape(-1, 2),
+                     **{f"RA_{c}": np.asarray([v[i] for _, v in ra], t) for i, (c, t) in
+                        enumerate((("S", np.float64), ("U", np.float64), ("N", np.int64), ("P", np.int64)))})
             os.replace(STATO + ".tmp.npz", STATO)
 
     def facilita_archi(self, oggi=None):
@@ -792,7 +887,7 @@ class Lux:
         s, t = self.pronti.get(r, (0.0, ora))
         return s * 0.5 ** (max(0.0, ora - t) / PREDISPOSIZIONE_EMIVITA)
 
-    def predisponi(self, nids, ora=None):
+    def predisponi(self, nids, ora=None, oggi=None):
         """1.12.0: dopo una consegna, ogni ricordo che condivide engrammi (peso 1/(altri ricordi che li usano), effetto
         ventaglio di Anderson 1974) o archi (stessa coppia di engrammi, x PESO_COPPIA) coi ricordi consegnati riceve una
         spinta, divisa per sqrt(engrammi del ricordo) come in richiama; si somma a quella residua"""
@@ -810,18 +905,54 @@ class Lux:
             if r not in nids:
                 self.pronti[r] = (self.spinta(r, ora) + s / np.sqrt(self.ricordi[r]["n"]), ora)
 
-    def _catene(self, scelta, via, quanti):
-        catene = []   # 1.11.0: un ricordo con le sue correzioni occupa un posto solo
+    def _catene(self, scelta, via, quanti, stessa=True):
+        """1.11.0: un ricordo con le sue correzioni occupa un posto solo. Fase 2 step b (l'utente 09/11 + 11/11,
+        PIANO-FASE2-B-STESSA-FIRMA.md): dopo la prima entrano solo le catene con la stessa dominante dell'originale
+        (un vettore solo); gli altri restano fuori, non consegnati ne' rinforzati. Senza dominante: da solo.
+        1.21.0: stessa=False = senza la regola (la selezione da cui nascono gli archi e la coda)"""
+        catene = []
         for nid in scelta:
             k = self.catena(nid)
-            if len(catene) == quanti:
+            if len(catene) >= quanti:
                 break
-            if not via & set(k) and all(k[0] != c[0] for c in catene):
+            d = self.ricordi[k[0]].get("dominante")
+            if (not via & set(k) and all(k[0] != c[0] for c in catene)
+                    and (not stessa or not catene or (d is not None and d == self.ricordi[catene[0][0]].get("dominante")))):
                 catene.append(k)
         return catene
 
+    def _coseleziona(self, radici, oggi):
+        """1.21.0: arco fra ogni coppia di ricordi della stessa selezione; nasce con S_BASE, poi cresce con FSRS come gli
+        archi degli engrammi (stesso giorno vissuto = crescita zero)"""
+        for a, b in itertools.combinations(sorted(set(radici)), 2):
+            v = self.archi_ric.get((a, b))
+            if v is None:
+                self.archi_ric[(a, b)] = [LUX.S_BASE, oggi, 1, 1]
+            else:
+                v[0] = LUX.cresci(v[0], float(LUX.curva(max(oggi - v[1], 0.0), v[0])))
+                v[1], v[2], v[3] = oggi, v[2] + 1, v[3] + 1
+
+    def firma_ora(self, nid):
+        """1.21.0 (D5): la firma di adesso, dalla carica (media di C/(fattore x W) sugli archi con C0), sugli assi della
+        firma della nascita; None senza firma o senza archi"""
+        js = [j for j in self.per_ricordo.get(nid, ()) if self.C0[j].any()]
+        f = self.ricordi.get(nid, {}).get("firma")
+        if not js or not f:
+            return None
+        v = np.mean(self.C[js] / (self.W[js, None] * self.fattore), 0)
+        return {e: float(v[EMOZIONI.index(e)]) for e in f if e in EMOZIONI}
+
+    def _rango(self, nid):
+        """1.21.0 (D4): (classe, intensita') per la coda: negativa 2 > neutra 1 > positiva 0, poi il valore della
+        dominante nella firma di adesso. Senza dominante o firma: neutra, intensita' 0"""
+        d = self.ricordi.get(nid, {}).get("dominante")
+        f = self.firma_ora(nid)
+        if d is None or not f:
+            return (1, 0.0)
+        return (0 if d in POSITIVE else 1 if d in NEUTRE else 2, f.get(d, 0.0))
+
     def consegna(self, testo, quanti=CONSEGNA_MAX, oggi=None, esclusi=(), ora=None, soglia=SOGLIA_RICHIAMO, da=None, a=None,
-                 emozione=None, traccia=None):
+                 emozione=None, traccia=None, coda=None):
         """L'UNICA porta per dare ricordi all'agente (richiamo automatico, 11/10): richiama, rinforza gli archi dei
         ricordi consegnati, restituisce [(id, testo ricomposto)]. Lista vuota = nessun turno del tool.
         esclusi = codici dei ricordi gia' consegnati nella conversazione: si passa al successivo sopra soglia.
@@ -829,7 +960,11 @@ class Lux:
         qlux (09/11): soglia (0 = il piu' vicino), finestra [da, a) sul momento del ricordo; con la finestra e
         nessun ricordo acceso dal testo, quelli della finestra in ordine di facilita'.
         1.19.0: emozione = indizio emotivo della via emotiva (richiama); traccia (dict) riceve i candidati con parole e
-        senso e accordo separati, e "senza" = il primo ricordo che la consegna avrebbe dato senza emozione."""
+        senso e accordo separati, e "senza" = i ricordi che la consegna avrebbe dato senza emozione.
+        1.21.0 (PIANO-FASE2-C-ARCHI-E-CODA.md): coda = codici in coda (lista del chiamante, la aggiorna sul posto).
+        La selezione (le prime quanti catene, senza la regola della firma) entra in coda (in_coda, D4); si consegna la
+        testa con quelli della coda e del richiamo che hanno la sua dominante; fra i ricordi della selezione nascono
+        o si rinforzano gli archi fra ricordi. coda=None: come lo step b, nessun arco (qlux, consenso spento)"""
         via = {self.da_codice[c] for c in esclusi if c in self.da_codice}   # gia' nel contesto della conversazione
         scelta = [n for n, _ in self.richiama(testo, len(self.ricordi), soglia, oggi=oggi, ora=ora, emozione=emozione,
                                               traccia=traccia)]
@@ -838,10 +973,37 @@ class Lux:
             fac = self.facilita(oggi)
             accesi = [n for n in scelta if n in nella]   # poi, in coda, il resto della finestra (gli esclusi li salta il giro sotto)
             scelta = accesi + sorted(nella - set(accesi), key=lambda n: -fac.get(n, 0))
-        catene = self._catene(scelta, via, quanti)
+        da_coda = []
+        if coda is None:
+            catene = self._catene(scelta, via, quanti)
+        else:
+            oggi_v = LUX.orologio() if oggi is None else oggi
+            vecchi = list(dict.fromkeys(self.catena(self.da_codice[c])[0] for c in coda
+                                        if c in self.da_codice and c not in esclusi))
+            vecchi = [r for r in vecchi if not via & set(self.catena(r))]
+            via = via | {n for r in vecchi for n in self.catena(r)}   # chi e' in coda non si riseleziona
+            selezione = [k[0] for k in self._catene(scelta, via, quanti, stessa=False)]
+            q = in_coda(vecchi, selezione, lambda a, b: self._rango(a) > self._rango(b))
+            gruppo = q[:1]
+            d0 = self.ricordi[q[0]].get("dominante") if q else None
+            if d0 is not None:
+                gruppo += [r for r in q[1:] if self.ricordi[r].get("dominante") == d0][:quanti - 1]
+                presi = via | {n for r in q for n in self.catena(r)}
+                for nid in scelta:   # step b: anche piu' in basso nel richiamo, con la stessa dominante
+                    k = self.catena(nid)
+                    if len(gruppo) >= quanti:
+                        break
+                    if not presi & set(k) and self.ricordi[k[0]].get("dominante") == d0:
+                        gruppo.append(k[0])
+                        presi |= set(k)
+            self._coseleziona(set(selezione) | {r for r in gruppo if r not in vecchi}, oggi_v)
+            catene = [self.catena(r) for r in gruppo]
+            da_coda = [r for r in gruppo if r in vecchi]
+            coda[:] = [self.ricordi[r]["codice"] for r in q if r not in gruppo]
         if traccia is not None and emozione and da is None:
             senza = [n for n, p, _ in traccia.get("candidati", []) if p >= soglia]
             traccia["senza"] = [n for k in self._catene(senza, via, quanti) for n in k]
+            traccia["da_coda"] = da_coda
         scelti = [n for k in catene for n in k]
         if traccia is not None and emozione and da is None:   # l'emozione ha fatto superare la soglia
             ps = {n: p for n, p, _ in traccia.get("candidati", [])}
@@ -851,12 +1013,12 @@ class Lux:
         t = ora if ora is not None and np.isfinite(ora) else time.time()
         for nid in scelti:   # 1.17.0: ultimo richiamo, salvato col rinforzo
             self.R[nid] = t
-        if any(n in self.errati for n in scelti):
+        if any(n in self.errati for n in scelti) or coda is not None:   # 1.21.0: anche gli archi fra ricordi
             self.salva_stato()
         for nid in scelti:
             if nid not in self.errati:   # un ricordo corretto non si rinforza piu'
                 self.rinforza(nid, oggi)
-        self.predisponi(scelti, ora)
+        self.predisponi(scelti, ora, oggi)
         return [(nid, self.ricordi[nid]["codice"], self.ricomponi(nid)) for nid in scelti]
 
     def catena(self, nid):
@@ -876,6 +1038,15 @@ class Lux:
         if emo not in EMOZIONI:
             return None
         e = EMOZIONI.index(emo)
+        r = self.ricordi.get(nid, {})
+        if "dominante_nascita" in r and emo != r["dominante_nascita"]:   # 1.21.0 (D5): emozione presa dopo la nascita, la carica di adesso
+            w = {}
+            for j in self.per_ricordo.get(nid, ()):
+                if self.C0[j].any():
+                    for i in {int(self.A[j, 2]), int(self.A[j, 3])}:
+                        w[i] = w.get(i, 0.0) + float(self.C[j, e])
+            tot = sum(w.values())
+            return sum(wi * float(self.F[i, e]) for i, wi in w.items()) / tot if tot > 0 else None
         w, w0 = {}, 0.0
         for j in self.per_ricordo.get(nid, ()):
             if self.C0[j].any():

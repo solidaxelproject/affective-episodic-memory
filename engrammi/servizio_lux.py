@@ -4,7 +4,7 @@
        -> {"codici": [...], "risposta": "1°\\n<codice>\\n<testo>\\n2°..."} da mettere nel tool memorinvolontaria,
        oppure {} = niente. Fino a X.CONSEGNA_MAX ricordi (1.10.0), o catene di correzioni (1.11.0). Rinforza gli archi
        dei ricordi consegnati, tranne quelli corretti
-       qlux (09/11): facoltativi "quanti" (il riflesso ne chiede 1), "soglia" (0 = il piu' vicino), "da"/"a"
+       qlux (09/11): facoltativi "quanti" (il riflesso ne chiede 4, stessa dominante: fase 2 step b; qlux 1), "soglia" (0 = il piu' vicino), "da"/"a"
        (finestra sul momento del ricordo, secondi epoch)
        1.19.0 (via emotiva): facoltativo "emozione": {"assi": [...], "q": [...], "k": 0.2}; allora la risposta ha anche
        "traccia": {"candidati": [[nid, parole e senso, accordo], ...], "senza": [nid...], "scelti": [nid...]}
@@ -21,6 +21,8 @@
        il servizio a un filo tiene lo stato in memoria; dopo si ricarica)
   POST /sbiadisci {} -> {"sbiadito", "giorno", "rodaggio", "umore", "freno_medio"} (1.18.0, notturna, una volta al giorno)
   POST /riaccendi {} -> {"messaggi", "engrammi"} (1.17.0, notturna prima di /riconsolida)
+  POST /avvicina {} -> {"archi", "spostati", "rodaggio", "dominanti"} (1.21.0, notturna dopo /riconsolida)
+       1.21.0: /consegna con "coda": [codici] (riflesso) torna anche "coda", la coda nuova, pure senza ricordi
   POST /aggiungi  {"testo", "firma": {asse: z}, "classe", "ts", "dominante", "fonte", "cattura", "salienza", "voluto"}
        -> {"nid": n} (1.20.0: il ricordo nuovo entra nel Lux e prende il numero, prima lo dava memoria.db; stesso testo =
        stesso nid); 400 = errore di questo ricordo (firma_subito lo segna e va avanti), 500 = si ritenta
@@ -97,7 +99,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path not in ("/consegna", "/correggi", "/rinforza", "/richiama", "/sovrapposizione", "/forza", "/riconsolida",
-                             "/riaccendi", "/sbiadisci", "/aggiungi", "/ricordo"):
+                             "/riaccendi", "/sbiadisci", "/aggiungi", "/ricordo", "/avvicina"):
             self.send_error(404)
             return
         try:
@@ -124,8 +126,9 @@ class H(BaseHTTPRequestHandler):
                 L.rinforza(nid, peso=peso)
                 self.rispondi({"rinforzato": True})
                 return
-            if self.path in ("/riconsolida", "/riaccendi", "/sbiadisci"):   # 1.17.0 /riaccendi, 1.18.0 /sbiadisci
-                r = {"/riconsolida": X.riconsolida, "/riaccendi": X.riaccendi, "/sbiadisci": X.sbiadisci}[self.path]()
+            if self.path in ("/riconsolida", "/riaccendi", "/sbiadisci", "/avvicina"):   # 1.17.0, 1.18.0, 1.21.0
+                r = {"/riconsolida": X.riconsolida, "/riaccendi": X.riaccendi, "/sbiadisci": X.sbiadisci,
+                     "/avvicina": X.avvicina}[self.path]()
                 _meta[0] = None   # ricarica subito: lo stato in memoria e' quello di prima
                 lux()
                 self.rispondi(r)
@@ -154,9 +157,10 @@ class H(BaseHTTPRequestHandler):
                 return
             fin = {"da": float(d["da"]), "a": float(d["a"])} if d.get("da") is not None else {}   # qlux (09/11)
             traccia = {} if d.get("emozione") else None   # 1.19.0: via emotiva, candidati per il diario
+            coda = [str(x) for x in d["coda"]] if isinstance(d.get("coda"), list) else None   # 1.21.0
             c = lux().consegna(str(d.get("testo", "")), int(d.get("quanti", X.CONSEGNA_MAX)), esclusi=d.get("esclusi", []),
                                soglia=float(d.get("soglia", X.SOGLIA_RICHIAMO)), emozione=d.get("emozione"),
-                               traccia=traccia, **fin)
+                               traccia=traccia, coda=coda, **fin)
         except Exception as e:   # il riflesso non deve mai fermarsi per il Lux: errore = nessun ricordo
             self.rispondi({"errore": repr(e)}, 500)
             return
@@ -165,6 +169,8 @@ class H(BaseHTTPRequestHandler):
                          for x in c for i in [_info(x[1])]]} if c else {}
         if traccia is not None:
             r["traccia"] = {**traccia, "scelti": [x[0] for x in c]}
+        if coda is not None:
+            r["coda"] = coda
         self.rispondi(r)
 
     def log_message(self, *a):
