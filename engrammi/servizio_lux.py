@@ -30,6 +30,10 @@
        le correzioni come ricordo sconosciuto, come quando si cercavano in memoria.db)
        1.20.0: /consegna torna anche "ricordi": [{"codice", "nid", "dominante", "classe"}] per il vettore del riflesso
        (correzione: nid e dominante null)
+       1.22.0: /consegna con "tratti": true e "numero": N (memorinvolontaria) = ricombinazione mnemonica: "risposta" =
+       "N° ricombinazione mnemonica" + un tratto per riga; "ricordi" = i ricordi dei tratti, la dominante (quella
+       dell'engramma acceso piu' importante, per il vettore) solo sulla prima voce; "impronta" = la firma di
+       quell'engramma per l'omeostato (barra-prefill, l'utente 13/11 sera); qlux resta col ricordo intero
   GET  /salute    -> {"versione": ..., "ricordi": ..., "engrammi": ...}
 Server a un filo solo: due consegne non scrivono lo stato insieme.
 ponytail: libreria standard, niente framework"""
@@ -154,6 +158,22 @@ class H(BaseHTTPRequestHandler):
                     self.rispondi({"errore": "codice sconosciuto o testo vuoto"}, 400)
                     return
                 self.rispondi({"codice": X.correggi(d["codice"], str(d["testo"]))})
+                return
+            if d.get("tratti"):   # 1.22.0 (13/11): ricombinazione mnemonica per memorinvolontaria
+                traccia = {} if d.get("emozione") else None
+                coda = [str(x) for x in d["coda"]] if isinstance(d.get("coda"), list) else None
+                c = lux().ricombina(str(d.get("testo", "")), int(d.get("numero", 1)), esclusi=d.get("esclusi", []),
+                                    emozione=d.get("emozione"), traccia=traccia, coda=coda)
+                r = {} if c is None else {
+                    "codici": c["codici"], "risposta": c["risposta"], "impronta": c["impronta"],
+                    # il vettore: dominante dell'engramma sulla prima voce, dose da /forza su quel ricordo (riflesso)
+                    "ricordi": [{"codice": cod, "nid": n, "dominante": c["dominante"] if k == 0 else None,
+                                 "classe": L.ricordi[n].get("classe")} for k, (n, cod) in enumerate(zip(c["nid"], c["codici"]))]}
+                if traccia is not None:
+                    r["traccia"] = {**traccia, "scelti": c["nid"] if c else []}
+                if coda is not None:
+                    r["coda"] = coda
+                self.rispondi(r)
                 return
             fin = {"da": float(d["da"]), "a": float(d["a"])} if d.get("da") is not None else {}   # qlux (09/11)
             traccia = {} if d.get("emozione") else None   # 1.19.0: via emotiva, candidati per il diario

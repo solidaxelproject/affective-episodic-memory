@@ -126,10 +126,12 @@ def _sam_accesa(dove=S.UPSTREAM):
         up.close()
 
 
-def _lux_consegna(testo, esclusi, emozione=None, coda=None):
+def _lux_consegna(testo, esclusi, emozione=None, coda=None, numero=None):
     """{codici, risposta} oppure {} = nessun ricordo (1.19.0: con l'emozione anche "traccia"; 1.21.0: con la coda
     anche "coda", la coda nuova). Mai bloccare la parola dell'agente."""
     corpo = {"testo": testo, "esclusi": esclusi, "quanti": 4}   # fase 2 step b: fino a 4, stessa dominante (la regola e' nel Lux)
+    if numero is not None:   # Lux 1.22.0 (13/11): ricombinazione mnemonica, la N-esima della conversazione
+        corpo.update(tratti=True, numero=numero)
     if emozione:
         corpo["emozione"] = emozione
     if coda is not None:
@@ -276,12 +278,12 @@ def memoria(body, flusso=None, righe=None, fuori=None):
     nuova = None
     visti = {c for v in voci for c in _codici(v)} | FO._codici_nei_messaggi(msgs)   # qlux compresi (09/11)
     if flusso == "chat":
-        with _esclusi_lock:
-            _esclusi_chat[0] = set(visti)
+        with _esclusi_lock:   # Lux 1.22.0: i ricordi dei tratti restano chiedibili interi con qlux
+            _esclusi_chat[0] = {c for v in voci if not v.get("tratti") for c in _codici(v)} | FO._codici_nei_messaggi(msgs)
     if fonte:
         emozione, voce = RVE._via_emotiva(msgs, i, flusso)
         r = _lux_consegna(FO.query_riflesso(fonte), sorted(visti), emozione,
-                          None if coda is None else [c for c, _ in coda])
+                          None if coda is None else [c for c, _ in coda], numero=len(voci) + 1)
         if coda is not None and isinstance(r.get("coda"), list):   # chi c'era tiene l'ora del suo recupero
             prima = dict(map(tuple, coda))
             coda = [[c, prima.get(c, adesso)] for c in r["coda"]]
@@ -290,17 +292,15 @@ def memoria(body, flusso=None, righe=None, fuori=None):
                 tr = r.get("traccia") or {}
                 voce.update(candidati=[[n, round(p, 5), round(a, 4)] for n, p, a in tr.get("candidati", [])],
                             scelto=tr.get("scelti", []), senza=tr.get("senza", []),
-                            oltre_soglia=tr.get("oltre_soglia", False), da_coda=tr.get("da_coda", []))
+                            oltre_soglia=tr.get("oltre_soglia", False), da_coda=tr.get("da_coda", []),
+                            testa=tr.get("testa", []))   # Lux 1.22.0: il primo del richiamo
                 VE.diario(voce)
             except Exception as e:
                 C._diario({"via emotiva": f"diario non scritto: {e}"})
         if r.get("codici") and attivo:
             nuova = {"dopo": C._impronta(msgs[i]["content"]), "indice": i,
-                     "codici": r["codici"], "risposta": r["risposta"]}
+                     "codici": r["codici"], "risposta": r["risposta"], "tratti": True}
             voci = voci + [nuova]
-            if flusso == "chat":
-                with _esclusi_lock:
-                    _esclusi_chat[0] |= set(r["codici"])
             with _consegne_lock:
                 tutte = _consegne_carica()
                 tutte.pop(vecchia, None)     # la voce di prima del 10/11 passa alla chiave senza ora
@@ -334,5 +334,6 @@ def memoria(body, flusso=None, righe=None, fuori=None):
                 C._diario({"vettore": f"non preparato: {e}"})
         # 30/09 persistenza: gli id servono alla notturna (solo diario)
         C._diario({FO.TOOL_RICORDO: nuova["codici"], "vettore": [vettore[0], round(vettore[1], 5)] if vettore else None,
-                 "nid": [int(n) for _, n, _, _ in ricordi if n is not None], "flusso": flusso})   # 1.14.0: il momento
+                 "nid": [int(n) for _, n, _, _ in ricordi if n is not None], "flusso": flusso,   # 1.14.0: il momento
+                 "tratti": True, "impronta": r.get("impronta")})   # Lux 1.22.0: barra-prefill imprime solo questa
     return json.dumps(d).encode()

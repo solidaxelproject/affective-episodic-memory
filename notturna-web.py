@@ -28,6 +28,7 @@ KV_BYTES_TOK = 22900          # ~22,9 KB/token misurati (640MB / 28k tok)
 CTX_DEFAULT = 143360
 FREEZE = "/usr/local/bin/pensatoio-freeze"
 AGENTE_START = "/usr/local/bin/agente-start"
+AGENTE_STOP = "/usr/local/bin/agente-stop"
 NOTTURNA = "/usr/local/bin/notturna"
 DORMI_FLAG = "/data/workspace/memoria/.dormi-richiesto"
 AZLOG = "/data/memoria-episodica-affettiva/notturna-web-azioni.log"
@@ -77,7 +78,9 @@ def _sistema():
     mot = subprocess.run(["systemctl", "--user", "is-active", "motore-autonomia.service"],
                          capture_output=True, text=True).stdout.strip()
     mk = os.path.getmtime(MARKER) if os.path.exists(MARKER) else 0
-    return {"ctx": ctx, "su": su, "busy": busy, "slot_vivo": npast,
+    cont = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", "agente"],
+                          capture_output=True, text=True).stdout.strip() == "true"
+    return {"ctx": ctx, "su": su, "busy": busy, "slot_vivo": npast, "container": cont,
             "ultimo_turno": int(ult[-1]) if ult else None,
             "kv_ram": _tier(KV_RAM), "kv_ssd": _tier(KV_SSD),
             "riflesso": _pgrep("riflesso.py"),
@@ -135,12 +138,85 @@ def _storico():
     return out
 
 
+# 13/11: quando arriva il prossimo appunto nel pensatoio. Il motore di autonomia controlla ogni 15 s e risveglia
+# l'agente quando le guardie lo permettono (motore-autonomia.py): qui l'ultimo esito del suo giro, tradotto in un orario
+RISVEGLIO = os.path.expanduser("~/.local/state/motore-autonomia.ultimo-risveglio")
+QUIETE_S = COOLDOWN_S = 5 * 60   # FERMA_DA e COOLDOWN di motore-autonomia.py
+
+
+def _appunto():
+    """quanto manca alla prossima consegna, contato dall'ora in cui il motore ha scritto il suo esito (13/11: contare da
+    adesso faceva scivolare l'orario in avanti fra un giro del motore e l'altro, ogni 15 s)"""
+    if subprocess.run(["systemctl", "--user", "is-active", "--quiet", "motore-autonomia"]).returncode:
+        return "motore spento"
+    r = subprocess.run(["journalctl", "--user", "-u", "motore-autonomia", "-n", "1", "-o", "short-unix", "--no-pager"],
+                       capture_output=True, text=True, timeout=5)
+    riga = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
+    try:
+        quando = float(riga.split()[0])
+    except (IndexError, ValueError):
+        return "?"
+    esito = riga.split(": ", 1)[1].split("  ", 1)[-1].strip() if ": " in riga else ""
+    m = re.search(r"(?:ferma da|scriveva) (\d+)s", esito)
+    if m:
+        fine = quando + QUIETE_S - int(m.group(1))
+    elif esito == "cooldown":
+        try:
+            fine = float(open(RISVEGLIO).read()) + COOLDOWN_S
+        except (OSError, ValueError):
+            return "cooldown"
+    else:
+        return {"niente da riprendere": "nessun appunto aperto", "gate: non è il momento": "aspetta il via dello stato emotivo",
+                "risveglio innescato": "consegnato adesso"}.get(esito, esito or "?")
+    return {"fine": fine}
+
+
+# 13/11: da quanto il pensatoio potrebbe prendere lo slot. Le condizioni del riflesso (riflesso_cache._chat_ferma
+# e l'attesa in riflesso.py): nessuna richiesta della chat in volo, ultima attivita' della chat (fine risposta) e ultimo
+# "sta scrivendo" ad almeno AFK_S. L'ultima attivita' = quando il riflesso ha riscritto /tmp/chat-in-volo
+VOLO = "/tmp/chat-in-volo"
+AFK_S = 60   # riflesso_cache.AFK_S
+STANZA_CHAT = "!mainroom:localhost"
+CC_TOKEN = os.path.expanduser("~/.claude/skills/agente-chat/.cc-token")
+_scrive = [0.0]   # ultima volta che la dashboard ha visto "sta scrivendo" nella chat
+
+
+def _guarda_typing():
+    while True:
+        try:
+            req = urllib.request.Request("http://127.0.0.1:8008/_matrix/client/v3/sync?timeout=0",
+                                         headers={"Authorization": "Bearer " + open(CC_TOKEN).read().strip()})
+            d = json.loads(urllib.request.urlopen(req, timeout=10).read())
+            ev = d.get("rooms", {}).get("join", {}).get(STANZA_CHAT, {}).get("ephemeral", {}).get("events", [])
+            if any(e.get("type") == "m.typing" and e["content"].get("user_ids") for e in ev):
+                _scrive[0] = time.time()
+        except Exception:
+            pass
+        time.sleep(3)
+
+
+def _durata(sec):
+    sec = int(sec)
+    return f"{sec // 3600} h {sec % 3600 // 60} min" if sec >= 3600 else f"{sec // 60} min {sec % 60} s" if sec >= 60 \
+        else f"{sec} s"
+
+
+def _pensatoio_libero():
+    try:
+        if int(open(VOLO).read().strip() or 0) > 0:
+            return "no: la chat sta lavorando"
+        ultima = os.path.getmtime(VOLO)
+    except (OSError, ValueError):
+        ultima = 0.0
+    return {"libero": max(ultima, _scrive[0]) + AFK_S, "scrivi": time.time() - _scrive[0] < 10}
+
+
 def dati():
     mk = os.path.getmtime(MARKER) if os.path.exists(MARKER) else 0
     return {"ora": time.strftime("%H:%M:%S"),
             "ore_da_notturna": round((time.time() - mk) / 3600, 1) if mk else None,
             "notturna_armata": os.path.exists(ARMATA_FILE),
-            "gpu": _gpu(), "storico": _storico(),
+            "gpu": _gpu(), "storico": _storico(), "appunto": _appunto(), "pens_libero": _pensatoio_libero(), "adesso": time.time(),
             "sistema": _sistema()}
 
 
@@ -217,6 +293,17 @@ def azione(op, nome):
             return p.returncode == 0, open(AZLOG).read().splitlines()[-1]
         except subprocess.TimeoutExpired:
             return True, "sveglia avviata: agente-start accende container, 35B e servizi (qualche minuto)"
+    if op == "agente_spegni":
+        # 13/11: SOLO dal click umano. agente-stop salva la KV della chat, ferma lo specchio della chat e i container
+        with open(AZLOG, "a") as fh:
+            fh.write(f"{time.strftime('%F %T')} spegni l'agente (agente-stop, dalla dashboard)\n")
+            fh.flush()
+            p = subprocess.Popen([AGENTE_STOP], stdout=fh, stderr=fh, start_new_session=True)
+        try:
+            p.wait(timeout=5)
+            return p.returncode == 0, open(AZLOG).read().splitlines()[-1]
+        except subprocess.TimeoutExpired:
+            return True, "spegnimento avviato: agente-stop salva la chat e ferma i container (fino a un minuto)"
     if op == "pensatoio_stop":
         r = subprocess.run([FREEZE, "-on"], capture_output=True, text=True)
         return (r.returncode == 0,
@@ -289,6 +376,51 @@ def azione(op, nome):
     except OSError as e:
         return False, str(e)
     return False, "operazione sconosciuta"
+
+
+# 13/11: pagina per vedere e modificare il blocco appunti dell'agente (quello che legge il motore di autonomia)
+APPUNTI = "/data/workspace/memoria/appunti-agente.md"
+PAGINA_APPUNTI = r"""<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blocco appunti dell'agente</title>
+<style>
+:root{color-scheme:dark;--bg:#14161a;--card:#1d2026;--ink:#e6e3dc;--muted:#9a978f;--bordo:#3a3d44;--accent:#c79a5b;--ok:#7fb069;--err:#e07a6a}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif;padding:16px;max-width:1100px;margin:auto}
+header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+h1{font-size:20px;font-weight:650;flex:1}
+.nota{color:var(--muted);font-size:13px;margin-bottom:10px}
+textarea{width:100%;min-height:65vh;background:var(--card);color:var(--ink);border:1px solid var(--bordo);border-radius:10px;
+  padding:12px;font:13.5px/1.6 ui-monospace,monospace;resize:vertical}
+button{background:var(--card);color:var(--ink);border:1px solid var(--bordo);border-radius:8px;padding:6px 14px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--accent)}
+#esito{font-size:13px;color:var(--muted)} #esito.ok{color:var(--ok)} #esito.err{color:var(--err)}
+</style></head><body>
+<header><h1>📝 Blocco appunti dell'agente</h1>
+<button onclick="location.href='/'">← dashboard</button><button onclick="carica()">↻ ricarica</button>
+<button onclick="salva()" style="border-color:var(--accent);color:var(--accent);font-weight:600">💾 salva</button></header>
+<div class="nota">Una riga per appunto, nel formato <code>[tema]{domanda}</code>. Una riga che comincia con <code>~~</code> e' depennata e il motore
+la salta. Ogni salvataggio tiene una copia della versione di prima (<code>appunti-agente.md.prima</code>).
+<span id="info"></span></div>
+<textarea id="testo" spellcheck="false"></textarea>
+<div id="esito"></div>
+<script>
+const $=i=>document.getElementById(i);
+let caricato="";
+async function carica(){
+  const d=await (await fetch("/appunti/testo",{cache:"no-store"})).json();
+  $("testo").value=caricato=d.testo; $("info").textContent=" Ultima modifica: "+d.modificato+".";
+  $("esito").textContent=""; $("esito").className="";
+}
+async function salva(){
+  const r=await (await fetch("/appunti/salva",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({testo:$("testo").value,prima:caricato})})).json();
+  $("esito").textContent=r.msg; $("esito").className=r.ok?"ok":"err";
+  if(r.ok) carica().then(()=>{$("esito").textContent=r.msg;$("esito").className="ok";});
+}
+carica();
+</script></body></html>
+"""
 
 
 PAGINA = r"""<!doctype html>
@@ -388,21 +520,19 @@ document.addEventListener("DOMContentLoaded",disegnaTema);
   <div class="riga"><span class="k">slot</span><span id="s-busy">…</span></div>
   <div class="riga"><span class="k">riflesso (:8091)</span><span id="s-rifl">…</span></div>
   <div class="riga"><span class="k">pensatoio</span><span id="s-pens">…</span></div>
+  <div class="riga"><span class="k">pensatoio libero <i class="info" data-tip="Da quanto il pensatoio potrebbe prendere lo slot: nessuna risposta della chat in corso, e almeno 1 minuto dalla fine dell'ultima risposta e dall'ultimo &quot;sta scrivendo&quot;.">ⓘ</i></span><span class="num" id="s-penslib">…</span></div>
+  <div class="riga"><span class="k">prossimo appunto</span><span class="num" id="s-appunto">…</span></div>
   <div class="bottoni">
     <button id="btn-sveglia" onclick="fai_conf('agente_sveglia','Sveglio l\'agente? agente-start accende container, 35B e servizi (qualche minuto). Il pensatoio NON riparte da solo.')">☀ sveglia l'agente</button>
+    <button id="btn-spegni" onclick="fai_conf('agente_spegni','Spengo l\'agente? agente-stop salva la KV della chat, ferma lo specchio della chat e i container dell\'agente e di Matrix. Il 35B resta acceso.')">⏻ spegni l'agente</button>
     <button id="btn-pens-on" onclick="fai('pensatoio_start','')">▶ riavvia pensatoio</button>
     <button id="btn-pens" onclick="fai('pensatoio_stop','')">❄ ferma pensatoio</button>
   </div>
   <!-- 25/07: le due finestre dell'agente, stesso servizio sulla 8096 -->
   <div class="bottoni">
     <button onclick="finestra('/')">🧠 stream del reasoning</button>
-    <button onclick="finestra('/diario')">📖 diario del riflesso</button>
+    <button onclick="location.href='/appunti'">📝 blocco appunti</button>
     <button onclick="location.href='/lux3d/'">✨ Lux in 3D</button>
-    <button onclick="location.href='/emozioni/'">🎭 test inefficace</button>
-    <button onclick="location.href='/protocollo/'">🧪 protocollo steering</button>
-    <button onclick="location.href='/dosi/'">💉 dosi steering</button>
-    <button onclick="location.href='/confronto/'">👥 confronto steering</button>
-    <button onclick="location.href='/vettori/'">🧭 vettori emotivi</button>
   </div>
 </section>
 <section><h2>Riposo</h2>
@@ -438,6 +568,16 @@ document.addEventListener("DOMContentLoaded",disegnaTema);
 <section class="largo"><h2>Storia <i class="info" data-tip="Per ogni giorno: quanti ricordi vivono nel grafo.">ⓘ</i></h2>
   <div id="grafico"><span class="vuoto">nessun dato</span></div>
   <div class="avviso"><span style="color:var(--ric)">●</span> ricordi nel grafo</div>
+</section>
+<section class="largo"><h2>Altre pagine</h2>
+  <div class="bottoni">
+    <button onclick="finestra('/diario')">📖 diario del riflesso</button>
+    <button onclick="location.href='/emozioni/'">🎭 test inefficace</button>
+    <button onclick="location.href='/vettori/'">🧭 vettori emotivi</button>
+    <button onclick="location.href='/dosi/'">💉 dosi steering</button>
+    <button onclick="location.href='/confronto/'">👥 confronto steering</button>
+    <button onclick="location.href='/protocollo/'">🧪 protocollo steering</button>
+  </div>
 </section>
 </main>
 <footer>aggiornamento automatico ogni 3 secondi, si muovono solo i valori</footer>
@@ -575,7 +715,8 @@ async function giro(){
   $("notturna-chip").textContent=s.notturna_in_corso?"▶ notturna in corso"
     :(armata?"🌙 armata: parte al prossimo EOS del pensatoio":"");
   stato($("s-35b"),s.su,"su, agente sveglio","giù, agente dorme");
-  $("btn-sveglia").disabled=s.su;
+  $("btn-sveglia").disabled=s.su&&s.container;
+  $("btn-spegni").disabled=!s.container;
   // isteresi 10s: mentre l'agente pensa fitto, la riga non sfarfalla
   // tra "in volo" e "libero" a ogni campione
   if(s.busy) busyVisto=Date.now();
@@ -588,6 +729,8 @@ async function giro(){
   $("btn-pens").disabled=!s.pensatoio;
   $("btn-pens-on").disabled=s.pensatoio;
   $("btn-pens-on").className=s.pensatoio?"btn-verde":"";
+  timer={appunto:d.appunto, libero:s.pensatoio?d.pens_libero:"❄ congelato", scarto:d.adesso-Date.now()/1000};
+  conta();
   $("r-ultima").textContent=s.ultima_notturna;
   $("r-prossima").textContent=s.prossima;
   $("cw-ctx").textContent="· ctx "+s.ctx.toLocaleString("it")+" tok";
@@ -598,7 +741,17 @@ async function giro(){
   $("kv-manovre").innerHTML=manovre(s);
 }
 
-giro(); setInterval(giro,3000);
+// 13/11: i due timer scendono ogni secondo fra un aggiornamento e l'altro (ogni 3 s si riallineano al server)
+let timer=null;
+function durata(s){s=Math.max(0,Math.floor(s));
+  return s>=3600?Math.floor(s/3600)+" h "+Math.floor(s%3600/60)+" min":s>=60?Math.floor(s/60)+" min "+(s%60)+" s":s+" s";}
+function conta(){
+  if(!timer) return;
+  const ora=Date.now()/1000+timer.scarto, a=timer.appunto, l=timer.libero;
+  $("s-appunto").textContent=typeof a==="string"?a:(a.fine>ora?"fra "+durata(a.fine-ora):"a momenti");
+  $("s-penslib").textContent=typeof l==="string"?l:(l.libero>ora?"fra "+durata(l.libero-ora)+(l.scrivi?" (stai scrivendo)":""):"da "+durata(ora-l.libero));
+}
+giro(); setInterval(giro,3000); setInterval(conta,1000);
 </script></body></html>"""
 
 
@@ -652,6 +805,14 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(corpo)
 
     def do_GET(self):
+        if self.path in ("/appunti", "/appunti/"):
+            self._manda(PAGINA_APPUNTI.encode(), "text/html; charset=utf-8")
+            return
+        if self.path.startswith("/appunti/testo"):
+            t = open(APPUNTI, encoding="utf-8").read() if os.path.exists(APPUNTI) else ""
+            mod = time.strftime("%d/%m %H:%M", time.localtime(os.path.getmtime(APPUNTI))) if t else "mai"
+            self._manda(json.dumps({"testo": t, "modificato": mod}).encode(), "application/json")
+            return
         if self.path.startswith("/dati.json"):
             self._manda(json.dumps(dati()).encode(), "application/json")
         elif self.path == "/":
@@ -747,6 +908,23 @@ class H(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        if self.path == "/appunti/salva":   # 13/11: il blocco appunti dell'agente si modifica dalla pagina
+            try:
+                d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                ora = open(APPUNTI, encoding="utf-8").read() if os.path.exists(APPUNTI) else ""
+                if ora != d.get("prima", ""):   # intanto l'ha cambiato l'agente: niente sovrascrittura
+                    ok, msg = False, "il file e' cambiato dopo che l'hai aperto (forse l'ha scritto l'agente): ricarica e rifai la modifica"
+                else:
+                    testo = d["testo"].replace("\r\n", "\n")
+                    testo += "" if testo.endswith("\n") or not testo else "\n"
+                    open(APPUNTI + ".prima", "w", encoding="utf-8").write(ora)
+                    open(APPUNTI + ".tmp", "w", encoding="utf-8").write(testo)
+                    os.replace(APPUNTI + ".tmp", APPUNTI)
+                    ok, msg = True, "salvato alle " + time.strftime("%H:%M:%S")
+            except Exception as e:
+                ok, msg = False, str(e)
+            self._manda(json.dumps({"ok": ok, "msg": msg}).encode(), "application/json")
+            return
         if self.path.startswith("/confronto/"):
             self._confronto(self.rfile.read(int(self.headers.get("Content-Length", 0))))
             return
@@ -779,12 +957,20 @@ if __name__ == "__main__":
     # 11/10: la dashboard di addestramento e' dismessa; questa pagina prende il suo posto sulla :8095,
     # su localhost e sull'IP della VPN Tailscale (100.x)
     porta = int(sys.argv[1]) if len(sys.argv) > 1 else 8095
-    ts = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True).stdout.split()
-    indirizzi = ["127.0.0.1"] + [ip for ip in ts if ip.startswith("100.")]
-    if len(indirizzi) == 1:
-        raise SystemExit("Tailscale non ancora su: esco, systemd riprova")
-    for ip in indirizzi[1:]:
-        threading.Thread(target=ThreadingHTTPServer((ip, porta), H).serve_forever, daemon=True).start()
+    # 13/11 (blackout): su localhost subito; l'indirizzo Tailscale si aggiunge quando la VPN sale (prima, senza VPN la
+    # dashboard non partiva nemmeno sul PC)
+    def _vpn():
+        while True:
+            ts = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True).stdout.split()
+            ips = [ip for ip in ts if ip.startswith("100.")]
+            if ips:
+                for ip in ips:
+                    threading.Thread(target=ThreadingHTTPServer((ip, porta), H).serve_forever, daemon=True).start()
+                print("notturna anche su " + ", ".join(f"http://{ip}:{porta}" for ip in ips), flush=True)
+                return
+            time.sleep(10)
+    threading.Thread(target=_vpn, daemon=True).start()
+    threading.Thread(target=_guarda_typing, daemon=True).start()
     threading.Thread(target=_watcher_eos, daemon=True).start()
-    print("notturna su " + ", ".join(f"http://{ip}:{porta}" for ip in indirizzi), flush=True)
-    ThreadingHTTPServer((indirizzi[0], porta), H).serve_forever()
+    print(f"notturna su http://127.0.0.1:{porta}", flush=True)
+    ThreadingHTTPServer(("127.0.0.1", porta), H).serve_forever()

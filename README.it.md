@@ -236,6 +236,12 @@ Il riflesso (issue #1) è un proxy trasparente tra il framework agentico e il mo
 
 Un esempio dal vivo (13/11/2026). L'utente fa notare all'agente che data e ora dovrebbero apparire all'inizio del suo messaggio. Prima che l'agente risponda, il Lux recupera da solo i due ricordi che contengono proprio quell'informazione, tutti e due con la stessa emozione dominante (attesa), e il riflesso li consegna insieme. L'agente li usa subito nella risposta. **Gli elementi di memoria necessari arrivano nel momento in cui servono, recuperati automaticamente dal Lux: l'agente non deve chiamare nessuno strumento per andarli a cercare.**
 
+### Il richiamo mnemonico
+
+**TL;DR.** I ricordi arrivano all'agente da soli, nel momento in cui servono, senza che chiami nessuno strumento: il riflesso accende nel Lux gli engrammi toccati dal messaggio per parole, senso ed emozione, e consegna i ricordi collegati con un vettore emotivo che colora il ragionamento. Il passo in corso porta il richiamo più vicino a quello umano: tornano solo i pezzi toccati dal discorso, anche da ricordi diversi e al massimo quattro; l'emozione viene dall'engramma più importante che li ha accesi; i pezzi che tornano insieme imparano a legarsi. Le equazioni vengono dai modelli del richiamo tarati su dati umani (ACT-R, CMR, eCMR).
+
+Per maggiori info: [`engrammi/RECUPERO-MNEMONICO.md`](engrammi/RECUPERO-MNEMONICO.md).
+
 Il riflesso è diviso in moduli, uno per lavoro (`riflesso_*.py`: memoria involontaria, vettore, cache e cambio di conversazione, riepilogo, metadati, via emotiva), e `riflesso.py` resta il punto d'ingresso. Ho deciso di dividerlo per motivi di manutenzione del codice e perché sto imparando a programmare esattamente con questo progetto.
 
 Il riflesso ha due parti: il **riflesso testuale** (il ricordo affiora come pensiero verbale: lo si può soppesare, scartare, contraddire) e il **riflesso sentito** (il marcatore emotivo del ricordo più congruente viene re-iniettato a dose bassa per la durata di quella sola risposta, come il marcatore somatico di Damasio).

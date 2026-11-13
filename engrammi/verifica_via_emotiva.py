@@ -95,7 +95,7 @@ def main():
             if r.get("da_coda"):   # 1.21.0: la testa arriva dalla coda di un messaggio prima, non da questa scelta
                 continue
             acc = [c[2] for c in cand]
-            vero = (r.get("scelto") or [None])[0]
+            vero = (r.get("testa") or r.get("scelto") or [None])[0]   # Lux 1.22.0: la testa del richiamo
             x = scegli(cand, acc, r["k"], soglia)
             uguali += (L.catena(int(x))[0] if x is not None else None) == vero
         for k in (0.0, 0.1, 0.2, 0.3, 0.4, 0.5):

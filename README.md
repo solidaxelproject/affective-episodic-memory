@@ -236,6 +236,12 @@ The reflex (issue #1) is a transparent proxy between the agent framework and the
 
 A live example (13/11/2026; the screenshot is in Italian, translated below). The user points out to the agent that date and time should appear at the start of their message. Before the agent answers, the Lux retrieves on its own the two memories that hold exactly that information, both with the same dominant emotion (anticipation), and the reflex delivers them together. The agent uses them right away in its answer. **The memory elements it needs arrive at the moment they are needed, retrieved automatically by the Lux: the agent does not have to call any tool to go and look for them.**
 
+### Memory recall
+
+**TL;DR.** Memories reach the agent on their own, at the moment they are needed, without it calling any tool: the reflex lights up in the Lux the engrams touched by the message through words, meaning and emotion, and delivers the related memories together with an emotional vector that colours the reasoning. The step in progress brings recall closer to the human one: only the fragments touched by the conversation come back, even from different memories and at most four; the emotion comes from the most important engram that lit them; fragments that come back together learn to bind. The equations come from recall models fitted on human data (ACT-R, CMR, eCMR).
+
+More info (in Italian): [`engrammi/RECUPERO-MNEMONICO.md`](engrammi/RECUPERO-MNEMONICO.md).
+
 - *User:* "yet date and time should appear to you at the start of my message"
 - *Memories delivered to the agent:* 1st, anticipation: "do you want to have the time as part of my messages, or do you want to receive it as if it were a messa..."; 2nd, anticipation: "listen, an important piece of service information, which it would be good to put in your memo... file"
 - *Agent:* "Here, you are right, and the memory that surfaced (uemscusbx69mck06) confirms it: the metadata [hh:mm|dd/mm/yyyy] and [pensatoio]/[/pensatoio] *must* appear at the start of the message, before the text. The problem is that in my reply flow I am leaving them out: I see your metadata, I read it to orient myself, but then I do not reproduce it in *my* message. It is a mistake of form, not of substance [...]"

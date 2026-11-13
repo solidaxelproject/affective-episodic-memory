@@ -7,10 +7,10 @@
 
 COME FUNZIONA (v2, decisione di progetto, 17/07)
   Il motore NON consegna messaggi e NON ha identità in chat. Quando le guardie
-  dicono che è il momento: (1) aggancia gli appunti nudi ai ricordi via
-  /lux-read (aggancia-appunti.py), (2) innesca il job Hermes "Risveglio del
-  pensatoio" (<job-id>): l'agente si sveglia, sceglie il tema più saliente dal
-  SUO blocco, ci pensa, e il pensiero appare nel pensatoio A NOME SUO.
+  dicono che è il momento: innesca il job Hermes "Risveglio del
+  pensatoio" (<job-id>) sul primo appunto aperto del SUO blocco (13/11,
+  decisione di progetto: in ordine, tolto l'aggancio ai ricordi per salienza): l'agente si sveglia, ci pensa, e il
+  pensiero appare nel pensatoio A NOME SUO.
   Endogeno fino in fondo: il chiodo fisso riaffiora, nessun postino.
 
 LE GUARDIE (tutte qui, lato host)
@@ -39,8 +39,6 @@ STANZA = "!mainroom:example.local"   # la chat principale (per typing)
 TOKFILE = Path.home() / ".config/motore/.matrix-token"
 
 JOB_RISVEGLIO = "<job-id>"
-AGGANCIA = ["/data/jspace/venv/bin/python", "/data/memoria-episodica-affettiva/aggancia-appunti.py"]
-SIDECAR = Path("/data/workspace/memoria/.appunti-agganci.json")
 
 # 10/11 (l'utente, K9 di PIANO-RIEPILOGO-KV.md): via l'avviso di stanchezza; la notturna parte solo a mezzanotte.
 
@@ -160,26 +158,19 @@ def in_cooldown():
 
 
 def scegli_tema():
-    """La riga aperta con la salienza più alta (dal sidecar); senza agganci,
-    la prima aperta. Ritorna (riga, tema) o (None, None)."""
+    """La prima riga aperta, in ordine di file. Ritorna (riga, tema) o (None, None)."""
     if not APPUNTI.exists():
         return None, None
     aperte = [r.strip() for r in APPUNTI.read_text(encoding="utf-8").splitlines()
               if RIGA.match(r) and not r.strip().startswith("~~")]
     if not aperte:
         return None, None
-    try:
-        sidecar = json.loads(SIDECAR.read_text())
-    except (FileNotFoundError, ValueError):
-        sidecar = {}
-    riga = max(aperte, key=lambda r: sidecar.get(r, {}).get("salienza", float("-inf")))
+    riga = aperte[0]
     return riga, RIGA.match(riga)["tema"]
 
 
 def risveglia():
-    """Aggancia gli appunti, cuce il tema nel prompt, innesca il job."""
-    agg = subprocess.run(AGGANCIA, capture_output=True, text=True, timeout=300)
-    log(aggancio=agg.stdout.strip() or agg.stderr.strip()[:120])
+    """Cuce il tema nel prompt, innesca il job."""
     riga, tema = scegli_tema()
     if riga is None:
         log(risveglio="saltato", esito="nessuna riga aperta")
@@ -211,11 +202,12 @@ TTS_CODA = 60          # margine dopo la fine di un vocale
 
 
 def tts_in_corso():
-    """Una sintesi vocale attiva = connessione aperta verso :8091 o :8092
-    (una richiesta /synth resta appesa per tutta la generazione)."""
+    """Una sintesi vocale attiva = connessione aperta verso :8092
+    (una richiesta /synth resta appesa per tutta la generazione).
+    13/11: tolta la :8091, oggi e' il riflesso: la connessione di Hermes sembrava una voce e fermava i risvegli."""
     out = subprocess.run(["ss", "-Htn", "state", "established"],
                          capture_output=True, text=True, timeout=10)
-    return any((":8091" in r or ":8092" in r) for r in out.stdout.splitlines())
+    return any(":8092" in r for r in out.stdout.splitlines())
 
 
 def giro():

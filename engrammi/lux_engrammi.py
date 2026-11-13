@@ -21,6 +21,7 @@ import itertools
 import shutil
 import sys
 import time
+import unicodedata
 import urllib.request
 
 import numpy as np
@@ -35,7 +36,7 @@ from codice_ricordo import codice  # noqa: E402,F401  (B7, P4: un solo posto; lo
 # VERSIONE MAJOR.MINOR.PATCH (11/10): MAJOR = formato dei dati incompatibile (lo stato dei rinforzi non si
 # porta), MINOR = ricostruzione con regole nuove (taglio, vettori) o funzione nuova, PATCH = correzione che non
 # cambia i dati. Ogni versione ha la sua cartella: le vecchie restano.
-VERSIONE = "1.21.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
+VERSIONE = "1.22.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
 # 1.6.0 (15/10): vettori bge-m3 in float16 su disco e in RAM (misurato sul Lux dell'agente: scarto coseni max 1.4e-4,
 # richiamo identico su 94/94 indizi); il coseno si calcola a blocchi riportati in float32
 # 1.7.0 (15/10): taglio per lingua (taglia.py: le frasi inglesi sicure vanno a en_core_web_lg); costruisci()
@@ -75,8 +76,11 @@ VERSIONE = "1.21.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engr
 # POST /aggiungi); memoria.db resta archivio in sola lettura
 # 1.21.0 (l'utente 11/11 + 12/11 D1-D5, PIANO-FASE2-C-ARCHI-E-CODA.md): archi fra ricordi (lux-stato.npz, RA_*), coda dei
 # ricordi richiamati (consegna con coda), predisposizione dall'arco, avvicina di notte con la dominante ricalcolata
+# 1.22.0 (l'utente 13/11, interfase 2-3, PIANO-INTERFASE-23-TRATTI.md): ricombinazione mnemonica (ricombina, frasi): a
+# memorinvolontaria fino a 4 frasi di ricordi diversi, rinforzo per archi, impronta dell'engramma; emoji per significato
+# in accendi; dati identici alla 1.21.0 (da_precedente)
 DIR = os.environ.get("LUX_DIR", f"/data/memoria-episodica-affettiva/engrammi/lux-{VERSIONE}")
-PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"   # da qui costruisci() riprende i vettori gia' calcolati, da_precedente() copia
+PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.21.0"   # da qui costruisci() riprende i vettori gia' calcolati, da_precedente() copia
 CAMPI = ("dominante", "fonte", "cattura", "salienza", "voluto")   # 1.20.0: in ricordi[nid] con testo e firma
 NPZ, META, STATO = f"{DIR}/lux.npz", f"{DIR}/lux-meta.json", f"{DIR}/lux-stato.npz"
 CRESCITA_PIENA = 100.0   # S/S0 a cui la facilita' tocca il tetto
@@ -122,6 +126,19 @@ TRACCIA_K_MAX = 0.5   # 1.19.0: il k piu' alto con cui !verifica emotiva! rigioc
 # 1.21.0 (l'utente 11/11 + 12/11 sera D1-D5, PIANO-FASE2-C-ARCHI-E-CODA.md): archi fra ricordi, coda, firme che si avvicinano
 PESO_ARCO_RICORDI = 1.0   # D1: spinta della predisposizione per arco fra ricordi = questo x forza dell'arco (provvisorio di CC)
 FRENO_LEGATI = 0.5        # D3: fra ricordi legati il termine della stabilita' del freno pesa la meta' (provvisorio di CC)
+# 1.22.0 (l'utente 13/11, interfase 2-3, PIANO-INTERFASE-23-TRATTI.md): ricombinazione mnemonica
+FINE_FRASE = (".", "!", "?", "...", "…")   # parametri che chiudono una frase (i tratti)
+# significato delle emoji per la via semantica (l'utente 13/11; bge-m3 vede tutte le emoji quasi uguali)
+EMOJI = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "emoji-significati.json"), encoding="utf-8"))
+SIGN = {**EMOJI["emozioni"], **EMOJI["altre"]}
+INVISIBILI = {"\ufe0f", "\u200d", " "}
+# valori provvisori di CC dalla prova del 13/11 (prova-interfase-23-emozione/), funzione da RICERCA-RICHIAMO-EMOTIVO.md C1
+RICORDI_TRATTI = 10   # ricordi del richiamo da cui escono i tratti
+TRATTI_MAX = 4        # Cowan 2001: circa 4 elementi insieme nella memoria di lavoro
+TOKEN_MAX = 512       # 13/11: quello che arriva all'agente sta sotto i 512 token
+CAR_TOKEN = 4         # stima: 4 caratteri per token
+S_MAX, LAMBDA_W, GAMMA, LAMBDA_0, TAU = 2.0, 1.0, 1.0, 1.0, 0.0
+TRADUZIONE_L29 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "via-emotiva", "traduzione-l29.npz")
 INVERSO = {}
 for _k, _v in T.PREPOSIZIONI.items():   # forma canonica: la prima della tabella (di, non d'; a, non ad; tra, non fra)
     INVERSO.setdefault(_v, _k)
@@ -381,8 +398,7 @@ def costruisci():
 
 
 def da_precedente():
-    """1.21.0: la versione PRECEDENTE (1.20.0) identica, piu' avvicina_da = oggi vissuto in lux.npz (D2: il rodaggio
-    dell'avvicinamento parte dalla produzione). Archi fra ricordi: nessuno (nascono con le consegne). Si lancia alla
+    """1.22.0: la versione PRECEDENTE (1.21.0) identica (1.21.0: piu' avvicina_da = oggi vissuto, D2). Si lancia alla
     messa in produzione, a servizi fermi: la PRECEDENTE cambia fino all'ultimo. La PRECEDENTE resta com'e'."""
     if os.path.exists(NPZ):
         sys.exit(f"{NPZ} esiste gia'")
@@ -392,13 +408,11 @@ def da_precedente():
         shutil.copy2(f"{PRECEDENTE}/lux-stato.npz", STATO)
         if os.path.exists(f"{PRECEDENTE}/lux-l29.npz"):
             shutil.copy2(f"{PRECEDENTE}/lux-l29.npz", f"{DIR}/lux-l29.npz")
-        z = dict(np.load(f"{PRECEDENTE}/lux.npz"))
-        z["avvicina_da"] = np.float64(LUX.orologio())
-        np.savez(NPZ + ".tmp.npz", **z)
+        shutil.copy2(f"{PRECEDENTE}/lux.npz", NPZ + ".tmp.npz")
         shutil.copy2(f"{PRECEDENTE}/lux-meta.json", META + ".tmp")
         os.replace(NPZ + ".tmp.npz", NPZ)
         os.replace(META + ".tmp", META)
-    print(f"{DIR}: copia di {PRECEDENTE}, avvicina_da = {float(z['avvicina_da'])}")
+    print(f"{DIR}: copia di {PRECEDENTE}")
 
 
 def aggiungi_ricordo(v):
@@ -760,6 +774,45 @@ def sbiadisci(oggi=None):
             "freno_medio": round(float(f.mean()), 3)}
 
 
+
+def e_emoji(t):
+    """1.22.0: engramma fatto solo di simboli (emoji, spunte, segni)"""
+    c = [ch for ch in t if ch not in INVISIBILI]
+    return bool(c) and all(unicodedata.category(ch) in ("So", "Sk", "Mn") for ch in c)
+
+
+def significato(t):
+    """1.22.0: il significato di un'emoji (emoji-significati.json, gesti dell'utente; assente = nome Unicode); None =
+    nessun significato, si accende solo se identica"""
+    parti = []
+    for ch in t:
+        if ch in INVISIBILI:
+            continue
+        if ch in SIGN:
+            if SIGN[ch]:
+                parti.append(SIGN[ch])
+        else:
+            parti.append(unicodedata.name(ch, "").lower())
+    return ", ".join(p for p in parti if p) or None
+
+
+def umore44():
+    """1.22.0: (u sui 44 assi della traduzione L29, assi, calma, D = distanza dalla calma, D normale) dallo stato vero
+    dell'agente col ritorno alla base per le ore passate (come stato.carica), senza rumore e senza scrivere; file assente o
+    rotto = calma"""
+    tr = np.load(TRADUZIONE_L29, allow_pickle=True)
+    assi, calma, d_norm = [str(a) for a in tr["assi"]], tr["calma"].astype(np.float64), float(tr["D_normale"])
+    try:
+        d = json.load(open(OMEOSTATO))
+        conf = json.load(open(os.path.join(os.path.dirname(OMEOSTATO), "eutimia.json")))
+        k = 1 - np.exp(-conf["theta_ora"] * max(0.0, (time.time() - d["ts"]) / 3600))
+        z = {e: v + k * (conf["baseline"].get(e, 0.0) - v) for e, v in d["stato"].items()}
+    except (OSError, ValueError, KeyError, TypeError):
+        return calma.copy(), assi, calma, 0.0, d_norm
+    u = np.asarray([z.get(a, 0.0) for a in assi])
+    return u, assi, calma, float(np.linalg.norm(u - calma)), d_norm
+
+
 class Lux:
     def __init__(self):
         self._apri(DIR)
@@ -789,6 +842,7 @@ class Lux:
         self.testi, self.altri, self.ricordi = m["engrammi"], m["altri_parametri"], {int(k): v for k, v in m["ricordi"].items()}
         self.chiavi = {chiave(t): i for i, t in enumerate(self.testi)}
         self.da_codice = {r["codice"]: n for n, r in self.ricordi.items()}
+        self._Vs = None   # 1.22.0: via semantica con le emoji per significato (_vs)
         self.vivi = self.A[:, 1] >= 0   # 1.11.0: posizione -1 = legame fra ricordi, fuori da ricomposizione e richiamo
         self.per_ricordo = {}
         self.per_engramma = {}
@@ -799,6 +853,9 @@ class Lux:
             self.per_engramma.setdefault(a, set()).add(j)
             self.per_engramma.setdefault(b, set()).add(j)
             self.coppie.setdefault((min(a, b), max(a, b)), set()).add(r)
+        self.fan = np.asarray([max(1, len(self.per_engramma.get(i, ()))) for i in range(len(self.V))])   # 1.22.0
+        nC = np.linalg.norm(self.C, axis=1)
+        self.normC = float(np.median(nC[nC > 0])) if (nC > 0).any() else 1.0   # 1.22.0: scala delle cariche
         self.pronti = {}   # 1.12.0: ricordo -> (spinta, ora) lasciata dalle consegne. ponytail: solo RAM, si perde al
         # riavvio del servizio (effetto di ore); su disco se servira' sopravvivere ai riavvii
         self.corregge, self.corretto_da = {}, {}   # correzione -> ricordo corretto, e al contrario
@@ -875,8 +932,13 @@ class Lux:
     def rinforza(self, nid, oggi=None, peso=1.0):
         """richiamo riuscito del ricordo nid (consegnato all'agente): ogni suo arco cresce con FSRS (tanto piu' quanto stava
         svanendo; stesso giorno vissuto = crescita zero) e riparte da oggi. Salva lo stato. peso < 1: eco (B5)"""
+        self.rinforza_archi(self.per_ricordo.get(nid, []), oggi, peso)
+
+    def rinforza_archi(self, js, oggi=None, peso=1.0):
+        """1.22.0 (l'utente 13/11, D1 di PIANO-INTERFASE-23-TRATTI.md): richiamo riuscito degli archi js (i tratti arrivati
+        all'agente): crescono con FSRS e ripartono da oggi. Salva lo stato"""
         oggi = LUX.orologio() if oggi is None else oggi
-        js = self.per_ricordo.get(nid, [])
+        js = list(js)
         R = LUX.curva(np.maximum(oggi - self.U[js], 0.0), self.S[js])
         self.S[js] = [LUX.cresci(float(s), float(r), peso) for s, r in zip(self.S[js], R)]
         self.U[js] = oggi
@@ -1092,6 +1154,176 @@ class Lux:
         pezzi += [("arco", param_testo(p, self.altri)) for p in info["coda"]]
         return unisci(pezzi)
 
+    def frasi(self, nid):
+        """1.22.0 (l'utente 13/11, interfase 2-3): il ricordo diviso in frasi [(testo, archi, engrammi scritti nella
+        frase)]. Una frase finisce col parametro di fine frase compreso; l'arco che lo porta va alla frase dopo (porta la
+        sua prima parola; la sua parola di partenza resta della frase prima). Una frase senza lettere (numero di elenco
+        "2.", emoji sola) si unisce alla frase dopo, o alla prima se e' l'ultima; una che comincia con un segno che si
+        attacca (":D") alla frase prima. Unite di seguito ridanno ricomponi(nid)"""
+        info, out = self.ricordi[nid], []
+        pezzi, js, eng = [("arco", param_testo(p, self.altri)) for p in info["testa"]], [], set()
+        for k, j in enumerate(sorted(self.per_ricordo.get(nid, []), key=lambda j: self.A[j, 1])):
+            _, pos, a, b, p0, n = self.A[j].tolist()
+            js.append(j)
+            if k == 0:
+                pezzi.append(("nodo", self.testi[a]))
+                eng.add(a)
+            if pos == 0:
+                continue
+            ps, fine = [param_testo(int(p), self.altri) for p in self.P[p0:p0 + n]], False
+            for i, t in enumerate(ps):
+                pezzi.append(("arco", t))
+                fine = fine or t in FINE_FRASE
+                dopo = ps[i + 1] if i + 1 < len(ps) else self.testi[b]
+                # revisione 13/11: i segni che si attaccano (!) ... ;) e un engramma che e' solo un punto restano con la
+                # fine della frase
+                if fine and len(js) > 1 and not (dopo in ",.;:!?)…" or dopo.startswith("...")):
+                    out.append((unisci(pezzi), js[:-1], eng))
+                    pezzi, js, eng, fine = [], [j], set(), False
+            pezzi.append(("nodo", self.testi[b]))
+            eng.add(b)
+        pezzi += [("arco", param_testo(p, self.altri)) for p in info["coda"]]
+        if any(k == "nodo" for k, _ in pezzi) or not out:
+            out.append((unisci(pezzi), js, eng))
+        else:   # dopo l'ultimo punto solo parametri (una parentesi): restano attaccati all'ultima frase
+            out[-1] = (unisci([("nodo", out[-1][0]), *pezzi]), out[-1][1] + js, out[-1][2])
+        unite = []
+        for t, js, eng in out:
+            # ":D" dopo un punto va con la frase prima; una frase senza lettere va con questa
+            if unite and (t.startswith(tuple(",.;:!?)…")) or not any(c.isalpha() for c in unite[-1][0])):
+                t0, js0, eng0 = unite.pop()
+                t, js, eng = unisci([("nodo", t0), ("nodo", t)]), js0 + js, eng0 | eng
+            unite.append((t, js, eng))
+        if len(unite) > 1 and not any(c.isalpha() for c in unite[-1][0]):
+            t1, js1, eng1 = unite.pop()
+            t0, js0, eng0 = unite.pop()
+            unite.append((unisci([("nodo", t0), ("nodo", t1)]), js0 + js1, eng0 | eng1))
+        return unite
+
+    def _guida(self, att, Fa, col):
+        """1.22.0 (l'utente 13/11, prova v2b + ritocco): (engramma, firma sui 44 assi, firma nella scala delle firme dei
+        ricordi) dell'engramma acceso piu' importante, o (None, None, None). Firma = cariche di tutti i suoi archi vivi
+        pesate da F x W; importanza = acceso x max(0, S_MAX - ln fan) x ln(1 + fan) x forza media dei suoi archi x
+        ln(1 + ||firma|| / normC). La seconda firma toglie fattore e W dalle cariche (come firma_ora): e' l'impronta
+        sull'omeostato (l'utente 13/11 sera: una ricombinazione imprime solo l'emozione del vettore)"""
+        k = self.vivi & self.C.any(1)
+        w = (Fa * self.W)[k].astype(np.float64)
+        C, a, b = self.C[k][:, col].astype(np.float64), self.A[k, 2], self.A[k, 3]
+        Cz = C / (self.W[k, None].astype(np.float64) * self.fattore[col] + 1e-12)
+        n = len(self.V)
+        S, Sz, N, cnt = np.zeros((n, len(col))), np.zeros((n, len(col))), np.zeros(n), np.zeros(n)
+        d = a != b   # un arco su se stesso conta una volta
+        for idx, m in ((a, slice(None)), (b[d], d)):
+            np.add.at(S, idx, C[m] * w[m][:, None])
+            np.add.at(Sz, idx, Cz[m] * w[m][:, None])
+            np.add.at(N, idx, w[m])
+            np.add.at(cnt, idx, 1)
+        meglio, imp_max = None, 0.0
+        for i, x in att.items():
+            if N[i] <= 0:
+                continue
+            f = S[i] / N[i]
+            imp = (x * max(0.0, S_MAX - float(np.log(self.fan[i]))) * float(np.log1p(self.fan[i])) * N[i] / cnt[i]
+                   * float(np.log1p(np.linalg.norm(f) / self.normC)))
+            if imp > imp_max:
+                meglio, imp_max = (i, f, Sz[i] / N[i]), imp
+        return meglio or (None, None, None)
+
+    def _attivazione(self, att, js, eng, Fa, col, du, D, D_norm):
+        """1.22.0: A_j degli archi js di una frase (RICERCA-RICHIAMO-EMOTIVO.md C1): forza + diffusione + senso + carica
+        + umore. La diffusione conta solo gli engrammi scritti nella frase (eng): la parola di partenza dell'arco che
+        apre la frase sta nella frase prima"""
+        js = np.asarray(js)
+        Cu = self.C[js][:, col].astype(np.float64)
+        cos = (Cu @ du) / (np.linalg.norm(Cu, axis=1) * (np.linalg.norm(du) + 1e-12) + 1e-12) if D > 0 else 0.0
+        diff = np.asarray([sum(att.get(e, 0.0) * (S_MAX - np.log(self.fan[e]))
+                               for e in {int(self.A[j, 2]), int(self.A[j, 3])} & eng) for j in js])
+        return (np.log(np.maximum(Fa[js], 1e-6)) + diff + LAMBDA_W * self.W[js].astype(np.float64)
+                + GAMMA * np.log1p(np.linalg.norm(self.C[js], axis=1) / self.normC) + LAMBDA_0 * (D / D_norm) * cos)
+
+    def ricombina(self, testo, numero=1, oggi=None, esclusi=(), ora=None, soglia=SOGLIA_RICHIAMO, emozione=None,
+                  traccia=None, coda=None):
+        """1.22.0 (l'utente 13/11, interfase 2-3, PIANO-INTERFASE-23-TRATTI.md): la ricombinazione mnemonica di
+        memorinvolontaria. Candidati = ricordi in coda + i primi RICORDI_TRATTI del richiamo, se almeno uno passa la
+        soglia (senza esclusi e ricordi corretti); di ognuno la frase accesa piu' attiva (A_j); affiorano i tratti sopra
+        TAU, i piu' attivi prima, al massimo TRATTI_MAX e TOKEN_MAX. Rinforza solo gli archi dei tratti (D1). Coda e archi fra ricordi come
+        la 1.21.0. Torna None (niente) o {"risposta", "nid", "codici", "archi", "dominante", "impronta"}: dominante =
+        quella dell'engramma acceso piu' importante (il vettore), impronta = la sua firma per l'omeostato"""
+        oggi = LUX.orologio() if oggi is None else oggi
+        ora = time.time() if ora is None else ora
+        via = {self.da_codice[c] for c in esclusi if c in self.da_codice} | self.errati
+        att = self.accendi(testo)
+        punti = [(n, p) for n, p in self.richiama(testo, len(self.ricordi), 0.0, oggi=oggi, ora=ora, emozione=emozione,
+                                                   traccia=traccia, att=att) if n not in via]
+        # la soglia decide SE affiora qualcosa (come prima); se si', i tratti escono dai primi RICORDI_TRATTI anche sotto
+        # soglia (come la prova del 13/11): pezzi di ricordi piu' deboli si ricombinano con quello che ha passato la soglia
+        sopra = [n for n, p in punti if p >= soglia]
+        selezione = [n for n, _ in punti[:RICORDI_TRATTI]] if sopra else []
+        vecchi = [] if coda is None else [n for c in dict.fromkeys(coda) for n in [self.da_codice.get(c)]
+                                          if n is not None and n not in via]
+        u, assi, calma, D, D_norm = umore44()
+        col = [EMOZIONI.index(a) for a in assi]
+        Fa = self.facilita_archi(oggi)
+        cand = []
+        for n in dict.fromkeys(vecchi + selezione):
+            meglio = None
+            for t, js, eng in self.frasi(n):
+                # revisione 13/11: un ricordo in coda e' gia' stato richiamato, la sua frase piu' attiva entra anche se il
+                # messaggio nuovo non ne accende nessuna parola (senza, la coda non usciva quasi mai: 6 su 236)
+                if js and (n in vecchi or eng & att.keys()):
+                    a = float(self._attivazione(att, js, eng, Fa, col, u - calma, D, D_norm).max())
+                    if meglio is None or a > meglio[0]:
+                        meglio = (a, n, " ".join(t.split()), js)   # un tratto per riga: niente a capo dentro
+            if meglio:
+                cand.append(meglio)
+        presi, tok = [], 0.0
+        for a, n, t, js in sorted(cand, key=lambda c: -c[0]):
+            if a > TAU and len(presi) < TRATTI_MAX and tok + len(t) / CAR_TOKEN <= TOKEN_MAX:
+                presi.append((n, t, js))
+                tok += len(t) / CAR_TOKEN
+        mostrati = [n for n, _, _ in presi]
+        if coda is not None:   # 1.21.0: la selezione entra in coda; chi e' mostrato ne esce
+            nuovi = [n for n in sopra[:CONSEGNA_MAX] if n not in vecchi]
+            q = in_coda(vecchi, nuovi, lambda a, b: self._rango(a) > self._rango(b))
+            self._coseleziona(set(sopra[:CONSEGNA_MAX]) | {n for n in mostrati if n not in vecchi}, oggi)
+            coda[:] = [self.ricordi[n]["codice"] for n in q if n not in mostrati]
+        if traccia is not None and emozione:   # 1.19.0, come consegna: il diario della via emotiva
+            ps = {n: p for n, p, _ in traccia.get("candidati", [])}
+            traccia["senza"] = [n for n, p, _ in traccia.get("candidati", []) if p >= soglia and n not in via][:RICORDI_TRATTI]
+            traccia["da_coda"] = [n for n in mostrati if n in vecchi]
+            # revisione 13/11: l'emozione conta se ha deciso che affiorasse qualcosa; testa = il primo del richiamo
+            # (i tratti mostrati sono in ordine di attivazione, non di richiamo): la usa !verifica emotiva!
+            traccia["oltre_soglia"] = any(ps.get(n, soglia) < soglia for n in sopra)
+            traccia["testa"] = sopra[:1]
+            traccia["candidati"] = [x for x in traccia.get("candidati", []) if x[1] * (1 + TRACCIA_K_MAX) >= soglia]
+        if not presi:
+            if coda is not None:
+                self.salva_stato()
+            return None
+        for n in mostrati:   # 1.17.0: ultimo richiamo
+            self.R[n] = ora
+        archi = [j for _, _, js in presi for j in js]
+        self.rinforza_archi(archi, oggi)   # D1: solo i tratti; salva lo stato (anche coda e archi fra ricordi)
+        self.predisponi(mostrati, ora, oggi)
+        _, firma, fz = self._guida(att, Fa, col)
+        return {"risposta": "\n".join([f"{numero}° ricombinazione mnemonica"] + [t for _, t, _ in presi]),
+                "nid": mostrati, "codici": [self.ricordi[n]["codice"] for n in mostrati], "archi": archi,
+                "dominante": None if firma is None else assi[int(np.argmax(firma))],
+                "impronta": None if fz is None else {e: float(v) for e, v in zip(assi, fz)}}
+
+    def _vs(self):
+        """1.22.0: vettori della via semantica, con gli engrammi-emoji rifatti sul loro significato (zero se non ne
+        hanno); calcolati al primo accendi, non all'avvio (l'embedder puo' non esserci ancora)"""
+        if self._Vs is None:
+            Vs = self.V.copy()
+            em = [i for i, t in enumerate(self.testi) if e_emoji(t)]
+            con = [(i, g) for i in em for g in [significato(self.testi[i])] if g]
+            if con:
+                Vs[[i for i, _ in con]] = embed([g for _, g in con]).astype(VTIPO)
+            Vs[[i for i in em if significato(self.testi[i]) is None]] = 0
+            self._Vs = Vs
+        return self._Vs
+
     def accendi(self, testo):
         """innesco: via testuale (stesso engramma = 1) e via semantica (bge-m3, coseno sopra soglia riscalato 0-1)"""
         att = {}
@@ -1102,7 +1334,11 @@ class Lux:
             i = self.chiavi.get(chiave(t))
             if i is not None:
                 att[i] = 1.0
-        S = coseni(embed(nodi), self.V)
+        q = [significato(t) if e_emoji(t) else t for t in nodi]   # 1.22.0: le emoji per significato
+        idx = [k for k, v in enumerate(q) if v]
+        if not idx:
+            return att
+        S = coseni(embed([q[k] for k in idx]), self._vs())
         for row in S:
             for i in np.where(row >= SOGLIA_SEM)[0]:
                 att[int(i)] = max(att.get(int(i), 0), float((row[i] - SOGLIA_SEM) / (1 - SOGLIA_SEM)))
@@ -1127,14 +1363,14 @@ class Lux:
         Z /= np.linalg.norm(Z, axis=1, keepdims=True) + 1e-9
         return Z @ np.asarray(emozione["q"], np.float64)
 
-    def richiama(self, testo, quanti=3, soglia=SOGLIA_RICHIAMO, oggi=None, ora=None, emozione=None, traccia=None):
+    def richiama(self, testo, quanti=3, soglia=SOGLIA_RICHIAMO, oggi=None, ora=None, emozione=None, traccia=None, att=None):
         """scelta: per ogni indice di ricordo la somma delle attivazioni dei suoi engrammi, pesate 1/log(1+ricordi che
         usano l'engramma) (gli engrammi comuni contano poco) e divise per sqrt(engrammi del ricordo) (i lunghi non vincono
         sempre), poi moltiplicate per la facilita' del ricordo (archi vivi). Tarato l'11/10 su 40 indizi: soglia 0.8, nessuna propagazione nella scelta (abbassava da 35 a 30).
         1.12.0: poi per la predisposizione lasciata dalle consegne (1 + spinta, fino a PREDISPOSIZIONE_MAX), solo sui
         ricordi che l'indizio ha gia' acceso."""
         punti = {}
-        for i, a in self.accendi(testo).items():
+        for i, a in (self.accendi(testo) if att is None else att).items():   # 1.22.0: att gia' calcolata
             ric = {int(self.A[j, 0]) for j in self.per_engramma.get(i, ())}
             for r in ric:
                 punti[r] = punti.get(r, 0) + a / np.log(1 + len(ric))

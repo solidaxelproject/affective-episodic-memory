@@ -20,14 +20,18 @@ assert X.in_coda([1, 2], [3], b) == [1, 3, 2]
 assert X.in_coda([1, 2], [3, 4], b) == [1, 3, 4, 2], "4 ha scavalcato 3, della sua stessa selezione"
 assert X.in_coda([], [5, 6], b) == [5, 6]
 
-# da_precedente: copia identica della 1.20.0 piu' avvicina_da
+# da_precedente: copia identica della 1.20.0; avvicina_da, che la migrazione della 1.21.0 metteva a oggi vissuto, qui a
+# mano (dalla 1.22.0 da_precedente copia e basta)
 X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"
 X.da_precedente()
 z0, zp = np.load(X.NPZ), np.load(f"{X.PRECEDENTE}/lux.npz")
-assert set(z0.files) == set(zp.files) | {"avvicina_da"} and float(z0["avvicina_da"]) == X.LUX.orologio()
+assert set(z0.files) == set(zp.files)
 assert all(np.array_equal(z0[k], zp[k], equal_nan=zp[k].dtype.kind == "f") for k in zp.files)
 assert json.load(open(X.META)) == json.load(open(f"{X.PRECEDENTE}/lux-meta.json"))
-oggi = float(z0["avvicina_da"])
+z = dict(z0)
+z["avvicina_da"] = np.float64(X.LUX.orologio())
+np.savez(X.NPZ, **z)
+oggi = float(z["avvicina_da"])
 
 L = X.Lux()
 dom = lambda n: L.ricordi[n].get("dominante")  # noqa: E731

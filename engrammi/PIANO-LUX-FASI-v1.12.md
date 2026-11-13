@@ -357,6 +357,17 @@ Da qui nasce anche la pagina pubblica sul recupero mnemonico (13/11): una pagina
 linkata nei README sotto un breve riassunto (compreso il richiamo senza tool call dello screenshot del 12/11); questa
 funzione ne diventa una sezione, coi paper determinanti linkati.
 
+**Nome e testi APPROVATI dall'utente (13/11 sera, parola per parola, non cambiarli):**
+- nome della funzione: **ricombinazione mnemonica** (i pezzi di ricordi diversi rimessi insieme; Schacter e Addis 2007,
+  simulazione episodica costruttiva); "interconnessione engrammatica" = i ponti fra engrammi.
+- risposta di memorinvolontaria: prima riga `N° ricombinazione mnemonica` (N conta le ricombinazioni arrivate nella
+  conversazione: 1°, 2°, ...), poi un tratto per riga, nell'ordine di attivazione, nient'altro. Esempio:
+      1° ricombinazione mnemonica
+      Buongiorno l'agente, come stai oggi?
+      è un regalo. 🌅
+- voce da aggiungere alla MEMORY dell'agente (parte A, la mette l'utente o CC col container acceso):
+      Ricombinazione mnemonica: pezzi di ricordi diversi che il discorso ha riacceso insieme. Ogni riga viene da un momento diverso: non sono un unico ricordo.
+
 **Da decidere:** regola del cammino (da quali engrammi si parte, come si sceglie a un bivio, quando ci si
 ferma); quanti tratti e quanti ricordi diversi al massimo; le parole con cui appaiono i tratti e il loro contesto;
 l'emozione di un tratto (oggi la firma e' del ricordo intero) e il vettore di steering con tratti di ricordi diversi;
