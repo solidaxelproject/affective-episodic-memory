@@ -34,6 +34,7 @@
        "N° ricombinazione mnemonica" + un tratto per riga; "ricordi" = i ricordi dei tratti, la dominante (quella
        dell'engramma acceso piu' importante, per il vettore) solo sulla prima voce; "impronta" = la firma di
        quell'engramma per l'omeostato (barra-prefill, l'utente 13/11 sera); qlux resta col ricordo intero
+  POST /ponti {} -> {"ponti", "provvisori", "calati", "tagliati"} (1.23.0, notturna dopo /avvicina: potatura dei ponti)
   GET  /salute    -> {"versione": ..., "ricordi": ..., "engrammi": ...}
 Server a un filo solo: due consegne non scrivono lo stato insieme.
 ponytail: libreria standard, niente framework"""
@@ -97,13 +98,14 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/salute":
-            self.rispondi({"versione": X.VERSIONE, "ricordi": len(lux().ricordi), "engrammi": len(L.testi)})
+            self.rispondi({"versione": X.VERSIONE, "ricordi": len(lux().ricordi), "engrammi": len(L.testi),
+                           "ponti": len(L.ponti)})
         else:
             self.send_error(404)
 
     def do_POST(self):
         if self.path not in ("/consegna", "/correggi", "/rinforza", "/richiama", "/sovrapposizione", "/forza", "/riconsolida",
-                             "/riaccendi", "/sbiadisci", "/aggiungi", "/ricordo", "/avvicina"):
+                             "/riaccendi", "/sbiadisci", "/aggiungi", "/ricordo", "/avvicina", "/ponti"):
             self.send_error(404)
             return
         try:
@@ -130,9 +132,9 @@ class H(BaseHTTPRequestHandler):
                 L.rinforza(nid, peso=peso)
                 self.rispondi({"rinforzato": True})
                 return
-            if self.path in ("/riconsolida", "/riaccendi", "/sbiadisci", "/avvicina"):   # 1.17.0, 1.18.0, 1.21.0
+            if self.path in ("/riconsolida", "/riaccendi", "/sbiadisci", "/avvicina", "/ponti"):   # 1.17.0-1.23.0
                 r = {"/riconsolida": X.riconsolida, "/riaccendi": X.riaccendi, "/sbiadisci": X.sbiadisci,
-                     "/avvicina": X.avvicina}[self.path]()
+                     "/avvicina": X.avvicina, "/ponti": X.pota_ponti}[self.path]()
                 _meta[0] = None   # ricarica subito: lo stato in memoria e' quello di prima
                 lux()
                 self.rispondi(r)

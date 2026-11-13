@@ -1,0 +1,47 @@
+{
+ "messaggi": 1000,
+ "per_giorno": 50,
+ "N": {
+  "accesso": 0.62,
+  "esche": 0.0,
+  "nati": 0,
+  "ponti": 0,
+  "stabili": 0,
+  "centrali": 0.9979640718562874,
+  "periferici": 0.99775390625
+ },
+ "P": {
+  "accesso": 0.62,
+  "esche": 0.006773101112723754,
+  "nati": 223,
+  "ponti": 7,
+  "stabili": 7,
+  "centrali_diff": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "periferici_diff": [
+   0.0,
+   0.0,
+   0.0
+  ]
+ },
+ "S": {
+  "accesso": 0.62,
+  "esche": 0.00725689404934688,
+  "nati": 262,
+  "ponti": 14,
+  "stabili": 14,
+  "centrali_diff": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "periferici_diff": [
+   0.0,
+   0.0,
+   0.0
+  ]
+ }
+}

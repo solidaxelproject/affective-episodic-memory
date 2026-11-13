@@ -1,0 +1,77 @@
+N: 100 messaggi, 0 ponti, 11 s
+N: 200 messaggi, 0 ponti, 22 s
+N: 300 messaggi, 0 ponti, 33 s
+N: 400 messaggi, 0 ponti, 44 s
+N: 500 messaggi, 0 ponti, 56 s
+N: 600 messaggi, 0 ponti, 67 s
+N: 700 messaggi, 0 ponti, 79 s
+N: 800 messaggi, 0 ponti, 89 s
+N: 900 messaggi, 0 ponti, 100 s
+N: 1000 messaggi, 0 ponti, 112 s
+P: 100 messaggi, 22 ponti, 11 s
+P: 200 messaggi, 15 ponti, 21 s
+P: 300 messaggi, 10 ponti, 33 s
+P: 400 messaggi, 20 ponti, 44 s
+P: 500 messaggi, 20 ponti, 56 s
+P: 600 messaggi, 12 ponti, 67 s
+P: 700 messaggi, 21 ponti, 78 s
+P: 800 messaggi, 18 ponti, 88 s
+P: 900 messaggi, 10 ponti, 99 s
+P: 1000 messaggi, 13 ponti, 110 s
+S: 100 messaggi, 26 ponti, 11 s
+S: 200 messaggi, 22 ponti, 21 s
+S: 300 messaggi, 16 ponti, 32 s
+S: 400 messaggi, 25 ponti, 43 s
+S: 500 messaggi, 28 ponti, 54 s
+S: 600 messaggi, 13 ponti, 65 s
+S: 700 messaggi, 24 ponti, 76 s
+S: 800 messaggi, 22 ponti, 87 s
+S: 900 messaggi, 16 ponti, 98 s
+S: 1000 messaggi, 20 ponti, 109 s
+{
+ "messaggi": 1000,
+ "per_giorno": 50,
+ "N": {
+  "accesso": 0.62,
+  "esche": 0.0,
+  "nati": 0,
+  "ponti": 0,
+  "stabili": 0,
+  "centrali": 0.9979640718562874,
+  "periferici": 0.99775390625
+ },
+ "P": {
+  "accesso": 0.62,
+  "esche": 0.006773101112723754,
+  "nati": 223,
+  "ponti": 7,
+  "stabili": 7,
+  "centrali_diff": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "periferici_diff": [
+   0.0,
+   0.0,
+   0.0
+  ]
+ },
+ "S": {
+  "accesso": 0.62,
+  "esche": 0.00725689404934688,
+  "nati": 262,
+  "ponti": 14,
+  "stabili": 14,
+  "centrali_diff": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "periferici_diff": [
+   0.0,
+   0.0,
+   0.0
+  ]
+ }
+}

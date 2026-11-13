@@ -36,7 +36,7 @@ from codice_ricordo import codice  # noqa: E402,F401  (B7, P4: un solo posto; lo
 # VERSIONE MAJOR.MINOR.PATCH (11/10): MAJOR = formato dei dati incompatibile (lo stato dei rinforzi non si
 # porta), MINOR = ricostruzione con regole nuove (taglio, vettori) o funzione nuova, PATCH = correzione che non
 # cambia i dati. Ogni versione ha la sua cartella: le vecchie restano.
-VERSIONE = "1.22.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
+VERSIONE = "1.23.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
 # 1.6.0 (15/10): vettori bge-m3 in float16 su disco e in RAM (misurato sul Lux dell'agente: scarto coseni max 1.4e-4,
 # richiamo identico su 94/94 indizi); il coseno si calcola a blocchi riportati in float32
 # 1.7.0 (15/10): taglio per lingua (taglia.py: le frasi inglesi sicure vanno a en_core_web_lg); costruisci()
@@ -79,8 +79,10 @@ VERSIONE = "1.22.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engr
 # 1.22.0 (l'utente 13/11, interfase 2-3, PIANO-INTERFASE-23-TRATTI.md): ricombinazione mnemonica (ricombina, frasi): a
 # memorinvolontaria fino a 4 frasi di ricordi diversi, rinforzo per archi, impronta dell'engramma; emoji per significato
 # in accendi; dati identici alla 1.21.0 (da_precedente)
+# 1.23.0 (l'utente 13/11, interfase 2-3, PIANO-PONTI-123.md): ponti fra engrammi (nascita, cattura, rinforzo, calo
+# notturno con POST /ponti, effetto ventaglio senza tetto); dati identici alla 1.22.0 (da_precedente)
 DIR = os.environ.get("LUX_DIR", f"/data/memoria-episodica-affettiva/engrammi/lux-{VERSIONE}")
-PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.21.0"   # da qui costruisci() riprende i vettori gia' calcolati, da_precedente() copia
+PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.22.0"   # da qui costruisci() riprende i vettori gia' calcolati, da_precedente() copia
 CAMPI = ("dominante", "fonte", "cattura", "salienza", "voluto")   # 1.20.0: in ricordi[nid] con testo e firma
 NPZ, META, STATO = f"{DIR}/lux.npz", f"{DIR}/lux-meta.json", f"{DIR}/lux-stato.npz"
 CRESCITA_PIENA = 100.0   # S/S0 a cui la facilita' tocca il tetto
@@ -138,6 +140,13 @@ TRATTI_MAX = 4        # Cowan 2001: circa 4 elementi insieme nella memoria di la
 TOKEN_MAX = 512       # 13/11: quello che arriva all'agente sta sotto i 512 token
 CAR_TOKEN = 4         # stima: 4 caratteri per token
 S_MAX, LAMBDA_W, GAMMA, LAMBDA_0, TAU = 2.0, 1.0, 1.0, 1.0, 0.0
+# 1.23.0 (l'utente 13/11, interfase 2-3 secondo passo, PIANO-PONTI-123.md): ponti fra engrammi di ricordi diversi
+# (interconnessione engrammatica, RICERCA-LEGAMI-NUOVI.md B). Valori [provvisori] di CC dalla ricerca
+PONTE_A0, PONTE_A1 = 0.2, 0.5   # B1/B6: accensione sotto A0 inattiva, fra A0 e A1 moderata, da A1 forte
+PONTE_W0, PONTE_W_CATTURA = 0.1, 0.2   # B2: peso alla nascita (provvisorio); B3/B5: peso alla cattura (stabile)
+PONTE_G, PONTE_D = 0.2, 0.05   # B3: guadagno del rinforzo forte-forte; B6: perdita col ramo discendente della U
+PONTI_PER_RICHIAMO = 2   # B1: k, scelta di sparsita'
+PONTE_CALO, PONTE_PROTETTI, PONTE_W_MIN = 0.82, 0.2, 0.05   # B4: de Vivo 2017, taglio
 TRADUZIONE_L29 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "via-emotiva", "traduzione-l29.npz")
 INVERSO = {}
 for _k, _v in T.PREPOSIZIONI.items():   # forma canonica: la prima della tabella (di, non d'; a, non ad; tra, non fra)
@@ -398,7 +407,7 @@ def costruisci():
 
 
 def da_precedente():
-    """1.22.0: la versione PRECEDENTE (1.21.0) identica (1.21.0: piu' avvicina_da = oggi vissuto, D2). Si lancia alla
+    """1.23.0: la versione PRECEDENTE (1.22.0) identica (1.21.0: piu' avvicina_da = oggi vissuto, D2). Si lancia alla
     messa in produzione, a servizi fermi: la PRECEDENTE cambia fino all'ultimo. La PRECEDENTE resta com'e'."""
     if os.path.exists(NPZ):
         sys.exit(f"{NPZ} esiste gia'")
@@ -680,6 +689,36 @@ def avvicina(oggi=None):
     return {"archi": archi, "spostati": len(passi), "rodaggio": rod, "dominanti": cambiate}
 
 
+def pota_ponti():
+    """1.23.0 (B4, PIANO-PONTI-123.md), di notte: 1. via i ponti provvisori (la marca decade, Frey e Morris 1997); 2-3. i
+    ponti stabili non usati nel giorno perdono il 18% del peso, tranne il 20% piu' forte (de Vivo 2017); 4. via sotto
+    PONTE_W_MIN. Niente tetto per engramma (l'utente 13/11 notte: nella mente non c'e', c'e' l'effetto ventaglio, gia' in
+    _dai_ponti). "Usato" e' un segno (PO_US) che
+    ricombina mette e la notte toglie (revisione 13/11: l'orologio vissuto avanza prima della notturna). Sotto
+    lucchetto rileggendo dal disco; il servizio poi ricarica"""
+    vuoto = {"ponti": 0, "provvisori": 0, "calati": 0, "tagliati": 0}
+    with lucchetto():
+        if not os.path.exists(STATO):
+            return vuoto
+        s = dict(np.load(STATO))
+        if "PO" not in s or not len(s["PO"]):
+            return vuoto
+        W, ST, US = s["PO_W"].copy(), s["PO_ST"], s["PO_US"]
+        tieni = ST == 1
+        protetti = np.zeros(len(W), bool)   # revisione 13/11: per rango, col quantile i pesi uguali non calavano mai
+        st = np.nonzero(tieni)[0]
+        protetti[st[np.argsort(-W[st], kind="stable")[:int(np.ceil(PONTE_PROTETTI * len(st)))]]] = True
+        calo = tieni & (US == 0) & ~protetti
+        W[calo] *= PONTE_CALO
+        forti = tieni & (W >= PONTE_W_MIN)
+        s.update(PO=s["PO"][forti], PO_R=s["PO_R"][forti], PO_W=W[forti], PO_ST=ST[forti],
+                 PO_US=np.zeros(int(forti.sum()), np.int8))
+        np.savez(STATO + ".tmp.npz", **s)
+        os.replace(STATO + ".tmp.npz", STATO)
+    return {"ponti": int(forti.sum()), "provvisori": int((~tieni).sum()), "calati": int(calo.sum()),
+            "tagliati": int((tieni & ~forti).sum())}
+
+
 def in_coda(vecchi, nuovi, batte):
     """1.21.0 (l'utente 11/11 punto 3 + 12/11 D4): la coda dei ricordi richiamati. vecchi = gia' in coda, in ordine; ogni
     nuovo (in ordine di richiamo) parte dal fondo e passa avanti ai VECCHI che batte (batte(nuovo, vecchio)); i nuovi
@@ -882,11 +921,16 @@ class Lux:
         (salienza.py, fino a 3x), U = oggi vissuto"""
         self.R = {}   # 1.17.0: ultimo richiamo (ts della consegna) per ricordo
         self.archi_ric = {}   # 1.21.0: (a, b) radici, a < b -> [S, U giorno vissuto, co-selezioni, non lavorate]
+        self.ponti = {}   # 1.23.0: (a, b) engrammi, a < b -> [peso, stabile, usato oggi, ricordo di a, ricordo di b]
         if os.path.exists(STATO):
             z = np.load(STATO)
             self.S, self.S0, self.U = z["S"], z["S0"], z["U"]
             if "R_nid" in z.files:
                 self.R = dict(zip(z["R_nid"].tolist(), z["R_ts"].tolist()))
+            if "PO" in z.files:
+                self.ponti = {(a, b): [w, st, us, ra, rb] for (a, b), w, st, us, (ra, rb) in
+                              zip(z["PO"].tolist(), z["PO_W"].tolist(), z["PO_ST"].tolist(), z["PO_US"].tolist(),
+                                  z["PO_R"].tolist())}
             if "RA" in z.files:
                 self.archi_ric = {(a, b): [s_, u, n, p] for (a, b), s_, u, n, p in
                                   zip(z["RA"].tolist(), z["RA_S"].tolist(), z["RA_U"].tolist(), z["RA_N"].tolist(),
@@ -906,11 +950,16 @@ class Lux:
                 if len(d["S"]) > len(S):
                     S, S0, U = (np.concatenate([x, d[k][len(x):]]) for x, k in ((S, "S"), (S0, "S0"), (U, "U")))
             ra = sorted(self.archi_ric.items())
+            po = sorted(self.ponti.items())
             np.savez(STATO + ".tmp.npz", S=S, S0=S0, U=U, R_nid=np.asarray(list(self.R), np.int64),
                      R_ts=np.asarray(list(self.R.values()), np.float64),
                      RA=np.asarray([k for k, _ in ra], np.int64).reshape(-1, 2),
                      **{f"RA_{c}": np.asarray([v[i] for _, v in ra], t) for i, (c, t) in
-                        enumerate((("S", np.float64), ("U", np.float64), ("N", np.int64), ("P", np.int64)))})
+                        enumerate((("S", np.float64), ("U", np.float64), ("N", np.int64), ("P", np.int64)))},
+                     PO=np.asarray([k for k, _ in po], np.int64).reshape(-1, 2),   # 1.23.0: i ponti
+                     PO_R=np.asarray([v[3:5] for _, v in po], np.int64).reshape(-1, 2),
+                     **{f"PO_{c}": np.asarray([v[i] for _, v in po], t) for i, (c, t) in
+                        enumerate((("W", np.float64), ("ST", np.int8), ("US", np.int8)))})
             os.replace(STATO + ".tmp.npz", STATO)
 
     def facilita_archi(self, oggi=None):
@@ -1229,6 +1278,77 @@ class Lux:
                 meglio, imp_max = (i, f, Sz[i] / N[i]), imp
         return meglio or (None, None, None)
 
+    def _dai_ponti(self, att):
+        """1.23.0 (B0): ({engramma: attivazione}, {ricordo: attivazione}) che arrivano dai ponti all'altra parte. Per ogni
+        ponte con un capo acceso: acceso x peso / ponti di quel capo (effetto ventaglio, Anderson 1974), tetto 1; il
+        ricordo e' quello dell'altro capo dove il ponte e' nato (revisione 13/11: non tutti i ricordi dell'engramma).
+        Serve solo all'affioramento: ricomponi e frasi non vedono i ponti"""
+        grado, pa, dal = {}, {}, {}
+        for a, b in self.ponti:
+            grado[a], grado[b] = grado.get(a, 0) + 1, grado.get(b, 0) + 1
+        for (a, b), (w, _, _, ra, rb) in self.ponti.items():
+            for x, y, ry in ((a, b, rb), (b, a, ra)):
+                if x in att:
+                    v = min(1.0, att[x]) * w / grado[x]
+                    pa[y] = min(1.0, pa.get(y, 0.0) + v)
+                    dal[ry] = max(dal.get(ry, 0.0), v)
+        return pa, dal
+
+    def _aggiorna_ponti(self, att):
+        """1.23.0 (B3, B6): i ponti con tutti e due i capi forti (accensione >= PONTE_A1) si rinforzano, w += G (1 - w),
+        e se provvisori diventano stabili (cattura, Frey e Morris 1997) con peso almeno PONTE_W_CATTURA; con un capo forte
+        e l'altro moderato (PONTE_A0 <= x < PONTE_A1) perdono w -= D sin(pi (x - A0) / (A1 - A0)) (ramo discendente della
+        U, Ritvo 2019). x = accensione dal messaggio, mai quella dai ponti (niente ponti che si rinforzano da soli).
+        ponytail: niente cattura per evento emotivo (B3 b) ne' bonus emotivo notturno (B4.2): i dati non danno la misura.
+        Torna True se qualcosa e' cambiato"""
+        cambiato = False
+        for (a, b), v in self.ponti.items():
+            lo, hi = sorted((min(1.0, att.get(a, 0.0)), min(1.0, att.get(b, 0.0))))
+            if hi < PONTE_A1 or lo < PONTE_A0:
+                continue
+            if lo >= PONTE_A1:
+                v[0] = max(v[0] + PONTE_G * (1 - v[0]), PONTE_W_CATTURA)
+                v[1] = v[2] = 1
+            else:
+                v[0] = max(0.0, v[0] - PONTE_D * float(np.sin(np.pi * (lo - PONTE_A0) / (PONTE_A1 - PONTE_A0))))
+            cambiato = True
+        return cambiato
+
+    def _nascite(self, att, presi):
+        """1.23.0 (B1, B2): ponti nuovi fra i ricordi dei tratti mostrati. Per ogni coppia di ricordi, se almeno uno e'
+        stabile (S medio dei suoi archi sopra la mediana dei ricordi), la coppia di engrammi (uno per tratto) con
+        accensione piu' alta (prodotto), entrambi forti (>= PONTE_A1), non comuni (ln fan < S_MAX: un engramma comune
+        non da' diffusione, revisione 13/11), non gia' legati da un arco o da un ponte, e nuovi (nessun ricordo li
+        contiene tutti e due) o con carica alta (||C|| medio di uno dei due ricordi sopra la media). Ne nascono al
+        massimo PONTI_PER_RICHIAMO, provvisori, peso PONTE_W0"""
+        if len(presi) < 2:
+            return
+        x = lambda e: min(1.0, att.get(e, 0.0))   # noqa: E731
+        ric = lambda e: {int(self.A[j, 0]) for j in self.per_engramma.get(e, ())}   # noqa: E731
+        idx = np.unique(self.A[self.vivi, 0], return_inverse=True)
+        sm = dict(zip(idx[0].tolist(), np.bincount(idx[1], self.S[self.vivi]) / np.bincount(idx[1])))
+        cm = dict(zip(idx[0].tolist(), np.bincount(idx[1], np.linalg.norm(self.C[self.vivi], axis=1)) / np.bincount(idx[1])))
+        s_med, c_med = float(np.median(list(sm.values()))), float(np.mean(list(cm.values())))
+        nuovi = []
+        for (n1, _, _, e1), (n2, _, _, e2) in itertools.combinations(presi, 2):
+            if max(sm.get(n1, 0), sm.get(n2, 0)) <= s_med:
+                continue
+            alta = max(cm.get(n1, 0), cm.get(n2, 0)) > c_med
+            forti = [[e for e in es if x(e) >= PONTE_A1 and np.log(self.fan[e]) < S_MAX] for es in (e1, e2)]
+            meglio = None
+            for a in forti[0]:
+                for b in forti[1]:
+                    k = (min(a, b), max(a, b))
+                    if a == b or k in self.ponti or k in self.coppie or not (alta or not ric(a) & ric(b)):
+                        continue
+                    if meglio is None or x(a) * x(b) > meglio[0]:
+                        meglio = (x(a) * x(b), k, (n1, n2) if k[0] == a else (n2, n1))
+            if meglio:
+                nuovi.append(meglio)
+        nuovi = list({k: (p, k, r) for p, k, r in sorted(nuovi, key=lambda c: c[0])}.values())   # una k, un posto
+        for _, k, (ra, rb) in sorted(nuovi, key=lambda c: -c[0])[:PONTI_PER_RICHIAMO]:
+            self.ponti[k] = [PONTE_W0, 0, 1, ra, rb]
+
     def _attivazione(self, att, js, eng, Fa, col, du, D, D_norm):
         """1.22.0: A_j degli archi js di una frase (RICERCA-RICHIAMO-EMOTIVO.md C1): forza + diffusione + senso + carica
         + umore. La diffusione conta solo gli engrammi scritti nella frase (eng): la parola di partenza dell'arco che
@@ -1259,6 +1379,11 @@ class Lux:
         # soglia (come la prova del 13/11): pezzi di ricordi piu' deboli si ricombinano con quello che ha passato la soglia
         sopra = [n for n, p in punti if p >= soglia]
         selezione = [n for n, _ in punti[:RICORDI_TRATTI]] if sopra else []
+        pa, dal = self._dai_ponti(att)   # 1.23.0 (B0): un ponte puo' far venire in mente un altro ricordo
+        acc = {**pa, **{e: max(a, pa.get(e, 0.0)) for e, a in att.items()}}
+        if sopra:
+            selezione += [r for r in sorted(dal, key=lambda r: -dal[r]) if r not in via and r not in selezione
+                          and r in self.ricordi][:RICORDI_TRATTI]
         vecchi = [] if coda is None else [n for c in dict.fromkeys(coda) for n in [self.da_codice.get(c)]
                                           if n is not None and n not in via]
         u, assi, calma, D, D_norm = umore44()
@@ -1270,18 +1395,20 @@ class Lux:
             for t, js, eng in self.frasi(n):
                 # revisione 13/11: un ricordo in coda e' gia' stato richiamato, la sua frase piu' attiva entra anche se il
                 # messaggio nuovo non ne accende nessuna parola (senza, la coda non usciva quasi mai: 6 su 236)
-                if js and (n in vecchi or eng & att.keys()):
-                    a = float(self._attivazione(att, js, eng, Fa, col, u - calma, D, D_norm).max())
+                if js and (n in vecchi or eng & acc.keys()):
+                    a = float(self._attivazione(acc, js, eng, Fa, col, u - calma, D, D_norm).max())
                     if meglio is None or a > meglio[0]:
-                        meglio = (a, n, " ".join(t.split()), js)   # un tratto per riga: niente a capo dentro
+                        meglio = (a, n, " ".join(t.split()), js, eng)   # un tratto per riga: niente a capo dentro
             if meglio:
                 cand.append(meglio)
         presi, tok = [], 0.0
-        for a, n, t, js in sorted(cand, key=lambda c: -c[0]):
+        for a, n, t, js, eng in sorted(cand, key=lambda c: -c[0]):
             if a > TAU and len(presi) < TRATTI_MAX and tok + len(t) / CAR_TOKEN <= TOKEN_MAX:
-                presi.append((n, t, js))
+                presi.append((n, t, js, eng))
                 tok += len(t) / CAR_TOKEN
-        mostrati = [n for n, _, _ in presi]
+        mostrati = [n for n, _, _, _ in presi]
+        cambiato = self._aggiorna_ponti(att)   # 1.23.0: prima i ponti che c'erano, poi quelli nuovi
+        self._nascite(att, presi)
         if coda is not None:   # 1.21.0: la selezione entra in coda; chi e' mostrato ne esce
             nuovi = [n for n in sopra[:CONSEGNA_MAX] if n not in vecchi]
             q = in_coda(vecchi, nuovi, lambda a, b: self._rango(a) > self._rango(b))
@@ -1297,16 +1424,16 @@ class Lux:
             traccia["testa"] = sopra[:1]
             traccia["candidati"] = [x for x in traccia.get("candidati", []) if x[1] * (1 + TRACCIA_K_MAX) >= soglia]
         if not presi:
-            if coda is not None:
+            if coda is not None or cambiato:   # 1.23.0: anche i ponti cambiati (revisione 13/11)
                 self.salva_stato()
             return None
         for n in mostrati:   # 1.17.0: ultimo richiamo
             self.R[n] = ora
-        archi = [j for _, _, js in presi for j in js]
+        archi = [j for _, _, js, _ in presi for j in js]
         self.rinforza_archi(archi, oggi)   # D1: solo i tratti; salva lo stato (anche coda e archi fra ricordi)
         self.predisponi(mostrati, ora, oggi)
         _, firma, fz = self._guida(att, Fa, col)
-        return {"risposta": "\n".join([f"{numero}° ricombinazione mnemonica"] + [t for _, t, _ in presi]),
+        return {"risposta": "\n".join([f"{numero}° ricombinazione mnemonica"] + [t for _, t, _, _ in presi]),
                 "nid": mostrati, "codici": [self.ricordi[n]["codice"] for n in mostrati], "archi": archi,
                 "dominante": None if firma is None else assi[int(np.argmax(firma))],
                 "impronta": None if fz is None else {e: float(v) for e, v in zip(assi, fz)}}

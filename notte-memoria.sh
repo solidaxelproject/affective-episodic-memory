@@ -111,4 +111,8 @@ if [ -n "$LD" ] && [ -d "$LD" ]; then
   R=$(curl -sf -m 600 -X POST http://127.0.0.1:8132/avvicina -H 'Content-Type: application/json' -d '{}') \
     && echo "$(date -Iseconds) avvicina: $R" \
     || echo "$(date -Iseconds) avvicina NON fatto (non critico, ritenta domani)"
+  # 1.23.0 (PIANO-PONTI-123.md): la potatura dei ponti fra engrammi (provvisori via, calo dei non usati, taglio)
+  R=$(curl -sf -m 600 -X POST http://127.0.0.1:8132/ponti -H 'Content-Type: application/json' -d '{}') \
+    && echo "$(date -Iseconds) ponti: $R" \
+    || echo "$(date -Iseconds) ponti NON fatto (non critico, ritenta domani)"
 fi
