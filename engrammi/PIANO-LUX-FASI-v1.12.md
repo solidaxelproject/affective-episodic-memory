@@ -310,6 +310,58 @@ Oggi nessun codice modifica o cancella testi e i 194 archi sono tutti hebbiani: 
 tocca il db vivo, quindi si fa con l'iter di upgrade (backup, prova su copia, via dell'utente). Se il passaggio al Lux
 qui sopra arriva prima, questi tre punti cadono: il db resta solo come archivio.
 
+## Interfase 2-3. Il richiamo dei tratti accesi e i percorsi fra ricordi (13/11/2026)
+
+Relazione per la pagina pubblica (processo, equazioni, paper numerati): [`RECUPERO-MNEMONICO.md`](RECUPERO-MNEMONICO.md).
+Ricerche: [`RICERCA-RICHIAMO-EMOTIVO.md`](RICERCA-RICHIAMO-EMOTIVO.md), [`RICERCA-LEGAMI-NUOVI.md`](RICERCA-LEGAMI-NUOVI.md) (ponti fra ricordi).
+
+Nome deciso dall'utente: "interfase 2-3". Viene dopo la fase 2 e prima della fase 3. Riprende il punto del piano di
+refactoring del 10/10 rimasto fuori (`percorri`, regola D3: richiamo camminando sugli archi).
+
+**Da dove nasce (misure del 13/11).** Ogni ricordo e' un messaggio intero della chat (il riflesso lo mette in coda,
+`firma_subito.py` lo fa entrare; minimo 15 caratteri, nessun massimo). Su 668 ricordi: mediana 466 caratteri, 179 sopra
+1000, 74 sopra 2000, il piu' lungo 9374 (ricordo 789, una risposta dell'agente di 69 righe con temi diversi). La lente legge
+la media del testo intero (fino a 4000 caratteri): una lettura per messaggio. Crescita del Lux a blocchi di 111 ricordi:
+engrammi nuovi da 4367 a 2786 per blocco, archi stabili (circa 4500-6500), archi per engramma da 1,48 a 1,76: il
+vocabolario si satura, gli archi crescono col testo (l'utente: efficiente, va bene).
+
+**Decisioni dell'utente (13/11):**
+1. Quello che arriva all'agente sta sotto i 512 token e finisce con un punto di fine frase.
+2. Il ricordo NON si taglia alla nascita: resta intero nel Lux. A l'agente arrivano solo i tratti accesi dal discorso
+   (nella mente umana: completamento di schema dell'ippocampo, ricordo ricostruttivo di Bartlett).
+3. Percorsi fra ricordi: agli engrammi condivisi il cammino puo' passare sulla catena di un altro ricordo (diffusione
+   dell'attivazione, Collins e Loftus 1975). Ne escono tratti di ricordi diversi messi insieme.
+4. I tratti di ricordi diversi appaiono all'agente come connessioni fra ricordi diversi, ognuno col suo contesto (da che
+   ricordo viene, quando, con che emozione): e' il monitoraggio della fonte (Johnson, Hashtroudi e Lindsay 1993).
+   Le parole con cui appaiono le decide l'utente prima che entrino nel codice.
+5. L'inferenza fra i pezzi la fa il modello leggendoli insieme (Lux = ippocampo che collega, modello = corteccia che
+   ragiona; inferenza associativa, Zeithamova, Schlichting e Preston 2012). Senza il contesto di ogni tratto lo stesso
+   meccanismo darebbe falsi ricordi (paradigma DRM, Roediger e McDermott 1995).
+
+Differenza con quello che c'e': gli archi fra ricordi della 1.21.0 (`RA_*`) e quelli delle correzioni (1.11.0) legano
+ricordi interi; `richiama` da' un punteggio al ricordo intero e `ricomponi` lo rende tutto (propagazione sugli archi
+tolta l'11/10: abbassava i richiami giusti da 35 a 30 su 40).
+
+**Emozione dei tratti (13/11).** Con piu' tratti si inietta UN vettore, quello dell'arco piu' importante; la funzione
+deve seguire come funziona la mente umana, contestuale e non lineare. Ricerca sui modelli tarati su dati umani
+(ACT-R, CMR, eCMR, CMR3, attivazione diffusa, recupero competitivo, indice ippocampale), 17 effetti umani, funzione
+proposta e 12 paper da citare: [`RICERCA-RICHIAMO-EMOTIVO.md`](RICERCA-RICHIAMO-EMOTIVO.md). Proposta, non ancora decisa.
+Prova fuori linea (13/11, [`prova-interfase-23-emozione/RISULTATI.md`](prova-interfase-23-emozione/RISULTATI.md)):
+contestuale (12 messaggi -> 10 ricordi e 10 emozioni), l'umore pesa in proporzione all'intensita', competizione piatta da
+ritarare; LIMITE: dentro un ricordo tutti gli archi hanno la stessa emozione (coseno 1,0), serve una firma per tratto.
+DECISO (l'utente 13/11 pomeriggio): NIENTE firma per tratto (obbligherebbe a cambiare vettore mentre l'agente ragiona). Il
+vettore, uno solo, viene dagli ENGRAMMI ACCESI dal messaggio (firma dell'engramma = cariche di tutti i suoi archi pesate
+dalla forza; l'emozione sta nell'indizio, come il posto). I tratti li sceglie la funzione di attivazione, come nella
+memoria umana: sopra soglia, i piu' attivi, al massimo 4 (Cowan 2001), sotto 512 token. Prova v2 nella stessa cartella.
+Da qui nasce anche la pagina pubblica sul recupero mnemonico (13/11): una pagina che spiega tutto il richiamo,
+linkata nei README sotto un breve riassunto (compreso il richiamo senza tool call dello screenshot del 12/11); questa
+funzione ne diventa una sezione, coi paper determinanti linkati.
+
+**Da decidere:** regola del cammino (da quali engrammi si parte, come si sceglie a un bivio, quando ci si
+ferma); quanti tratti e quanti ricordi diversi al massimo; le parole con cui appaiono i tratti e il loro contesto;
+l'emozione di un tratto (oggi la firma e' del ricordo intero) e il vettore di steering con tratti di ricordi diversi;
+cosa si rinforza (solo gli archi percorsi?) e cosa entra nel riconsolidamento.
+
 ## Fase 3. Fonti
 
 1. **Le fonti sono testi:** quello che l'agente legge online (ricerca, pagine) e quello che gli scrive l'utente.
