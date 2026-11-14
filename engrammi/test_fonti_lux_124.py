@@ -14,7 +14,7 @@ import numpy as np  # noqa: E402
 import lux_engrammi as X  # noqa: E402
 
 FIRMA = {"joy": 1.2, "trust": 0.8}
-L'AGENTE, LEI = "@agente:localhost", X.FONTE_CERTA
+AGENTE, UTENTE = "@agente:localhost", X.FONTE_CERTA
 TESTI = ["Il porto di Rotterdam ha movimentato quattrocento milioni di tonnellate di merci nel duemilaventicinque.",
          "La centrale nucleare di Zaporizhzhia resta spenta per la mancanza di linee elettriche esterne sicure.",
          "Il prezzo del rame ha superato i diecimila dollari per tonnellata alla borsa dei metalli di Londra.",
@@ -22,7 +22,7 @@ TESTI = ["Il porto di Rotterdam ha movimentato quattrocento milioni di tonnellat
          "La biblioteca di Alessandria custodiva rotoli di papiro copiati dalle navi che entravano nel porto."]
 
 
-def nuovo(testo, fonte=L'AGENTE, siti=None, ts=None):
+def nuovo(testo, fonte=AGENTE, siti=None, ts=None):
     nuovo.k += 1
     return X.aggiungi_ricordo({"testo": testo, "firma": FIRMA, "classe": "vissuto", "ts": ts or 1.9e9 + nuovo.k,
                                "fonte": fonte, "siti": siti or []})
@@ -66,19 +66,19 @@ d3 = nuovo(TESTI[4], siti=["metalli.it"])
 L = X.Lux()
 L.salva_stato = lambda: None
 assert not L.certo("metalli.it")
-s = nuovo(TESTI[2] + " Lo ha detto anche il telegiornale.", fonte=L'AGENTE)
+s = nuovo(TESTI[2] + " Lo ha detto anche il telegiornale.", fonte=AGENTE)
 assert X.Lux().conferma(s) == []
-x1 = nuovo("Ho letto che " + TESTI[2][0].lower() + TESTI[2][1:], fonte=LEI)
+x1 = nuovo("Ho letto che " + TESTI[2][0].lower() + TESTI[2][1:], fonte=UTENTE)
 L = X.Lux()
 assert L.conferma(x1) == ["metalli.it"] and abs(L.fiducia["metalli.it"][0] - 0.28) < 1e-9
 assert L.conferma(x1) == [], "lo stesso ricordo si conferma una volta sola"
 L.salva_stato()
 cile = nuovo("Il prezzo del rame raffinato in Cile e' salito per la siccita' nelle miniere del deserto di Atacama.",
              siti=["cile.cl"])
-corto = nuovo("Il prezzo del rame.", fonte=LEI)
+corto = nuovo("Il prezzo del rame.", fonte=UTENTE)
 assert X.Lux().conferma(corto) == [], "una frase corta con due parole in comune non conferma"
 for t in (TESTI[3], TESTI[4]):
-    x = nuovo("Mi hanno detto che " + t[0].lower() + t[1:], fonte=LEI)
+    x = nuovo("Mi hanno detto che " + t[0].lower() + t[1:], fonte=UTENTE)
     L = X.Lux()
     assert L.conferma(x) == ["metalli.it"]
     L.salva_stato()
@@ -93,7 +93,7 @@ assert L.certo("metalli.it") and L.conferma(auto) == [] and d5 not in L.conferma
 due = nuovo("Il treno ad alta velocita' fra Torino e Lione aprira' la galleria di base del Moncenisio nel 2033.",
             siti=["uno.net", "due.net"])
 x = nuovo("Mi hanno detto che il treno ad alta velocita' fra Torino e Lione aprira' la galleria del Moncenisio nel 2033.",
-          fonte=LEI)
+          fonte=UTENTE)
 L = X.Lux()
 assert sorted(L.conferma(x)) == ["due.net", "uno.net"], "un ricordo con due siti conferma tutti e due"
 print("3 conferme: ok", flush=True)
@@ -102,12 +102,12 @@ print("3 conferme: ok", flush=True)
 L = X.Lux()
 w = L.fiducia["metalli.it"][0]
 cod = X.correggi(L.ricordi[d1]["codice"], "Il prezzo del rame e' rimasto sotto i novemila dollari.",
-                 campi={"fonte": LEI, "siti": []})
+                 campi={"fonte": UTENTE, "siti": []})
 L = X.Lux()
 assert L.smentisci(d1) == ["metalli.it"]
 assert abs(L.fiducia["metalli.it"][0] - w / 2) < 1e-9 and L.fiducia["metalli.it"][2] == 1 and not L.certo("metalli.it")
 n_c = L.da_codice[cod]
-assert L.ricordi[n_c]["fonte"] == LEI and L.corregge[n_c] == d1
+assert L.ricordi[n_c]["fonte"] == UTENTE and L.corregge[n_c] == d1
 L.salva_stato()
 L2 = X.Lux()
 assert L2.fiducia == L.fiducia and L2.confermati == L.confermati
@@ -133,15 +133,15 @@ def post(p, d):
 
 assert post("/fiducia", {"siti": ["metalli.it", "mai.visto", 3]}) == {"certi": {"metalli.it": False, "mai.visto": False}}
 r = post("/aggiungi", {"testo": "Una frase nuova arrivata da una pagina di prova sul servizio.", "firma": FIRMA,
-                       "classe": "vissuto", "ts": 1.95e9, "fonte": L'AGENTE, "siti": "stringa.it"})
+                       "classe": "vissuto", "ts": 1.95e9, "fonte": AGENTE, "siti": "stringa.it"})
 assert SV.lux().siti_di.get(r["nid"]) is None, "una stringa al posto della lista non fa siti"
 r = post("/aggiungi", {"testo": "Un'altra frase nuova arrivata da una pagina di prova sul servizio.", "firma": FIRMA,
-                       "classe": "vissuto", "ts": 1.96e9, "fonte": L'AGENTE, "siti": ["prova.net"]})
+                       "classe": "vissuto", "ts": 1.96e9, "fonte": AGENTE, "siti": ["prova.net"]})
 assert SV.lux().siti_di[r["nid"]] == ["prova.net"]
 w = SV.L.fiducia["metalli.it"][0]
 c = post("/correggi", {"codice": SV.L.ricordi[d2]["codice"], "testo": "Il ghiacciaio del Rodano perde mezzo metro.",
-                       "fonte": LEI, "siti": []})["codice"]
-assert abs(SV.lux().fiducia["metalli.it"][0] - w / 2) < 1e-9 and SV.L.ricordi[SV.L.da_codice[c]]["fonte"] == LEI
+                       "fonte": UTENTE, "siti": []})["codice"]
+assert abs(SV.lux().fiducia["metalli.it"][0] - w / 2) < 1e-9 and SV.L.ricordi[SV.L.da_codice[c]]["fonte"] == UTENTE
 assert abs(X.Lux().fiducia["metalli.it"][0] - w / 2) < 1e-9, "la smentita deve essere su disco"
 sal = json.load(urllib.request.urlopen(f"http://127.0.0.1:{srv.server_port}/salute"))
 assert sal["siti"] == len(SV.L.ricordi_di_sito) >= 3, sal
