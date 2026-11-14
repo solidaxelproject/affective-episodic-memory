@@ -178,7 +178,8 @@ def nodo(v, fonte, cattura=None):
     Il Lux lo rifiuta (400) = ValueError: la voce si segna "errore" e la coda va avanti"""
     corpo = {"testo": v["testo"], "firma": v["firma"], "dominante": v["dominante"], "fonte": fonte, "ts": v["ts"],
              "classe": "letto" if URL_RE.search(v["testo"]) else "vissuto", "voluto": 1 if v.get("forzato") else 0,
-             "cattura": cattura, "salienza": v["salienza"]}
+             "cattura": cattura, "salienza": v["salienza"],
+             "siti": [x for x in (v.get("siti") or []) if isinstance(x, str)]}   # 1.24.0: i siti letti (PIANO-1.24-FONTI)
     try:
         return _lux("/aggiungi", corpo, attesa=120)["nid"]
     except urllib.error.HTTPError as e:

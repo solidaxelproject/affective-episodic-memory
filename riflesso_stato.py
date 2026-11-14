@@ -53,3 +53,4 @@ _altro_lock = threading.Lock()   # anche per _chat_in_volo (revisione 3.5.3, pun
 _salva_ultimo = [None]   # il salvataggio della chat piu' recente: il riepilogo lo aspetta (revisione 3.5.3, punto 2)
 _tok_cw = {"chat": 0, "pensatoio": 0}
 _avvisato_cw = {"chat": False, "pensatoio": False}
+_fonte_utente = [False]   # 1.24.0 (PIANO-1.24-FONTI.md): l'ultima richiesta della chat viene da un messaggio dell'utente

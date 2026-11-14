@@ -390,6 +390,30 @@ cosa si rinforza (solo gli archi percorsi?) e cosa entra nel riconsolidamento.
    numero del ricordo, poi il testo sbagliato preceduto da - e il testo corretto preceduto da +.", pensati per la
    correzione a tratti; la 1.11.0 corregge il ricordo intero (codice + testo nuovo), quindi il testo va riadattato da lei.
 
+**Decise (l'utente 13/11 sera):** D1 = la fonte web e' il SITO (dominio), non la singola pagina.
+D2 = la conferma la vede il sistema da solo: un ricordo nuovo con lo stesso contenuto (somiglianza fra i ricordi)
+arriva da un'altra fonte gia' certa (l'utente o un sito certo) e nessuna correzione lo smentisce. Niente strumento di conferma.
+D3 = le correzioni dell'agente entrano SUBITO (ricordo corretto nel Lux e fiducia del sito giu' alla chiamata dello strumento).
+D4 = STRINGA APPROVATA (l'utente 13/11 sera, alla lettera): nome dello strumento `correggicordo`, descrizione
+"Corregge un tuo ricordo. Scrivi il codice del ricordo e il testo corretto, intero."
+D5 = se la fonte nel contesto e' un sito NON certo, correggicordo RIFIUTA (non corregge, risponde all'agente con una frase
+che decide l'utente). La certezza la decide il sistema col conto della fiducia (conferme su, correzioni giu', soglia
+provvisoria di CC); l'utente certa dall'inizio.
+D6 = STRINGA APPROVATA (l'utente 13/11 sera, alla lettera, senza punto finale): risposta di correggicordo al rifiuto
+mmm non sono sicura che questa informazione sia veritiera, questa fonte, non mi pare ancora credibile
+D7 = STRINGA APPROVATA (l'utente 13/11 sera, alla lettera): risposta di correggicordo a correzione fatta
+Ricordo corretto. Il nuovo codice è <codice>.
+(<codice> = il codice di 16 caratteri del ricordo nuovo)
+D8 = risposta dell'agente dopo una RICERCA (web_search, elenco di risultati) senza pagine aperte: nessun sito, il ricordo
+resta dell'agente e nessuna fiducia in gioco. Il sito si ricava solo da una pagina letta (web_extract URL e simili).
+D9 = il sito e' un ENGRAMMA VERO (l'utente: "nella mente umana un sito e' un engramma, non un campo"; Johnson,
+Hashtroudi e Lindsay 1993, source monitoring): engramma col nome del dominio, arco speciale (posizione -1, fuori da
+ricomposizione e richiamo come quello delle correzioni) al primo engramma di ogni ricordo del sito; fiducia per sito in
+una tabella. Pronto per la fase 5 (chi c'era come indizio di richiamo).
+D10 = correggicordo RIFIUTA se fra le ultime N pagine lette dall'agente, e solo dentro gli ultimi M minuti, c'e' almeno un
+sito non certo (l'utente 13/11 sera: finestra sulle letture, non sui suoi messaggi; tutte e due insieme). N e M = numeri
+provvisori di CC. Chiude il buco "pagina malevola, poi un messaggio qualsiasi dell'utente, poi la correzione".
+
 **Da decidere:** il testo dello strumento di correzione; la soglia di fiducia; se le correzioni dell'agente entrano
 subito o nella notte.
 
@@ -409,6 +433,9 @@ prova per layer), fase 3, poi dalla 4 alla 12.
 
 **Fase 4.** Contiguita' temporale: un ricordo richiama quelli vicini nel tempo (oggi gli archi legano engrammi dentro un ricordo,
    non ricordi in sequenza).
+   Pulizia insieme alla fase 4 (14/11): via i vettori L29 degli engrammi, inutili (nessuno li legge; il file
+   lux-l29.npz manca in tutte le cartelle dalla 1.6.0): vettori_l29.py in archivio, tolte le righe di da_precedente che
+   lo copiano e la nota nel docstring di _aggiungi. NON toccare il layer 29 della via emotiva (via-emotiva/traduzione-l29.npz).
 **Fase 5.** Contesto di codifica: chi c'era, attivita', ora del giorno come indizio di richiamo.
    Dal piano di refactoring (22/10): al richiamo nasce un legame fra il messaggio che ha fatto affiorare il ricordo e il
    ricordo stesso (oggi `consegna` rinforza gli archi del ricordo ma non crea legami nuovi).

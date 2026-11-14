@@ -679,8 +679,22 @@ uscito = json.loads(R.Proxy._memoria(None, corpo([m("user", "[utente] u"), m("as
 assert fuori.get("vettore"), "il vettore del ricordo non e' passato all'inoltro"
 assert next(v for v in reversed(diario) if isinstance(v, dict) and "memorinvolontaria" in v)["flusso"] == "chat", \
     "1.14.0: il flusso della consegna serve al riconsolidamento"
-assert uscito["messages"][2]["content"] == "META\n\n[utente] il mare blu di ieri" \
-    and json.loads(fuori["senza"])["messages"][2]["content"] == "[utente] il mare blu di ieri"
+emo = fuori["vettore"][0]   # 14/11: [emozione] in fondo al blocco, il primo vettore del turno
+assert uscito["messages"][2]["content"] == f"META\n[{emo}]\n\n[utente] il mare blu di ieri" \
+    and json.loads(fuori["senza"])["messages"][2]["content"] == "[utente] il mare blu di ieri", uscito["messages"][2]
+giro = [m("user", "[utente] u"), m("assistant", "r"), m("user", "[utente] il mare blu di ieri"),
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "t1", "type": "function",
+                                                              "function": {"name": "terminal", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "t1", "content": "fatto"}]
+f2 = {}
+dopo_giro = json.loads(R.Proxy._memoria(None, corpo(giro), "chat", ["META"], f2))
+assert not f2.get("vettore") and dopo_giro["messages"][2]["content"].startswith(f"META\n[{emo}]\n\n"), \
+    "nello stesso turno l'emozione resta anche nei giri senza vettore (la cache non cambia)"
+f3 = {}
+M._sam_accesa = lambda *a: True
+altro_turno = json.loads(R.Proxy._memoria(None, corpo([m("user", "[utente] parola senza ricordi zzz")]), "chat", ["META"], f3))
+assert f3.get("vettore") or altro_turno["messages"][0]["content"] == "META\n\n[utente] parola senza ricordi zzz", \
+    "turno senza vettore: niente riga [emozione]"
 fuori = {}
 M._sam_accesa = lambda *a: False
 assert json.loads(R.Proxy._memoria(None, corpo([m("user", "[utente] x")]), "chat", ["META"], fuori))["messages"][0][
@@ -693,6 +707,7 @@ assert MD.ORE.read_text() == prima_ore, "il pensatoio ha scritto in ore-messaggi
 
 # l'utente 10/11 sera: le copie del blocco che l'agente scrive in fondo alle sue risposte spariscono dalla storia
 for x, y in (("bene.\n\n[/pensatoio]\n[20:15|10/11/2026]", "bene."), ("ok [pensatoio]", "ok"),
+             ("bene.\n[00:10|14/11/2026]\n[gioia]", "bene."), ("ho scritto [gioia] qui", "ho scritto [gioia] qui"),
              ("il [pensatoio] e' una stanza", "il [pensatoio] e' una stanza"), ("niente", "niente")):
     assert C._senza_imitati(x) == y, (x, C._senza_imitati(x))
 f = Finto()

@@ -214,14 +214,15 @@ class Proxy(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self._inoltra(None)
 
-    def _ricordo(self, body):
+    def _ricordo(self, body, strumento=None):
         if not M._ammesso(self.client_address[0]):
             self.send_error(403)
             return
+        strumento = strumento or M.memorinvolontaria
         try:
-            testo = M.memorinvolontaria(json.loads(body or b"{}"))
+            testo = strumento(json.loads(body or b"{}"))
         except Exception as e:
-            C._diario({"memorinvolontaria": f"rotta: {e}"})
+            C._diario({strumento.__name__: f"rotta: {e}"})
             testo = M.R_GIU
         b = json.dumps({"testo": testo}, ensure_ascii=False).encode()
         self.send_response(200)
@@ -248,9 +249,13 @@ class Proxy(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self._inoltrato = self._esito = self._salva = self._senza = self._hermes = None   # keep-alive: piu' richieste
         self._altro = False
+        self._siti = ()   # 1.24.0: i siti letti nel turno, per la riga dell'agente nella coda di firma
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         if self.path == "/memorinvolontaria":   # 09/11: il plugin di Hermes, mai inoltrato al 35B
             self._ricordo(body)
+            return
+        if self.path == "/correggicordo":   # 1.24.0 (l'utente 13/11, PIANO-1.24-FONTI.md): plugin di Hermes, mai al 35B
+            self._ricordo(body, M.correggicordo)
             return
         if self.path == "/memoria-b":   # step d (12/11): la notturna, solo dal PC (mai dal container dell'agente)
             self._memoria_b()
@@ -271,6 +276,16 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 pass
         # --- doppia CW (19/07): riconosci il flusso, scambia le cache.
         flusso = CA._flusso(body) if chat else None
+        if chat:   # 1.24.0: chi corregge = l'utente solo se l'ultima richiesta e' la chat col suo handle (non CC, pensatoio, cron)
+            h = C._HANDLE.match(ultimo.strip()) if flusso == "chat" and isinstance(ultimo, str) else None
+            S._fonte_utente[0] = bool(h) and h.group(1) == "utente"
+        if flusso in S.KV_FLUSSO:   # 1.24.0 (PIANO-1.24-FONTI.md): try proprio, dopo lo stop (PATTO clausola 3)
+            try:
+                msgs0 = json.loads(body).get("messages", [])
+                M.registra_letture(msgs0)
+                self._siti = FO.siti_del_turno(msgs0)
+            except Exception as e:
+                C._diario({"fonti": f"letture non registrate: {e}"})
         if flusso == "chat":
             with S._altro_lock:
                 S._chat_in_volo[0] += 1     # fino a fine risposta: il pensatoio non prende lo slot
@@ -294,7 +309,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 with S._altro_lock:
                     S._altro_in_volo[0] -= 1
             try:
-                FI._accoda_firma(flusso, ultimo, arrivo, self._esito)
+                FI._accoda_firma(flusso, ultimo, arrivo, self._esito, self._siti)
             except Exception as e:
                 C._diario({"firma": f"coda non scritta: {e}"})   # mai toccare la parola dell'agente
             try:

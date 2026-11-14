@@ -1,10 +1,12 @@
 # riflesso_memoria.py: parte di riflesso.py, spostata con manutenzione/sposta_riflesso.py (PIANO-DIVISIONE-RIFLESSO.md).
+import collections
 import http.client
 import json
 import os
 import re
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 import steering
@@ -224,7 +226,7 @@ def memorinvolontaria(args):
     if aggiungi is not None:
         t = str(aggiungi).strip()
         if t:
-            FI._accoda_forzato(t)
+            FI._accoda_forzato(t, _recenti())   # 1.24.0: un ricordo voluto dopo una pagina viene da li'
             C._diario({"+lux": t[:80]})
         parti.append(R_AGGIUNTO if t else R_VUOTO)
     if cerca is not None:
@@ -242,6 +244,25 @@ def memorinvolontaria(args):
                 C._diario({"qlux": r["codici"]})
             parti.append(r.get("risposta") or R_NESSUNO)
     return "\n\n".join(parti)
+
+
+_emozione_turno = {}   # 14/11: (flusso, impronta dell'ultimo messaggio user) -> nome italiano del primo vettore del turno
+
+
+def _emozione_del_turno(msgs, flusso, vettore):
+    """14/11: l'emozione del blocco metadati. Il primo vettore del turno la fissa e resta per tutti i giri del
+    turno (il blocco sta all'inizio del messaggio dell'utente: cambiarlo a meta' turno rifarebbe la cache); turno senza
+    vettore = niente riga. Si tengono solo gli ultimi turni"""
+    u = next((m for m in reversed(msgs) if m.get("role") == "user"), None)
+    if u is None:
+        return None
+    c = u.get("content")
+    k = (flusso, C._impronta(c if isinstance(c, str) else json.dumps(c, ensure_ascii=False)))
+    if vettore and k not in _emozione_turno:
+        _emozione_turno[k] = vettore[0]
+        while len(_emozione_turno) > 20:
+            _emozione_turno.pop(next(iter(_emozione_turno)))
+    return _emozione_turno.get(k)
 
 
 def memoria(body, flusso=None, righe=None, fuori=None):
@@ -312,12 +333,9 @@ def memoria(body, flusso=None, righe=None, fuori=None):
     if not any(t.get("function", {}).get("name") == FO.TOOL_RICORDO for t in tools):
         tools.append(TOOL)
     _rimetti(msgs, voci)
-    if righe:
-        fuori["senza"] = json.dumps(d).encode()
-        MD._metti_metadati(msgs, righe, flusso)
+    vettore = None
     if nuova:
         ricordi = [(x["codice"], *VT._emo_del_ricordo(x)) for x in r.get("ricordi", [])]
-        vettore = None
         # RIFLESSO_COLLAUDO=1 blocca i vettori: mai più test che iniettano
         # sulla produzione (incidente del 14/07)
         # clausola 3 (issue #3 punto E): con la parola di emergenza il ricordo arriva senza vettore
@@ -332,8 +350,68 @@ def memoria(body, flusso=None, righe=None, fuori=None):
                     fuori["vettore"] = vettore
             except Exception as e:
                 C._diario({"vettore": f"non preparato: {e}"})
+    if righe:   # 14/11: [emozione] in fondo al blocco, l'emozione del primo vettore del turno, fissa nel turno
+        tag = _emozione_del_turno(msgs, flusso, vettore)
+        fuori["senza"] = json.dumps(d).encode()
+        MD._metti_metadati(msgs, righe + ([f"[{tag}]"] if tag else []), flusso)
+    if nuova:
         # 30/09 persistenza: gli id servono alla notturna (solo diario)
         C._diario({FO.TOOL_RICORDO: nuova["codici"], "vettore": [vettore[0], round(vettore[1], 5)] if vettore else None,
                  "nid": [int(n) for _, n, _, _ in ricordi if n is not None], "flusso": flusso,   # 1.14.0: il momento
                  "tratti": True, "impronta": r.get("impronta")})   # Lux 1.22.0: barra-prefill imprime solo questa
     return json.dumps(d).encode()
+
+
+# 1.24.0 (l'utente 13/11, fase 3, engrammi/PIANO-1.24-FONTI.md): correggicordo. Testi approvati il 13/11: non cambiarli.
+R_CORRETTO = "Ricordo corretto. Il nuovo codice è {codice}."   # D7
+R_DUBBIO = "mmm non sono sicura che questa informazione sia veritiera, questa fonte, non mi pare ancora credibile"   # D6
+R_CODICE = "Non trovo questo ricordo: controlla il codice e scrivi il testo corretto."
+LETTURE_N, LETTURE_MIN = 5, 30   # D10: ultime 5 pagine, solo negli ultimi 30 minuti (numeri provvisori di CC)
+LUX_BASE = LUX.rsplit("/", 1)[0]
+_letture = collections.deque(maxlen=200)   # (ts, id della chiamata, dominio) delle pagine lette, in ordine
+_letture_visti = set()   # id gia' registrati, senza tetto: una lettura uscita dal registro non rientra come nuova
+_letture_lock = threading.Lock()
+
+
+def registra_letture(msgs):
+    """le pagine lette nella richiesta, una volta sola per chiamata (Hermes rimanda tutta la storia a ogni giro)"""
+    with _letture_lock:
+        for i, s in FO.letture(msgs):
+            if i not in _letture_visti:
+                _letture.append((time.time(), i, s))
+                _letture_visti.add(i)
+
+
+def _recenti(adesso=None):
+    """D10: i domini delle ultime LETTURE_N pagine, solo dentro gli ultimi LETTURE_MIN minuti"""
+    adesso = time.time() if adesso is None else adesso
+    with _letture_lock:
+        ultime = list(_letture)[-LETTURE_N:]
+    return list(dict.fromkeys(s for t, _, s in ultime if adesso - t <= LETTURE_MIN * 60))
+
+
+def _lux_post(percorso, corpo, attesa=45):
+    req = urllib.request.Request(LUX_BASE + percorso, json.dumps(corpo).encode(), {"Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(req, timeout=attesa))
+
+
+def correggicordo(args):
+    """la risposta che l'agente riceve. D5/D10: rifiuto se fra le letture recenti c'e' un sito non certo; D3: la correzione
+    entra subito (il Lux abbassa la fiducia dei siti del ricordo corretto). A consenso spento niente si scrive"""
+    if not C.consenso_attivo():
+        return R_GIU
+    codice, testo = str(args.get("codice", "")).strip(), str(args.get("testo", "")).strip()
+    recenti = _recenti()
+    try:
+        certi = _lux_post("/fiducia", {"siti": recenti})["certi"] if recenti else {}
+        if not all(certi.get(s) for s in recenti):
+            C._diario({"correggicordo": "rifiutata", "siti": recenti})
+            return R_DUBBIO
+        fonte = "@utente:localhost" if S._fonte_utente[0] else "@agente:localhost"
+        r = _lux_post("/correggi", {"codice": codice, "testo": testo, "fonte": fonte, "siti": recenti})
+    except urllib.error.HTTPError as e:
+        return R_CODICE if e.code == 400 else R_GIU
+    except Exception:
+        return R_GIU
+    C._diario({"correggicordo": r["codice"], "corretto": codice, "fonte": fonte, "siti": recenti})
+    return R_CORRETTO.format(codice=r["codice"])

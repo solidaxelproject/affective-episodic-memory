@@ -36,7 +36,7 @@ from codice_ricordo import codice  # noqa: E402,F401  (B7, P4: un solo posto; lo
 # VERSIONE MAJOR.MINOR.PATCH (11/10): MAJOR = formato dei dati incompatibile (lo stato dei rinforzi non si
 # porta), MINOR = ricostruzione con regole nuove (taglio, vettori) o funzione nuova, PATCH = correzione che non
 # cambia i dati. Ogni versione ha la sua cartella: le vecchie restano.
-VERSIONE = "1.23.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
+VERSIONE = "1.24.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engrammi (lux-l29.npz); 1.5.0: aggiungi();
 # 1.6.0 (15/10): vettori bge-m3 in float16 su disco e in RAM (misurato sul Lux dell'agente: scarto coseni max 1.4e-4,
 # richiamo identico su 94/94 indizi); il coseno si calcola a blocchi riportati in float32
 # 1.7.0 (15/10): taglio per lingua (taglia.py: le frasi inglesi sicure vanno a en_core_web_lg); costruisci()
@@ -81,9 +81,11 @@ VERSIONE = "1.23.0"   # 1.3.0: codice dei ricordi; 1.4.0: vettori L29 degli engr
 # in accendi; dati identici alla 1.21.0 (da_precedente)
 # 1.23.0 (l'utente 13/11, interfase 2-3, PIANO-PONTI-123.md): ponti fra engrammi (nascita, cattura, rinforzo, calo
 # notturno con POST /ponti, effetto ventaglio senza tetto); dati identici alla 1.22.0 (da_precedente)
+# 1.24.0 (l'utente 13/11, fase 3, PIANO-1.24-FONTI.md): fonti. Siti delle pagine lette come engrammi (arco -1 {fonte}),
+# fiducia per sito (conferme da fonte certa, smentite dalle correzioni), correggicordo; dati identici alla 1.23.0
 DIR = os.environ.get("LUX_DIR", f"/data/memoria-episodica-affettiva/engrammi/lux-{VERSIONE}")
-PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.22.0"   # da qui costruisci() riprende i vettori gia' calcolati, da_precedente() copia
-CAMPI = ("dominante", "fonte", "cattura", "salienza", "voluto")   # 1.20.0: in ricordi[nid] con testo e firma
+PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.23.0"   # da qui costruisci() riprende i vettori gia' calcolati, da_precedente() copia
+CAMPI = ("dominante", "fonte", "cattura", "salienza", "voluto", "siti")   # 1.20.0: in ricordi[nid] con testo e firma; 1.24.0: siti
 NPZ, META, STATO = f"{DIR}/lux.npz", f"{DIR}/lux-meta.json", f"{DIR}/lux-stato.npz"
 CRESCITA_PIENA = 100.0   # S/S0 a cui la facilita' tocca il tetto
 FACILITA_MAX = 2.0   # tetto: un ricordo richiamato spesso arriva alla soglia con un indizio fino a 2x piu' debole
@@ -92,6 +94,12 @@ EMBEDDER = "http://127.0.0.1:8094/v1/embeddings"
 CONSEGNA_MAX = 4   # 1.10.0 (16/10): ricordi al massimo nella stessa risposta del tool (1.11.0: catene)
 PRIMO_CORREZIONE = 1_000_000   # 1.11.0: numeri delle correzioni, fuori dalla serie di memoria.db
 CORREGGE = "corregge"   # 1.11.0: parametro dell'arco che lega una correzione al ricordo corretto
+# 1.24.0 (l'utente 13/11, fase 3, PIANO-1.24-FONTI.md): fonti. Il sito e' un engramma (D9) legato al ricordo da un arco
+# a posizione -1 con parametro FONTE; fiducia per sito nello stato. Valori [provvisori] di CC
+FONTE = "fonte"   # parametro dell'arco che lega un sito (engramma) al primo engramma di un suo ricordo
+FONTE_CERTA = "@utente:localhost"   # D5: certa dall'inizio (campo fonte dei suoi messaggi)
+FIDUCIA_W0, FIDUCIA_G, FIDUCIA_D, FIDUCIA_CERTA = 0.1, 0.2, 0.5, 0.5   # partenza, conferma (RW), smentita, soglia
+CONFERMA_QUOTA = 0.5   # D2: sovrapposizione minima, nei due versi, perche' due ricordi dicano la stessa cosa
 SOGLIA_RICHIAMO = 0.2   # sotto: nessun ricordo, nessun turno del tool (taratura_soglia.py, 11/10: negativi max 0.177, positivi giusti min 0.268)
 VTIPO = np.float16   # 1.6.0
 SOGLIA_SEM = 0.8     # coseno minimo perche' un engramma del messaggio ne accenda uno del Lux
@@ -364,6 +372,25 @@ def _lega(A, C, par_lista, tab, legami, ricordi, tutti):
         par_lista += [param_id(CORREGGE, tab), param_id(ricordi[o]["codice"], tab)]
 
 
+def _lega_siti(righe, A, C, par_lista, tab, eid, testi, tutti):
+    """1.24.0 (D9, l'utente 13/11): il sito e' un engramma (testo = dominio) legato al primo engramma del ricordo da un arco
+    a posizione -1 (fuori da ricomposizione e richiamo) con parametro {fonte}; carica zero. Un engramma con lo stesso
+    testo (anche con altre maiuscole) si riusa. Ricordi senza archi vivi: niente legame"""
+    for r in righe:
+        if len(r) < 6 or not ((tutti[:, 0] == r[0]) & (tutti[:, 1] >= 0)).any():
+            continue
+        uno = {}
+        for s in r[5].get("siti") or []:   # stessa chiave = un sito solo, col primo testo
+            uno.setdefault(chiave(s), s)
+        for k, s in uno.items():
+            if k not in eid:
+                eid[k] = len(testi)
+                testi.append(s)
+            A.append((r[0], -1, eid[k], _primo(tutti, r[0]), len(par_lista), 1))
+            C.append(carica(None))
+            par_lista.append(param_id(FONTE, tab))
+
+
 def costruisci():
     os.makedirs(DIR, exist_ok=True)
     if os.path.exists(STATO):   # gli archi cambiano numerazione: lo stato dei rinforzi non varrebbe piu'
@@ -380,6 +407,7 @@ def costruisci():
     eid, testi, C, tab, A, par_lista, ricordi = {}, [], [], {}, [], [], {}
     _inserisci(righe, eid, testi, C, tab, A, par_lista, ricordi)
     _lega(A, C, par_lista, tab, legami, ricordi, np.asarray(A, np.int64))
+    _lega_siti(righe, A, C, par_lista, tab, eid, testi, np.asarray(A, np.int64))   # 1.24.0
     print(f"{len(righe)} ricordi -> {len(testi)} engrammi unici, {len(A)} archi, {len(tab)} parametri non preposizione", flush=True)
     V = np.zeros((len(testi), 1024), VTIPO)
     vecchi = {}
@@ -407,7 +435,7 @@ def costruisci():
 
 
 def da_precedente():
-    """1.23.0: la versione PRECEDENTE (1.22.0) identica (1.21.0: piu' avvicina_da = oggi vissuto, D2). Si lancia alla
+    """1.24.0: la versione PRECEDENTE (1.23.0) identica (1.21.0: piu' avvicina_da = oggi vissuto, D2). Si lancia alla
     messa in produzione, a servizi fermi: la PRECEDENTE cambia fino all'ultimo. La PRECEDENTE resta com'e'."""
     if os.path.exists(NPZ):
         sys.exit(f"{NPZ} esiste gia'")
@@ -440,17 +468,18 @@ def aggiungi_ricordo(v):
         return nid
 
 
-def correggi(codice_errato, testo, ts=None):
+def correggi(codice_errato, testo, ts=None, campi=None):
     """1.11.0 (16/10): un ricordo che corregge quello di codice_errato. Entra nel Lux come gli altri, con un numero
     fuori dalla serie di memoria.db, legato al corretto da un arco {corregge}{codice}; l'originale non si tocca e da
-    adesso non si rinforza piu'. Una correzione si corregge allo stesso modo (ripensamento). Torna il codice nuovo."""
+    adesso non si rinforza piu'. Una correzione si corregge allo stesso modo (ripensamento). Torna il codice nuovo.
+    1.24.0: campi = fonte (chi corregge) e siti (letti poco prima, tutti certi: D10) del ricordo della correzione"""
     with lucchetto():
         m = json.load(open(META))
         ricordi = {int(k): v for k, v in m["ricordi"].items()}
         o = next(n for n, r in ricordi.items() if r["codice"] == codice_errato)
         nid = max(PRIMO_CORREZIONE - 1, *ricordi) + 1
         ts = time.time() if ts is None else ts
-        _aggiungi([(nid, testo, None, "correzione", ts)], [(nid, o)])
+        _aggiungi([(nid, testo, None, "correzione", ts, {k: (campi or {}).get(k) for k in CAMPI})], [(nid, o)])
         return codice(ts)
 
 
@@ -468,6 +497,7 @@ def _aggiungi(righe, legami=()):
     A, C, par_lista = [], [], list(z["P"])
     _inserisci(righe, eid, testi, C, tab, A, par_lista, ricordi)
     _lega(A, C, par_lista, tab, legami, ricordi, np.concatenate([z["A"], np.asarray(A, np.int64).reshape(-1, 6)]))
+    _lega_siti(righe, A, C, par_lista, tab, eid, testi, np.concatenate([z["A"], np.asarray(A, np.int64).reshape(-1, 6)]))
     nuovi = testi[n_e:]
     V = np.concatenate([z["V"].astype(VTIPO), embed(nuovi).astype(VTIPO)]) if nuovi else z["V"].astype(VTIPO)
     A = np.concatenate([z["A"], np.asarray(A, np.int64).reshape(-1, 6)])
@@ -898,20 +928,25 @@ class Lux:
         self.pronti = {}   # 1.12.0: ricordo -> (spinta, ora) lasciata dalle consegne. ponytail: solo RAM, si perde al
         # riavvio del servizio (effetto di ore); su disco se servira' sopravvivere ai riavvii
         self.corregge, self.corretto_da = {}, {}   # correzione -> ricordo corretto, e al contrario
+        self.siti_di, self.ricordi_di_sito = {}, {}   # 1.24.0: ricordo -> siti (chiave del dominio), e al contrario
         for j in np.nonzero(~self.vivi)[0].tolist():
-            r, _, _, _, p0, n = self.A[j].tolist()
+            r, _, a, _, p0, n = self.A[j].tolist()
             if n == 2 and param_testo(int(self.P[p0]), self.altri) == CORREGGE:
                 o = self.da_codice[param_testo(int(self.P[p0 + 1]), self.altri)]
                 self.corregge[r] = o
                 self.corretto_da.setdefault(o, []).append(r)
+            elif n == 1 and param_testo(int(self.P[p0]), self.altri) == FONTE:
+                s = chiave(self.testi[a])
+                self.siti_di.setdefault(r, []).append(s)
+                self.ricordi_di_sito.setdefault(s, set()).add(r)
         self.errati = set(self.corretto_da)
         # 1.19.0 (l'utente 11/11, PIANO-1.19-VIA-EMOTIVA): profilo emotivo del ricordo = C0 medio per arco, z sulla
         # popolazione dei ricordi (come T1e: i numeri decisi sono misurati su C0)
-        rid = self.A[:, 0].astype(np.int64)
+        rid = self.A[self.vivi, 0].astype(np.int64)   # 1.24.0: solo archi vivi (gli archi dei siti non diluiscono)
         self.prof_nid = np.unique(rid)
         k = np.searchsorted(self.prof_nid, rid)
         somma = np.zeros((len(self.prof_nid), self.C0.shape[1]))
-        np.add.at(somma, k, self.C0)
+        np.add.at(somma, k, self.C0[self.vivi])
         prof = somma / np.bincount(k)[:, None]
         self.profz = (prof - prof.mean(0)) / (prof.std(0) + 1e-9)
 
@@ -922,6 +957,8 @@ class Lux:
         self.R = {}   # 1.17.0: ultimo richiamo (ts della consegna) per ricordo
         self.archi_ric = {}   # 1.21.0: (a, b) radici, a < b -> [S, U giorno vissuto, co-selezioni, non lavorate]
         self.ponti = {}   # 1.23.0: (a, b) engrammi, a < b -> [peso, stabile, usato oggi, ricordo di a, ricordo di b]
+        self.fiducia = {}   # 1.24.0: sito -> [fiducia, conferme, correzioni]
+        self.confermati = set()   # 1.24.0: ricordi di siti gia' confermati (una conferma per ricordo)
         if os.path.exists(STATO):
             z = np.load(STATO)
             self.S, self.S0, self.U = z["S"], z["S0"], z["U"]
@@ -931,6 +968,10 @@ class Lux:
                 self.ponti = {(a, b): [w, st, us, ra, rb] for (a, b), w, st, us, (ra, rb) in
                               zip(z["PO"].tolist(), z["PO_W"].tolist(), z["PO_ST"].tolist(), z["PO_US"].tolist(),
                                   z["PO_R"].tolist())}
+            if "FO" in z.files:
+                self.fiducia = {s: [w, int(c), int(x)] for s, w, c, x in
+                                zip(z["FO"].tolist(), z["FO_W"].tolist(), z["FO_C"].tolist(), z["FO_X"].tolist())}
+                self.confermati = set(z["FO_OK"].tolist())
             if "RA" in z.files:
                 self.archi_ric = {(a, b): [s_, u, n, p] for (a, b), s_, u, n, p in
                                   zip(z["RA"].tolist(), z["RA_S"].tolist(), z["RA_U"].tolist(), z["RA_N"].tolist(),
@@ -959,7 +1000,11 @@ class Lux:
                      PO=np.asarray([k for k, _ in po], np.int64).reshape(-1, 2),   # 1.23.0: i ponti
                      PO_R=np.asarray([v[3:5] for _, v in po], np.int64).reshape(-1, 2),
                      **{f"PO_{c}": np.asarray([v[i] for _, v in po], t) for i, (c, t) in
-                        enumerate((("W", np.float64), ("ST", np.int8), ("US", np.int8)))})
+                        enumerate((("W", np.float64), ("ST", np.int8), ("US", np.int8)))},
+                     FO=np.asarray(list(self.fiducia), dtype=str),   # 1.24.0: la fiducia dei siti
+                     **{f"FO_{c}": np.asarray([v[i] for v in self.fiducia.values()], t) for i, (c, t) in
+                        enumerate((("W", np.float64), ("C", np.int64), ("X", np.int64)))},
+                     FO_OK=np.asarray(sorted(self.confermati), np.int64))
             os.replace(STATO + ".tmp.npz", STATO)
 
     def facilita_archi(self, oggi=None):
@@ -1482,6 +1527,54 @@ class Lux:
         presi = sum(self.chiavi.get(chiave(t)) in mio or bool((row >= SOGLIA_SEM).any()) for t, row in zip(nodi, S))
         return len(nodi), int(presi)
 
+    def _engrammi(self, nid):
+        return sorted({int(e) for j in self.per_ricordo.get(nid, []) for e in self.A[j, 2:4]})
+
+    def _vicini(self, nid, m):
+        """1.24.0 (D2): i ricordi nid e m dicono la stessa cosa: nei due versi almeno CONFERMA_QUOTA dei loro engrammi
+        ha un compagno nell'altro (stesso engramma o coseno bge-m3 >= SOGLIA_SEM, la regola di accendi). Tutti e due
+        sono gia' nel Lux: niente embedder"""
+        a, b = self._engrammi(nid), self._engrammi(m)
+        if not a or not b:
+            return False
+        S = coseni(self.V[a].astype(np.float32), self.V[b]) >= SOGLIA_SEM
+        return min(S.any(1).mean(), S.any(0).mean()) >= CONFERMA_QUOTA
+
+    def certo(self, sito):
+        """D5 (13/11): certo quando la fiducia supera la soglia; un sito mai visto parte da FIDUCIA_W0"""
+        return self.fiducia.get(chiave(sito), [FIDUCIA_W0])[0] >= FIDUCIA_CERTA
+
+    def conferma(self, nid):
+        """D2 (13/11): il ricordo nid viene da una fonte certa (l'utente o un sito certo): ogni ricordo di un ALTRO
+        sito che dice la stessa cosa, non corretto e non gia' confermato, alza la fiducia del suo sito (Rescorla-Wagner).
+        -> siti confermati"""
+        r = self.ricordi.get(nid, {})
+        miei = set(self.siti_di.get(nid, []))
+        if r.get("fonte") != FONTE_CERTA and not any(self.certo(s) for s in miei):
+            return []
+        fatti = []
+        candidati = {m for s, nids in self.ricordi_di_sito.items() if s not in miei for m in nids}
+        for m in sorted(candidati - self.confermati - self.errati - {nid}):
+            if not self._vicini(nid, m):
+                continue
+            for s in self.siti_di[m]:   # tutti i siti del ricordo confermato, tranne quelli della fonte
+                if s in miei:
+                    continue
+                w = self.fiducia.setdefault(s, [FIDUCIA_W0, 0, 0])
+                w[0] += FIDUCIA_G * (1 - w[0])
+                w[1] += 1
+                fatti.append(s)
+            self.confermati.add(m)
+        return fatti
+
+    def smentisci(self, o):
+        """D3 (13/11): il ricordo o e' stato corretto: la fiducia dei suoi siti scende subito. -> siti"""
+        for s in self.siti_di.get(o, []):
+            w = self.fiducia.setdefault(s, [FIDUCIA_W0, 0, 0])
+            w[0] *= 1 - FIDUCIA_D
+            w[2] += 1
+        return self.siti_di.get(o, [])
+
     def accordi(self, nids, emozione):
         """1.19.0: accordo emotivo dei ricordi nids con l'indizio (emozione = {"assi": nomi inglesi, "q": vettore di
         lunghezza 1}) = coseno fra il profilo del ricordo sugli stessi assi e q"""
@@ -1556,8 +1649,13 @@ if __name__ == "__main__":
         L = Lux()
         c = L.consegna(sys.argv[2])
         print(f"== ricordi {[nid for nid, _, _ in c]}\n{L.risposta_tool([nid for nid, _, _ in c])}")
-    elif cmd == "correggi":
-        print(correggi(sys.argv[2], sys.argv[3]))
+    elif cmd == "correggi":   # 1.24.0 (D3): la smentita dei siti subito, come POST /correggi; fonte ignota: niente conferme
+        o = Lux.struttura(DIR).da_codice[sys.argv[2]]
+        cod = correggi(sys.argv[2], sys.argv[3])
+        L = Lux()
+        L.smentisci(o)
+        L.salva_stato()
+        print(cod)
     elif cmd == "richiama":
         L = Lux()
         for nid, p in L.richiama(sys.argv[2]):

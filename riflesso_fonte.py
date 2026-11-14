@@ -2,6 +2,7 @@
 import html
 import json
 import re
+from urllib.parse import urlsplit
 import riflesso_comune as C
 
 
@@ -10,6 +11,9 @@ LETTURA_MIN = 400      # manopola: sotto tanti caratteri di prosa, un risultato 
 
 
 TOOL_RICORDO = "memorinvolontaria"
+
+
+_URL = re.compile(r"https?://[^\s\"'<>\\]+")   # 1.24.0: un URL negli argomenti di una chiamata
 
 
 _CODICE_TOOL = re.compile(r"^\d+[a-z]?°\n([0-9a-z]{16})$", re.M)
@@ -99,3 +103,48 @@ def query_riflesso(testo):
     riga = m.group(1)
     r = _RIGA_APPUNTO.match(riga)
     return f"{r.group('tema')} {r.group('query')}" if r else riga
+
+
+def dominio(url):
+    """1.24.0, D1 (l'utente 13/11, PIANO-1.24-FONTI.md): il sito e' il dominio, senza www.; URL malformato = """""
+    try:
+        h = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+    return h[4:] if h.startswith("www.") else h
+
+
+def _url(arguments):
+    """il primo URL negli argomenti di una chiamata (stringa JSON di Hermes: si cerca nei valori decodificati)"""
+    try:
+        d = json.loads(arguments)
+        testi = [str(v) for v in d.values()] if isinstance(d, dict) else [str(d)]
+    except (ValueError, TypeError):
+        testi = [str(arguments)]
+    for t in testi:
+        u = _URL.search(t)
+        if u:
+            return u.group()
+    return ""
+
+
+def letture(msgs):
+    """1.24.0 (D1, D8): [(id della chiamata, dominio)] delle pagine lette: risultato di uno strumento con almeno
+    LETTURA_MIN caratteri di prosa e un URL negli argomenti della sua chiamata (una ricerca non ha URL: D8)"""
+    args = {tc.get("id"): (tc.get("function") or {}).get("arguments", "") for m in msgs
+            if m.get("role") == "assistant" for tc in (m.get("tool_calls") or [])}
+    ids = _ids_ricordo(msgs)
+    out = []
+    for m in msgs:
+        if m.get("role") != "tool" or _e_ricordo(m, ids) or not isinstance(m.get("content"), str):
+            continue
+        d = dominio(_url(args.get(m.get("tool_call_id"), "")))
+        if d and len(_leggibile(m["content"])) >= LETTURA_MIN:
+            out.append((m.get("tool_call_id"), d))
+    return out
+
+
+def siti_del_turno(msgs):
+    """1.24.0: i siti letti dopo l'ultimo messaggio user (il turno della risposta finale dell'agente), senza doppioni"""
+    u = max((i for i, m in enumerate(msgs) if m.get("role") == "user"), default=-1)
+    return list(dict.fromkeys(d for _, d in letture(msgs[u + 1:])))

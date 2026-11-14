@@ -10,16 +10,17 @@ import riflesso_comune as C
 CODA_FIRMA = os.environ.get("CODA_FIRMA", "/data/workspace/memoria/coda-firma.jsonl")
 
 
-def _accoda_forzato(testo):
+def _accoda_forzato(testo, siti=()):
     fd = os.open(CODA_FIRMA, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
     try:   # una sola write: righe intere anche con la chat che accoda
         os.write(fd, (json.dumps({"ts": time.time(), "autore": "@agente:localhost", "testo": testo,
-                                  "forzato": True}, ensure_ascii=False) + "\n").encode())
+                                  "forzato": True, **({"siti": list(siti)} if siti else {})},
+                                 ensure_ascii=False) + "\n").encode())
     finally:
         os.close(fd)
 
 
-def _accoda_firma(flusso, ultimo, arrivo, esito):
+def _accoda_firma(flusso, ultimo, arrivo, esito, siti=()):
     """B6: solo le risposte finali. Chat: il messaggio dell'utente com'era prima delle aggiunte del riflesso (ora, coda)
     e la risposta dell'agente; un ultimo user senza "[handle] " e' Hermes (background review, memory flush): niente.
     Pensatoio: la risposta dell'agente. Una sola write in append: righe intere anche con la notturna che accoda"""
@@ -35,7 +36,8 @@ def _accoda_firma(flusso, ultimo, arrivo, esito):
     elif flusso != "pensatoio":
         return
     if risposta and not risposta.startswith("[OUT-OF-BAND]"):   # orchestrazione, non esperienza (estrai-matrix)
-        righe.append({"ts": time.time(), "autore": "@agente:localhost", "testo": risposta, "flusso": flusso})
+        righe.append({"ts": time.time(), "autore": "@agente:localhost", "testo": risposta, "flusso": flusso,
+                      **({"siti": list(siti)} if siti else {})})   # 1.24.0: i siti delle pagine lette nel turno
     if righe:
         fd = os.open(CODA_FIRMA, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
         try:

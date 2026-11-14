@@ -35,7 +35,10 @@
        dell'engramma acceso piu' importante, per il vettore) solo sulla prima voce; "impronta" = la firma di
        quell'engramma per l'omeostato (barra-prefill, l'utente 13/11 sera); qlux resta col ricordo intero
   POST /ponti {} -> {"ponti", "provvisori", "calati", "tagliati"} (1.23.0, notturna dopo /avvicina: potatura dei ponti)
-  GET  /salute    -> {"versione": ..., "ricordi": ..., "engrammi": ...}
+  POST /fiducia {"siti": [...]} -> {"certi": {sito: bool}} (1.24.0, PIANO-1.24-FONTI.md: correggicordo del riflesso)
+       1.24.0: /aggiungi e /correggi prendono anche "siti" (lista di domini) e "fonte" (/correggi: chi corregge); un
+       ricordo da fonte certa conferma i ricordi simili degli altri siti, una correzione smentisce i siti del corretto
+  GET  /salute    -> {"versione": ..., "ricordi": ..., "engrammi": ..., "ponti": ..., "siti": ...}
 Server a un filo solo: due consegne non scrivono lo stato insieme.
 ponytail: libreria standard, niente framework"""
 import json
@@ -76,6 +79,7 @@ def _aggiungi(d):
             or v["classe"] not in ("vissuto", "letto") or not isinstance(v["ts"], (int, float)):
         return {"errore": "servono testo, firma (dict), classe vissuto/letto e ts"}, 400
     v["ts"] = float(v["ts"])   # il codice del ricordo si calcola sul float, come il REAL di memoria.db
+    v["siti"] = _siti(v.get("siti"))
     try:
         nid = X.aggiungi_ricordo(v)
     except OSError as e:   # embedder, disco: si ritenta
@@ -83,8 +87,14 @@ def _aggiungi(d):
     except Exception as e:   # questo ricordo non entra (taglio, salienza): firma_subito lo segna e va avanti
         return {"errore": repr(e)}, 400
     _meta[0] = None   # ricarica subito, la predisposizione resta (lux())
-    lux()
+    if lux().conferma(nid):   # 1.24.0 (D2): fonte certa = conferma dei ricordi simili degli altri siti
+        L.salva_stato()
     return {"nid": nid}, 200
+
+
+def _siti(x):
+    """1.24.0: solo una lista di stringhe non vuote (una stringa sola farebbe un engramma per lettera)"""
+    return [s for s in x if isinstance(s, str) and s.strip()] if isinstance(x, list) else []
 
 
 class H(BaseHTTPRequestHandler):
@@ -99,19 +109,22 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/salute":
             self.rispondi({"versione": X.VERSIONE, "ricordi": len(lux().ricordi), "engrammi": len(L.testi),
-                           "ponti": len(L.ponti)})
+                           "ponti": len(L.ponti), "siti": len(L.ricordi_di_sito)})
         else:
             self.send_error(404)
 
     def do_POST(self):
         if self.path not in ("/consegna", "/correggi", "/rinforza", "/richiama", "/sovrapposizione", "/forza", "/riconsolida",
-                             "/riaccendi", "/sbiadisci", "/aggiungi", "/ricordo", "/avvicina", "/ponti"):
+                             "/riaccendi", "/sbiadisci", "/aggiungi", "/ricordo", "/avvicina", "/ponti", "/fiducia"):
             self.send_error(404)
             return
         try:
             d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
             if self.path == "/aggiungi":
                 self.rispondi(*_aggiungi(d))
+                return
+            if self.path == "/fiducia":   # 1.24.0 (D5)
+                self.rispondi({"certi": {s: lux().certo(s) for s in _siti(d.get("siti"))}})
                 return
             if self.path == "/ricordo":
                 r = _info(str(d.get("codice", "")))
@@ -159,7 +172,14 @@ class H(BaseHTTPRequestHandler):
                 if str(d.get("codice", "")) not in lux().da_codice or not str(d.get("testo", "")).strip():
                     self.rispondi({"errore": "codice sconosciuto o testo vuoto"}, 400)
                     return
-                self.rispondi({"codice": X.correggi(d["codice"], str(d["testo"]))})
+                o = L.da_codice[str(d["codice"])]
+                cod = X.correggi(d["codice"], str(d["testo"]), campi={"fonte": str(d.get("fonte", "")),
+                                                                     "siti": _siti(d.get("siti"))})
+                _meta[0] = None   # 1.24.0 (D3): subito la smentita dei siti del corretto e le conferme della correzione
+                lux().smentisci(o)
+                L.conferma(L.da_codice[cod])
+                L.salva_stato()
+                self.rispondi({"codice": cod})
                 return
             if d.get("tratti"):   # 1.22.0 (13/11): ricombinazione mnemonica per memorinvolontaria
                 traccia = {} if d.get("emozione") else None

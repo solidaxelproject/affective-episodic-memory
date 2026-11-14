@@ -86,7 +86,10 @@ def _ora_blocco(t):
 
 
 # l'utente 10/11 sera: l'agente copiava il blocco in fondo alle sue risposte; le copie si tolgono dalla storia che vede
-_IMITATI = re.compile(r"(?:\s*\[(?:/?pensatoio|\d\d:\d\d\|\d\d/\d\d/\d{4})\])+\s*\Z")
+_EMOZIONI_IT = [e["it"] for e in json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "emozioni.json"),
+                                                 encoding="utf-8"))]   # 14/11: le righe [emozione] del blocco
+_IMITATI = re.compile(r"(?:\s*\[(?:/?pensatoio|\d\d:\d\d\|\d\d/\d\d/\d{4}|"
+                      + "|".join(map(re.escape, sorted(_EMOZIONI_IT, key=len, reverse=True))) + r")\])+\s*\Z")
 
 
 def _senza_imitati(testo):

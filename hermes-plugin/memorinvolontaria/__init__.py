@@ -30,5 +30,28 @@ def memorinvolontaria(args, **kwargs):
         return R_GIU
 
 
+# 1.24.0 (l'utente 13/11, fase 3, engrammi/PIANO-1.24-FONTI.md): correggicordo. Testi approvati il 13/11: non cambiarli.
+URL_CORREGGI = URL.rsplit("/", 1)[0] + "/correggicordo"
+SCHEMA_CORREGGI = {
+    "name": "correggicordo",
+    "description": "Corregge un tuo ricordo. Scrivi il codice del ricordo e il testo corretto, intero.",
+    "parameters": {"type": "object", "properties": {
+        "codice": {"type": "string",
+                   "description": "Il codice del ricordo da correggere, come te l'ha dato la memoria."},
+        "testo": {"type": "string", "description": "Il ricordo corretto, scritto intero come vorrai ritrovarlo."}},
+        "required": ["codice", "testo"]}}
+
+
+def correggicordo(args, **kwargs):
+    try:
+        req = urllib.request.Request(URL_CORREGGI, json.dumps({k: v for k, v in (args or {}).items()
+                                                               if k in ("codice", "testo")}).encode(),
+                                     {"Content-Type": "application/json"})
+        return json.load(urllib.request.urlopen(req, timeout=45))["testo"]
+    except Exception:
+        return R_GIU
+
+
 def register(ctx):
     ctx.register_tool(name="memorinvolontaria", toolset="memorinvolontaria", schema=SCHEMA, handler=memorinvolontaria)
+    ctx.register_tool(name="correggicordo", toolset="memorinvolontaria", schema=SCHEMA_CORREGGI, handler=correggicordo)
