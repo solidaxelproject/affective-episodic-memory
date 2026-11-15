@@ -54,3 +54,4 @@ _salva_ultimo = [None]   # il salvataggio della chat piu' recente: il riepilogo 
 _tok_cw = {"chat": 0, "pensatoio": 0}
 _avvisato_cw = {"chat": False, "pensatoio": False}
 _fonte_utente = [False]   # 1.24.0 (PIANO-1.24-FONTI.md): l'ultima richiesta della chat viene da un messaggio dell'utente
+_ultima_richiesta = [0.0]   # 14/11: ora dell'ultima richiesta arrivata al riflesso (quiete per la copia su disco)

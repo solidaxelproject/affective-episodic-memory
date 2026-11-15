@@ -1,0 +1,32 @@
+{
+ "altri_file": {
+  "diario-riflessi.jsonl": "1d3c56b8b51de3b4042b6baf198da99defa8c1184d1f49c74ecbe4a23c4c388e",
+  "giornata-firma.jsonl": "ba8331ea0efe9f1dc765195b0860c2f1eadcbd5d2112ecee346efd405833147e",
+  "stato-emotivo.json": "98561b706d8528f157b690c58c33e8671712b864443ed7261e7c8fff3f93275f"
+ },
+ "avvicina": "f23ae506ae595eb29e04a64151170c7a88bd4e28accf32946679cdc81f59bb2e",
+ "consegna": "251b75f95d19306edf69ac00e909a32d53849f50ba1d3598e53f83c1acd01c27",
+ "correggi": "34d2bd5e3352161ddad9db43f42bd5621a287c7e29564d88f53bd79bcc85e8a9",
+ "file_da_precedente": {
+  "lux-meta.json": "fd26e92ed9221f8ad88c2768a2d0e43d5dd513101e3cdb8349576560017e1d7d",
+  "lux-stato.npz": "87ea3191d6ffa31f5621baa565d137184a20dc4eb9bfdceb14687734668f0197",
+  "lux.npz": "211b5642520db0a2b57f51e97a4c4e499b02d57a2bc5049e21cac4d7ca0e2172"
+ },
+ "file_lux": {
+  "lux-meta.json": "49b866dd53f6d897a8da1d13dd4870683c50be8928d787e99b5cb27e2a9d0bcc",
+  "lux-stato.npz": "f50445dc2bedba1601cda7f9ddff7c65bf39e27fc7a1556dbdf8fd9bf1d898bf",
+  "lux.npz": "304d88bd7a0371f22ab097c9fbd228c290ed1d7b12b7bc31a254771d4c01b013"
+ },
+ "forza": "492b691672c68652d9cdcefb2a8ec3531d6f22ad97ae69c2b14174cb51360856",
+ "frasi": "4e0467aef47363d6054cdb04b71c2ecd6e2b8c720983ac75854bc4ddd6f9676d",
+ "indizi": "3cef35c1a5699d34afd0f9b4204a64cc679d601d0d313c658e7cae9ffb311997",
+ "pota_ponti": "87b1923ecc071e0bf048f95bb2b4bdb1931684bbef75d215ed69f0245ed30c46",
+ "riaccendi": "c317e0e8df72c9ce50e6ae1a186c50eb8c305ede72a57f0b145054a338c987c7",
+ "richiama": "8ea20bcc1b868c6f59367bb4eaf4a0eb444485dbb5fa8de950caec1d0fb3ba0b",
+ "ricombina": "3b8903cec3181ad25e62129534b95c687b113f22e77d77a276f7a236b433dd4f",
+ "ricomponi": "36b4d29534828a6a58ec4ad6a0caa51cd0ea98e4fdb2c84ca512196ea5cb400f",
+ "riconsolida": "a0ac33f1a8e20b67b701eb255a311e3ad1cae4c29756a7deb209516e6c10767e",
+ "risposta_tool": "ba3481c0b55508c342dd207c3e8d8f58fe98bcde7cdaef38e1e6556a481babbe",
+ "sbiadisci": "cfe50a87842e252841a55f70a74b200a44ecffffd254b3a8262153e9f5ca7449",
+ "stato_memoria": "b847a4b86d0539c32ed9536f5e22e3b26d15a2b048d007f86d869b8243abf75a"
+}

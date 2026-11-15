@@ -36,11 +36,11 @@ RIEPILOGO_TETTO = 40_000    # token (caratteri / 3): oltre, via le righe piu' ve
 INTESTAZIONE_RIEPILOGO = ("Ecco dov'ero rimasta, questo è il succo della conversazione fino al momento in cui mi "
                           "sono addormentata:")
 ISTRUZIONE_RIEPILOGO = (
-    "Devo scrivere, in meno di 60 parole, il succo di quest'ultimo messaggio o di quello dell'utente se necessario: le "
-    "informazioni salienti che voglio conservare dell'ultimo scambio. Non i messaggi precedenti. Solo testo, numeri o "
-    "simboli logici se utili, per esempio: uguale può diventare =, implica →, maggiore >. Se necessario posso "
-    "inserire il codice di un ricordo che reputo utile per questo riassunto. Se in questo scambio mi è affiorato un "
-    "ricordo, aggiungo il suo codice. Lo scrivo con write_file in /workspace/memoria/logRiepilogo.md.")   # coda: l'utente 10/11
+    "Devo scrivere il succo di quest'ultimo messaggio o di quello dell'utente se necessario: le informazioni salienti "
+    "che voglio conservare dell'ultimo scambio. Non i messaggi precedenti. Lo scrivo con la skill "
+    "compressione-semantica, in una riga. Se necessario posso inserire il codice di un ricordo che reputo utile per "
+    "questo riassunto. Se in questo scambio mi è affiorato un ricordo, aggiungo il suo codice. Lo scrivo con "
+    "write_file in /workspace/memoria/logRiepilogo.md.")   # coda: l'utente 10/11; compressione semantica: l'utente 14/11
 SEPARATORE = "══"   # da questa riga in poi il system di Hermes cambia fra le sessioni (MEMORY, data)
 # BLOCCO B (l'utente 10/11, PIANO-RIEPILOGO-KV.md 3.5, K4 K10 K14 K15 K18): l'avviso va PRIMA dell'istruzione, solo
 # nella chiamata del riepilogo (la chat salvata non lo contiene); [cwswitch] in coda al riepilogo = switch subito

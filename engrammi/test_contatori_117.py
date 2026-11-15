@@ -29,8 +29,8 @@ X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"   # 1.21.
 X.GIORNATA = f"{T}/giornata.jsonl"
 t0 = time.time()
 X.da_precedente()
-p, z = np.load(f"{X.PRECEDENTE}/lux.npz"), np.load(X.NPZ)
-for k in p.files:
+p, z = X.carica_npz(f"{X.PRECEDENTE}/lux.npz"), X.carica_npz(X.NPZ)
+for k in p:
     assert np.array_equal(p[k], z[k], equal_nan=True) if p[k].dtype.kind == "f" else np.array_equal(p[k], z[k]), k
 n = len(z["V"])
 assert all(len(z[k]) == n for k in ("E_nato", "E_acceso", "E_accensioni")) and 0 < float(z["riacceso_fino"]) <= t0
@@ -50,7 +50,7 @@ with open(X.GIORNATA, "w") as f:
         f.write(json.dumps(v) + "\n")
 prima = {k: z[k].copy() for k in ("E_nato", "E_acceso", "E_accensioni")}
 r = X.riaccendi()
-z = np.load(X.NPZ)
+z = X.carica_npz(X.NPZ)
 i = condivisi[0]
 d = X.giorno_di(dopo)
 assert r["messaggi"] == 2, r
@@ -64,9 +64,9 @@ assert float(z["riacceso_fino"]) == dopo + 1 and X.riaccendi()["messaggi"] == 0,
 n_a = len(z["A"])
 X._aggiungi([(999999, "Oggi al mare con l'utente abbiamo visto un delfino saltare vicino alla barca.",
               json.dumps({"joy": 2.5}), "vissuto", time.time())])
-z = np.load(X.NPZ)
+z = X.carica_npz(X.NPZ)
 assert all(len(z[k]) == len(z["V"]) for k in ("E_nato", "E_acceso", "E_accensioni")) and len(z["V"]) > n
-assert (z["E_nato"][n:] == X.giorno_di(time.time())).all() and "W" in z.files and "riacceso_fino" in z.files
+assert (z["E_nato"][n:] == X.giorno_di(time.time())).all() and "W" in z and "riacceso_fino" in z
 
 # ultimo richiamo alla consegna, salvato nello stato e riletto; aggiungi non lo cancella
 L = X.Lux()

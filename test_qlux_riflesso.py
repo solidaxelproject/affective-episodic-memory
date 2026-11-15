@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """test di +lux e qlux nel riflesso (PIANO-MEMORINVOLONTARIA-LUX.md, l'utente 09/11): senza GPU, senza il Lux vero (un
-Lux finto su una porta libera), coda, consenso e diario in una cartella temporanea. Uso: python3 test_qlux_riflesso.py"""
+Lux finto su una porta libera), coda e diario in una cartella temporanea. Uso: python3 test_qlux_riflesso.py"""
 import http.server
 import json
 import os
@@ -21,8 +21,6 @@ TMP = R.Path(tempfile.mkdtemp())
 diario = []
 C._diario = diario.append
 FI.CODA_FIRMA = str(TMP / "coda-firma.jsonl")
-C.CONSENSO = TMP / "consenso.md"
-C.CONSENSO.write_text("[attivo: *sì*]\n", encoding="utf-8")
 T0 = time.mktime((2026, 11, 9, 15, 0, 0, 0, 0, -1))   # lunedi' 9/11/2026, 15:00 ora locale
 
 
@@ -125,12 +123,6 @@ assert chiedi({"+lux": "  il giorno del mare  "}) == M.R_AGGIUNTO
 riga, = [json.loads(r) for r in open(FI.CODA_FIRMA, encoding="utf-8")]
 assert riga["testo"] == "il giorno del mare" and riga["forzato"] is True and riga["autore"] == "@agente:localhost"
 assert chiedi({"+lux": "secondo", "qlux": "il mare"}) == M.R_AGGIUNTO + "\n\n1°\ncccccccccccccccc\ntrovato"
-# consenso spento: niente entra, niente si scrive
-C.CONSENSO.write_text("[attivo: *no*]\n", encoding="utf-8")
-n = len(open(FI.CODA_FIRMA).readlines())
-assert chiedi({"+lux": "terzo"}) == M.R_GIU and chiedi({"qlux": "il mare"}) == M.R_GIU
-assert len(open(FI.CODA_FIRMA).readlines()) == n
-C.CONSENSO.write_text("[attivo: *sì*]\n", encoding="utf-8")
 # il plugin di Hermes contro questo riflesso: stessi testi, argomenti estranei tolti
 import importlib.util  # noqa: E402
 os.environ["MEMORINVOLONTARIA_URL"] = URL

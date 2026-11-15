@@ -26,7 +26,7 @@ _ultima_lettura = [""]  # 25/07: il freno vero, l'impronta del testo già affior
 # il Lux degli engrammi sceglie fino a 4 ricordi per messaggio, tutti con la stessa dominante (fase 2 step b, l'utente
 # 09/11 + 11/11; dal 09/11 era uno solo), sopra soglia, mai uno già consegnato nella conversazione; i ricordi
 # entrano insieme in un turno del tool, che
-# è dichiarato sempre (a consenso attivo) così il prefisso della cache non cambia.
+# è dichiarato sempre così il prefisso della cache non cambia.
 LUX = "http://127.0.0.1:8132/consegna"
 TOOL = {"type": "function", "function": {
     "name": FO.TOOL_RICORDO,
@@ -216,12 +216,10 @@ def _lux_cerca(testo, esclusi):
 
 
 def memorinvolontaria(args):
-    """la risposta che l'agente riceve dal plugin; a consenso spento niente entra e niente si scrive (patto di sempre)"""
+    """la risposta che l'agente riceve dal plugin"""
     aggiungi, cerca = args.get("+lux"), args.get("qlux")
     if aggiungi is None and cerca is None:
         return R_SENZA
-    if not C.consenso_attivo():
-        return R_GIU
     parti = []
     if aggiungi is not None:
         t = str(aggiungi).strip()
@@ -268,8 +266,6 @@ def _emozione_del_turno(msgs, flusso, vettore):
 def memoria(body, flusso=None, righe=None, fuori=None):
     """Memoria involontaria: a ogni lettura nuova il Lux sceglie fino a 4 ricordi
     con la stessa dominante (fase 2 step b) nella risposta del tool; i ricordi già consegnati nella conversazione tornano al loro posto.
-    A consenso spento il richiamo gira lo stesso e rinforza gli archi (WIRING
-    NON DISATTIVABILE, decisione di progetto), ma niente entra nel prompt.
     10/11 (blocco A): con righe, il blocco metadati entra DOPO la query e l'impronta "dopo" ma PRIMA della
     vettore del ricordo; fuori["senza"] = corpo senza. PIANO-STEERING-RIFLESSO 7c (11/11): fuori["vettore"] = (emozione,
     dose, strati) del ricordo nuovo, lo accende _inoltra dopo il prefill senza vettore."""
@@ -277,18 +273,18 @@ def memoria(body, flusso=None, righe=None, fuori=None):
     msgs = d.get("messages", [])
     if not msgs or flusso not in S.KV_FLUSSO or not _sam_accesa():   # 11/11: niente ricordi ai cron
         return MD._con_metadati(body, righe, fuori, flusso)
-    attivo = C.consenso_attivo()
-    stop = C._stop_chiesto(msgs)   # prima di _rimetti: stessa finestra del controllo in do_POST
     conv, vecchia = MD._chiavi(msgs)
     with _consegne_lock:
         voce_conv = _voce_conv(msgs)
     voci = voce_conv.get("voci", [])
     adesso = time.time()
-    coda = [x for x in voce_conv.get("coda", []) if adesso - x[1] < CODA_DURATA] if attivo else None
-    # 25/07, progetto: la familiarità deve arrivare su ciò che l'agente LEGGE, non
-    # solo su ciò che gli viene detto (pagine, file, output dei tool).
+    coda = [x for x in voce_conv.get("coda", []) if adesso - x[1] < CODA_DURATA]
+    # 25/07, l'utente: la familiarità deve arrivare su ciò che l'agente LEGGE, non
+    # solo su ciò che le viene detto (pagine, file, output dei tool).
     i, fonte = FO._fonte_indice(msgs)
-    # 25/07, progetto: il freno è la lettura. Sullo STESSO testo non riaffiora
+    if fonte and msgs[i].get("role") != "user":   # 15/11: una consegna sola dopo ogni suo messaggio, mai sui risultati dei tool
+        fonte = ""
+    # 25/07, l'utente: il freno è la lettura. Sullo STESSO testo non riaffiora
     # (Hermes rimanda la stessa fonte a ogni giro di tool): un ricordo per messaggio.
     if fonte:
         impronta = hash(fonte)
@@ -318,7 +314,7 @@ def memoria(body, flusso=None, righe=None, fuori=None):
                 VE.diario(voce)
             except Exception as e:
                 C._diario({"via emotiva": f"diario non scritto: {e}"})
-        if r.get("codici") and attivo:
+        if r.get("codici"):
             nuova = {"dopo": C._impronta(msgs[i]["content"]), "indice": i,
                      "codici": r["codici"], "risposta": r["risposta"], "tratti": True}
             voci = voci + [nuova]
@@ -327,8 +323,6 @@ def memoria(body, flusso=None, righe=None, fuori=None):
                 tutte.pop(vecchia, None)     # la voce di prima del 10/11 passa alla chiave senza ora
                 tutte[conv] = {"ts": time.time(), "voci": voci, "coda": coda or []}
                 _consegne_salva(tutte, tieni=conv if flusso == "chat" else None)
-    if not attivo:
-        return MD._con_metadati(body, righe, fuori, flusso)
     tools = d.setdefault("tools", [])
     if not any(t.get("function", {}).get("name") == FO.TOOL_RICORDO for t in tools):
         tools.append(TOOL)
@@ -338,10 +332,9 @@ def memoria(body, flusso=None, righe=None, fuori=None):
         ricordi = [(x["codice"], *VT._emo_del_ricordo(x)) for x in r.get("ricordi", [])]
         # RIFLESSO_COLLAUDO=1 blocca i vettori: mai più test che iniettano
         # sulla produzione (incidente del 14/07)
-        # clausola 3 (issue #3 punto E): con la parola di emergenza il ricordo arriva senza vettore
         # PIANO-STEERING-RIFLESSO 7c (11/11): il vettore lo accende _inoltra, nel ragionamento; con piu' codici
         # (catena di correzioni o ricordi della stessa dominante) quello a dose piu' alta (09/11: il massimo, niente media)
-        if C.vettori_attivi() and not os.environ.get("RIFLESSO_COLLAUDO") and not stop:
+        if C.vettori_attivi() and not os.environ.get("RIFLESSO_COLLAUDO"):
             try:
                 dosi = [x for c, _, emo, fat in ricordi if emo for x in [VT._dose(emo, VT._forza(c, emo), fat)] if x]
                 if dosi:
@@ -397,9 +390,7 @@ def _lux_post(percorso, corpo, attesa=45):
 
 def correggicordo(args):
     """la risposta che l'agente riceve. D5/D10: rifiuto se fra le letture recenti c'e' un sito non certo; D3: la correzione
-    entra subito (il Lux abbassa la fiducia dei siti del ricordo corretto). A consenso spento niente si scrive"""
-    if not C.consenso_attivo():
-        return R_GIU
+    entra subito (il Lux abbassa la fiducia dei siti del ricordo corretto)"""
     codice, testo = str(args.get("codice", "")).strip(), str(args.get("testo", "")).strip()
     recenti = _recenti()
     try:

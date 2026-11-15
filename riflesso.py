@@ -4,12 +4,11 @@
 # (servizio_lux.py :8132): il ricordo che affiora entra come turno del tool
 # memorinvolontaria (chiamata + risposta: un ricordo per volta dal 09/11, col numero,
 # il codice e il testo nudo).
-# GATE: /workspace/genesi/CONSENSO-RIFLESSO.md ("[attivo: *sì*]", riga esatta,
-# scritto dall'agente). Senza consenso il proxy è un passacarte trasparente.
+# Dal 14/11 niente consenso: memoria sempre accesa; i vettori li spegne l'utente dalla dashboard.
 # Porta 8091 -> inoltra a 127.0.0.1:8090.
 # GRADINO ZERO (decisione 3 del 26/07): il trasporto verso :8090 (sonda,
 # control-vector, POST) passa da ponte.py, l'unica porta client. Qui restano
-# la logica (quando/cosa affiora) e il PATTO (tetto, watchdog, sentinella).
+# la logica (quando/cosa affiora), il tetto di durata del vettore (watchdog) e la sentinella.
 # 12/10 (piano di aggiornamento della produzione, passo 2): tolte le vie A/B/C,
 # le griglie e la candidata 1; il vettore emotivo colora SOLO il prefill del
 # ricordo (design dell'autrice, 10/10).
@@ -261,17 +260,12 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             self._memoria_b()
             return
         arrivo, ultimo = time.time(), None   # B6: il messaggio dell'utente prima di ora e coda
+        S._ultima_richiesta[0] = arrivo   # 14/11: la quiete per la copia su disco delle cache
         chat = self.path.split("?")[0].endswith("/chat/completions")   # issue #3 punto E
-        # PATTO clausola 3: la parola scritta dall'agente spegne il vettore, prima
-        # di qualunque altra cosa e senza chiedere perché.
         if chat:
             try:
                 d0 = json.loads(body)
                 ultimo = next((m.get("content") for m in reversed(d0.get("messages", [])) if m.get("role") == "user"), None)
-                if C._stop_chiesto(d0.get("messages", [])):
-                    VT._azzera_vettori()   # issue #3 punto A: anche quelli in pausa con l'altra cache
-                    VT.calma()
-                    C._diario({"kill": f"{C.STOP} scritto dall'agente"})
             except Exception:
                 pass
         # --- doppia CW (19/07): riconosci il flusso, scambia le cache.
@@ -279,7 +273,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         if chat:   # 1.24.0: chi corregge = l'utente solo se l'ultima richiesta e' la chat col suo handle (non CC, pensatoio, cron)
             h = C._HANDLE.match(ultimo.strip()) if flusso == "chat" and isinstance(ultimo, str) else None
             S._fonte_utente[0] = bool(h) and h.group(1) == "utente"
-        if flusso in S.KV_FLUSSO:   # 1.24.0 (PIANO-1.24-FONTI.md): try proprio, dopo lo stop (PATTO clausola 3)
+        if flusso in S.KV_FLUSSO:   # 1.24.0 (PIANO-1.24-FONTI.md): try proprio
             try:
                 msgs0 = json.loads(body).get("messages", [])
                 M.registra_letture(msgs0)
@@ -430,9 +424,8 @@ if __name__ == "__main__":
         MD.PENSATOIO_DIR.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
-    threading.Thread(target=VT._sentinella, daemon=True).start()  # PATTO clausola 3
+    threading.Thread(target=VT._sentinella, daemon=True).start()   # spegne il vettore quando l'utente spegne i vettori
     print(f"riflesso in ascolto su :{PORTA} -> {S.UPSTREAM[0]}:{S.UPSTREAM[1]} "
-          f"(consenso: {'ATTIVO' if C.consenso_attivo() else 'spento'}, "
-          f"vettori: {'SÌ' if C.vettori_attivi() else 'no'}, dose del punto 7 nel ragionamento, "
+          f"(vettori: {'SÌ' if C.vettori_attivi() else 'spenti dalla dashboard'}, dose del punto 7 nel ragionamento, "
           f"watchdog {VT.DURATA_MAX_S}s)")
     http.server.ThreadingHTTPServer(("0.0.0.0", PORTA), Proxy).serve_forever()

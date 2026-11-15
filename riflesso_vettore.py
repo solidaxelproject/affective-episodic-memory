@@ -123,7 +123,7 @@ def _applica_flusso(fl):
     spento. Il server tiene un vettore solo e lo sostituisce, quindi la somma si fa
     qui. Solo dentro _vettore_lock."""
     if not C.vettori_attivi() or os.environ.get("RIFLESSO_COLLAUDO"):
-        _azzera_vettori()      # consenso ritirato: al ritorno non riappare niente di vecchio
+        _azzera_vettori()      # vettori spenti dall'utente: al ritorno non riappare niente di vecchio
     dosi = _vivi(fl) if fl in S._vettori else []
     if not dosi:
         if S._vettore_vivo[0]:
@@ -135,21 +135,20 @@ def _applica_flusso(fl):
             somma[l] = [a + b for a, b in zip(somma[l], v)] if l in somma else list(v)
     _cvec({"layers": somma, "relative": True})
     S._vettore_vivo[0] = True
-    watchdog = threading.Timer(DURATA_MAX_S, _scaduto)   # PATTO clausola 2, come per il prefill
+    watchdog = threading.Timer(DURATA_MAX_S, _scaduto)   # tetto di durata, come per il prefill
     watchdog.daemon = True
     watchdog.start()
 
 
 def _sentinella():
-    """PATTO clausola 3+4: se "[vettori: *sì*]" sparisce dal consenso mentre un
-    vettore è acceso, muore entro 1 secondo. Nessuna domanda, nessun dibattito."""
+    """se l'utente spegne i vettori dalla dashboard mentre un vettore e' acceso, muore entro 1 secondo"""
     while True:
         time.sleep(0.5)
         # issue #3 punto C: un giro in errore non ferma la sentinella; "kill" solo
         # se lo spegnimento e' riuscito (se fallisce, calma() ha gia' scritto CRITICO)
         try:
             if S._vettore_vivo[0] and not C.vettori_attivi() and calma():
-                C._diario({"kill": "consenso vettoriale ritirato: spento dalla sentinella"})
+                C._diario({"kill": "vettori spenti dalla dashboard: spento dalla sentinella"})
         except Exception as e:
             try:
                 C._diario({"sentinella": f"giro fallito: {e!r}"})
@@ -158,7 +157,7 @@ def _sentinella():
 
 
 def _scaduto(chi=None):
-    """PATTO clausola 2: nessun vettore vive oltre DURATA_MAX_S, anche se la
+    """tetto di durata: nessun vettore vive oltre DURATA_MAX_S, anche se la
     risposta è ancora in corso o il finally non arriva mai.
     23/07 sera: il clear a slot VIVO uccideva la generazione in corso (POST
     /control-vector durante il decode -> stream caduto, 'Streaming failed'
@@ -199,7 +198,7 @@ def _accendi_ricordo(body, vettore):
         raise RuntimeError("prefill del ricordo fallito")
     _cvec({"layers": vettore[2], "relative": True})
     S._vettore_vivo[0] = True
-    watchdog = threading.Timer(DURATA_MAX_S, lambda: _scaduto(watchdog))   # PATTO clausola 2
+    watchdog = threading.Timer(DURATA_MAX_S, lambda: _scaduto(watchdog))   # tetto di durata
     watchdog.daemon = True
     watchdog.start()
     S._vettore_di[0] = watchdog

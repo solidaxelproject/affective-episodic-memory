@@ -4,7 +4,7 @@
 # GRADINO ZERO (decisione 3 del 26/07, registro del refactoring): questo file è
 # l'UNICA porta client verso :8090. Lettura sonda, control-vector e POST
 # passano da qui; il layer della sonda vive in UNA costante (LAYER_SONDA).
-# riflesso.py tiene la logica e il patto, ma per il trasporto chiama ponte.
+# riflesso.py tiene la logica, ma per il trasporto chiama ponte.
 # 12/10: tolta la parte delle griglie e del codec (abbandonati il 10/10).
 import json
 import os

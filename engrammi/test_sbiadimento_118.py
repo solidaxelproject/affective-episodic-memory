@@ -20,11 +20,11 @@ assert X._umore() == 1.0
 json.dump({"ts": 0, "stato": {"anxiety": 1.0, "sadness": -2.0}}, open(X.OMEOSTATO, "w"))
 assert X._umore() == 0.5
 X.da_precedente()
-zz = dict(np.load(X.NPZ))   # 1.19.0: il rodaggio come lo metteva la migrazione della 1.18.0 (oggi vissuto)
+zz = dict(X.carica_npz(X.NPZ))   # 1.19.0: il rodaggio come lo metteva la migrazione della 1.18.0 (oggi vissuto)
 zz.update(sbiadimento_da=np.float64(X.LUX.orologio()), sbiadito_fino=np.float64(X.LUX.orologio()))
 np.savez(X.NPZ + ".tmp.npz", **zz)
 os.replace(X.NPZ + ".tmp.npz", X.NPZ)
-z0 = np.load(X.NPZ)
+z0 = X.carica_npz(X.NPZ)
 oggi = float(z0["sbiadito_fino"])
 assert float(z0["sbiadimento_da"]) == oggi
 assert X.sbiadisci(oggi)["sbiadito"] is False, "nello stesso giorno della produzione non sbiadisce"
@@ -33,7 +33,7 @@ s = np.load(X.STATO)
 L = X.Lux.struttura(X.DIR)
 r = X.sbiadisci(oggi + 1)
 assert r["sbiadito"] and r["rodaggio"] == 0.1 and r["umore"] == 0.5, r
-z = np.load(X.NPZ)
+z = X.carica_npz(X.NPZ)
 f = X.freno_archi(z0["A"], s["S"], s["S0"], (z0["E_nato"], z0["E_acceso"], z0["E_accensioni"]), SA.ranghi(z0), L.errati,
                   oggi + 1)
 neg = np.asarray([e not in X.POSITIVE and e not in X.NEUTRE for e in X.EMOZIONI])

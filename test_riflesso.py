@@ -26,14 +26,13 @@ diario = []
 C._diario = diario.append
 C.DIARIO = "/dev/null"
 
-# minori (18/10): l'interruttore vale solo scritto [attivo: *sì*] / [vettori: *sì*]; il testo normale,
-# esempi compresi, non accende niente
+# 14/11 (l'utente, interfase 3-4 punto 6): niente consenso; i vettori si spengono col file della dashboard
 import tempfile  # noqa: E402
-C.CONSENSO = R.Path(tempfile.mkdtemp()) / "consenso.md"
-C.CONSENSO.write_text("# si accende con attivo: sì\n```\nattivo: sì\nvettori: sì\n```\n", encoding="utf-8")
-assert not C.consenso_attivo() and not C.vettori_attivi(), "il testo normale accende il consenso"
-C.CONSENSO.write_text("[attivo: *sì*]\n  [vettori: *sì*]  \n", encoding="utf-8")
-assert C.consenso_attivo() and C.vettori_attivi(), "l'interruttore formattato non accende"
+C.VETTORI_SPENTI = R.Path(tempfile.mkdtemp()) / "vettori-spenti"
+assert C.vettori_attivi(), "senza il file della dashboard i vettori sono ammessi"
+C.VETTORI_SPENTI.touch()
+assert not C.vettori_attivi(), "il file della dashboard non spegne i vettori"
+C.VETTORI_SPENTI.unlink()
 
 # punto C: la sentinella sopravvive a un giro in errore e scrive "kill" solo se lo spegnimento e' riuscito
 giri = {"n": 0}
@@ -54,28 +53,19 @@ t = threading.Thread(target=VT._sentinella, daemon=True)
 t.start()
 time.sleep(1.8)
 assert t.is_alive(), "la sentinella e' morta dopo un giro in errore"
-assert giri["n"] >= 2, "dopo l'errore non ha piu' controllato il consenso"
+assert giri["n"] >= 2, "dopo l'errore non ha piu' controllato l'interruttore"
 assert not any("kill" in v for v in diario), "kill scritto con lo spegnimento fallito"
 esito[0] = True
 time.sleep(0.8)
 assert any("kill" in v for v in diario), "kill non scritto con lo spegnimento riuscito"
 
-# punto E (18/10): la parola di emergenza e' "vectreflexstop", scritta dall'agente negli ultimi 4 messaggi
 def m(ruolo, testo):
     return {"role": ruolo, "content": testo}
 
 
-assert C._stop_chiesto([m("user", "ciao"), m("assistant", "basta cosi', VectReflexStop.")])
-assert not C._stop_chiesto([m("user", "vectreflexstop")]), "vale solo per l'agente"
-assert not C._stop_chiesto([m("assistant", "vectreflexstop")] + [m("user", "x")] * 4), "oltre gli ultimi 4"
-assert not C._stop_chiesto([m("assistant", "riflesso vettoriale: off")]), "la frase vecchia non vale piu'"
-assert C._stop_chiesto([m("assistant", "vectreflexstop"), m("system", "ora"), m("tool", "x"), m("user", "y")]), \
-    "system e tool non spostano la finestra"
-
-# con la parola nella conversazione il ricordo arriva, ma senza colore
 import json, tempfile  # noqa: E401,E402
 M.CONSEGNE = R.Path(tempfile.mkdtemp()) / "consegne.json"
-C.consenso_attivo = C.vettori_attivi = lambda: True
+C.vettori_attivi = lambda: True
 M._lux_consegna = lambda testo, esclusi, emozione=None, coda=None, numero=None: {"codici": ["abc"], "risposta": "1°\nabc\nil mare",
                                                         "ricordi": [{"codice": "abc", "nid": 1, "dominante": "fear",
                                                                      "classe": "vissuto"}]}
@@ -112,10 +102,8 @@ def memoria(msgs, *a):
     return uscito
 
 
-memoria([m("user", "guarda il mare"), m("assistant", "vectreflexstop"), m("user", "e adesso?")])
-assert not colorati, "colorato con vectreflexstop negli ultimi messaggi"
 assert "il mare" in json.dumps(json.loads(memoria([m("user", "di nuovo il mare")])))
-assert colorati, "senza la parola il ricordo deve colorarsi"
+assert colorati, "il ricordo deve colorarsi"
 emo, dose, strati = colorati[-1]
 assert emo == "paura" and abs(dose - (0.036 + 0.009 * (1 - R.math.exp(-1)))) < 1e-9, (emo, dose)
 assert strati == R.steering.strati("paura", dose), "il vettore non e' quello del modulo unico"
@@ -204,12 +192,6 @@ orologio_m[0] = 5000.0 + M.CODA_DURATA + 1          # q3 scaduta, q9 no
 porto += [m("assistant", "si'"), m("user", "e le barche ferme?")]
 memoria(porto)
 assert mandate[-1] == ["q9"], ("la coda non e' scaduta dopo 30 minuti", mandate)
-C.consenso_attivo = lambda: False                   # consenso spento: niente coda (step b)
-porto += [m("assistant", "si'"), m("user", "e il molo?")]
-memoria(porto)
-assert mandate[-1] is None, mandate
-assert numeri == [1, 2, 3, 4], numeri   # 1.22.0: N-esima ricombinazione (a consenso spento la voce non entra)
-C.consenso_attivo = lambda: True
 M.time.time, M._lux_consegna = tempo_vero, lux_prima
 
 # punto A (design dell'utente 18/10): il vettore appartiene alla KV cache del suo flusso
@@ -239,7 +221,7 @@ assert inviati[-1] == {"layers": {"20": [0.2, 0.1], "21": [0.0, 0.1]}, "relative
 orologio[0] += 60                          # fear finita (50+50), joy a 0.04
 assert [e for e, _ in VT._vivi("pensatoio")] == ["joy"]
 assert not S._vettori["chat"]
-VT._azzera_vettori()                        # vectreflexstop: tutti e due i flussi
+VT._azzera_vettori()                        # vettori spenti: tutti e due i flussi
 assert not S._vettori["pensatoio"] and not S._vettori["chat"]
 
 # 18/10: dopo un'interruzione il vettore torna alla dose della fine dell'ultima risposta di un tool
@@ -305,11 +287,11 @@ INTEST = RP.INTESTAZIONE_RIEPILOGO
 assert INTEST == ("Ecco dov'ero rimasta, questo è il succo della conversazione fino al momento in cui mi sono "
                   "addormentata:"), "intestazione diversa da quella approvata"
 assert RP.ISTRUZIONE_RIEPILOGO == (
-    "Devo scrivere, in meno di 60 parole, il succo di quest'ultimo messaggio o di quello dell'utente se necessario: le "
-    "informazioni salienti che voglio conservare dell'ultimo scambio. Non i messaggi precedenti. Solo testo, numeri o "
-    "simboli logici se utili, per esempio: uguale può diventare =, implica →, maggiore >. Se necessario posso "
-    "inserire il codice di un ricordo che reputo utile per questo riassunto. Se in questo scambio mi è affiorato un "
-    "ricordo, aggiungo il suo codice. Lo scrivo con write_file in /workspace/memoria/logRiepilogo.md."), \
+    "Devo scrivere il succo di quest'ultimo messaggio o di quello dell'utente se necessario: le informazioni salienti "
+    "che voglio conservare dell'ultimo scambio. Non i messaggi precedenti. Lo scrivo con la skill "
+    "compressione-semantica, in una riga. Se necessario posso inserire il codice di un ricordo che reputo utile per "
+    "questo riassunto. Se in questo scambio mi è affiorato un ricordo, aggiungo il suo codice. Lo scrivo con "
+    "write_file in /workspace/memoria/logRiepilogo.md."), \
     "istruzione diversa da quella approvata"
 
 # riepilogo.json assente o rotto = nessun blocco; rotto = voce nel diario

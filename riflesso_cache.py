@@ -2,10 +2,13 @@
 import http.client
 import json
 import socket
+import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
 import riflesso_stato as S
+import riflesso_comune as C
 
 
 # --- specchio del KV (17/07, richiesta di progetto): l'istante sospeso dell'agente.
@@ -22,6 +25,12 @@ KV_SSD_ATTIVO = False
 _kv_conta = [0]
 
 AFK_S = 60              # spec punto 5: 1 min senza typing = l'utente non c'è
+# 14/11: quando nello slot entra la cache del pensatoio e per QUIETE_S non arriva nessuna richiesta, le cache della
+# chat e del riepilogo si COPIANO su disco (agente-kv salva: chat.kv col .ckpt e riepilogo.kv, con l'impronta della sessione,
+# la stessa copia di samstop). Una volta per ingresso del pensatoio; se la chat torna prima, niente copia.
+QUIETE_S = 60
+SAM_KV = str(Path.home() / ".local/bin/agente-kv")
+_ingresso = [0]   # conta gli ingressi del pensatoio nello slot: una copia vale solo per il suo ingresso
 
 
 HS = "http://127.0.0.1:8008"
@@ -80,6 +89,26 @@ def _scambia(fl):
     if (KV_RAM / S.KV_FLUSSO[fl]).exists():
         _slot("restore", S.KV_FLUSSO[fl])
     _cambia_cw(fl)
+    if fl == "pensatoio":
+        _ingresso[0] += 1
+        threading.Thread(target=_copia_dopo_quiete, args=(_ingresso[0],), daemon=True).start()
+
+
+def _copia_dopo_quiete(n, passo=None):
+    """14/11: dopo l'ingresso n del pensatoio, QUIETE_S senza richieste (chat, pensatoio o altro) = copia su
+    disco di chat.kv e riepilogo.kv. Esce senza copiare se il pensatoio lascia lo slot o se c'e' un ingresso nuovo"""
+    while True:
+        time.sleep(passo or min(5, QUIETE_S / 4))
+        if _ingresso[0] != n or S._cw[0] != "pensatoio":
+            return
+        quiete = time.time() - max(S._ultima_richiesta[0], S._caricato[0])
+        if quiete >= QUIETE_S and not (S._chat_in_volo[0] or S._altro_in_volo[0]):
+            break
+    try:
+        r = subprocess.run([SAM_KV, "salva"], capture_output=True, text=True, timeout=600)
+        C._diario({"cw": f"pensatoio fermo da {QUIETE_S} s: copia su disco", "agente-kv": (r.stdout or r.stderr).strip()[-200:]})
+    except Exception as e:
+        C._diario({"cw": f"copia su disco non fatta: {e}"})
 
 
 def _cambia_cw(fl):

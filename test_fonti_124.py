@@ -19,8 +19,6 @@ TMP = Path(tempfile.mkdtemp())
 diario = []
 C._diario = diario.append
 FI.CODA_FIRMA = str(TMP / "coda-firma.jsonl")
-C.CONSENSO = TMP / "consenso.md"
-C.CONSENSO.write_text("[attivo: *sì*]\n", encoding="utf-8")
 
 PROSA = "parola " * 100   # 700 caratteri: una lettura
 
@@ -125,10 +123,6 @@ S._fonte_utente[0] = False
 assert M.correggicordo(GIUSTO).startswith("Ricordo corretto.")
 assert ricevute[-1][1]["fonte"] == "@agente:localhost" and len(ricevute[-1][1]["siti"]) == 5
 assert M.correggicordo({"codice": "zzz", "testo": "x"}) == M.R_CODICE
-C.CONSENSO.write_text("[attivo: *no*]\n", encoding="utf-8")
-n = len(ricevute)
-assert M.correggicordo(GIUSTO) == M.R_GIU and len(ricevute) == n   # consenso spento: niente si scrive
-C.CONSENSO.write_text("[attivo: *sì*]\n", encoding="utf-8")
 srv.shutdown()
 srv.server_close()
 assert M.correggicordo(GIUSTO) == M.R_GIU   # Lux giu'

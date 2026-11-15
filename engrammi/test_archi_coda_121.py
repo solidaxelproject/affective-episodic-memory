@@ -24,9 +24,9 @@ assert X.in_coda([], [5, 6], b) == [5, 6]
 # mano (dalla 1.22.0 da_precedente copia e basta)
 X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"
 X.da_precedente()
-z0, zp = np.load(X.NPZ), np.load(f"{X.PRECEDENTE}/lux.npz")
-assert set(z0.files) == set(zp.files)
-assert all(np.array_equal(z0[k], zp[k], equal_nan=zp[k].dtype.kind == "f") for k in zp.files)
+z0, zp = X.carica_npz(X.NPZ), X.carica_npz(f"{X.PRECEDENTE}/lux.npz")
+assert set(z0) == set(zp)
+assert all(np.array_equal(z0[k], zp[k], equal_nan=zp[k].dtype.kind == "f") for k in zp)
 assert json.load(open(X.META)) == json.load(open(f"{X.PRECEDENTE}/lux-meta.json"))
 z = dict(z0)
 z["avvicina_da"] = np.float64(X.LUX.orologio())
@@ -153,16 +153,16 @@ for c, val in (("S", X.LUX.S_BASE), ("U", oggi + 40), ("N", 1), ("P", 1)):
     s[f"RA_{c}"] = np.concatenate([s[f"RA_{c}"], np.asarray([val], s[f"RA_{c}"].dtype)])
 np.savez(X.STATO + ".tmp.npz", **s)
 os.replace(X.STATO + ".tmp.npz", X.STATO)
-Cp = np.load(X.NPZ)["C"].copy()
+Cp = X.carica_npz(X.NPZ)["C"].copy()
 r = X.avvicina(oggi + 41)
-assert r["archi"] == 1 and r["spostati"] == 0 and np.array_equal(np.load(X.NPZ)["C"], Cp), r
+assert r["archi"] == 1 and r["spostati"] == 0 and np.array_equal(X.carica_npz(X.NPZ)["C"], Cp), r
 assert (np.load(X.STATO)["RA_P"] == 0).all()
 
 # aggiungi dopo avvicina: avvicina_da resta (revisione 1)
 nid = max(L.ricordi) + 1
 X._aggiungi([(nid, "Il gatto rosso dorme sul davanzale della cucina.", L.ricordi[x]["firma"], "vissuto", 1.8e9,
               {"dominante": dom(x), "fonte": "prova", "cattura": None, "salienza": None, "voluto": False})])
-assert "avvicina_da" in np.load(X.NPZ).files, "aggiungi ha perso avvicina_da"
+assert "avvicina_da" in X.carica_npz(X.NPZ), "aggiungi ha perso avvicina_da"
 assert X.Lux().archi_ric, "aggiungi ha perso gli archi fra ricordi"
 print(f"selezione {sel}, dati {dati}, coda dopo {len(coda)}, archi {len(L.archi_ric)}, cambiato {cambiato}")
 print("TUTTI I TEST DELLA 1.21.0 VERDI")

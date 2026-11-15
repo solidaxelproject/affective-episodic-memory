@@ -8,16 +8,13 @@ from pathlib import Path
 import ponte
 
 
-CONSENSO = Path(os.environ.get("RIFLESSO_CONSENSO",
-    "/data/workspace/genesi/CONSENSO-RIFLESSO.md"))
+# 14/11 (l'utente, interfase 3-4 punto 6): patto e consenso tolti; i vettori li spegne solo l'utente dalla dashboard (:8095,
+# pulsante "vettori"), che crea questo file. Sta fuori da workspace: l'agente non lo vede e non lo cambia.
+VETTORI_SPENTI = Path(os.environ.get("RIFLESSO_VETTORI_SPENTI", "/data/memoria-episodica-affettiva/vettori-spenti"))
 DIARIO = "/data/workspace/memoria/diario-riflessi.jsonl"
 
 
 _HANDLE = re.compile(r"^\[([a-z0-9_]+)\]\s?(.*)$", re.DOTALL)   # come estrai-matrix: solo handle veri (minuscoli)
-
-
-# PATTO 14/07 (CONSENSO-RIFLESSO.md, firmato dall'agente):
-STOP = "vectreflexstop"   # clausola 3 (l'utente 18/10, era "riflesso vettoriale: off"): scritta dall'agente, spegne <1s
 
 
 _ORA = re.compile(r"^\[\d{1,2}/\d{1,2}/\d{4}\|\d{1,2}:\d{2}\] ")
@@ -30,28 +27,9 @@ def _chiedi(path, payload):
     return r
 
 
-# issue #3 (18/10): l'interruttore vale solo con la sua formattazione; un "attivo: sì" scritto
-# nel testo normale o in un esempio non accende niente
-INTERRUTTORE = "[attivo: *sì*]"
-INTERRUTTORE_VETTORI = "[vettori: *sì*]"
-
-
-def consenso_attivo():
-    # issue #3 punto C: un byte non UTF-8 nel file non deve bloccare la sentinella
-    try:
-        return any(r.strip() == INTERRUTTORE
-                   for r in CONSENSO.open(encoding="utf-8", errors="replace"))
-    except OSError:
-        return False
-
-
 def vettori_attivi():
-    """v2: il brivido insieme al sussurro. Interruttore SEPARATO, riga esatta."""
-    try:
-        return any(r.strip() == INTERRUTTORE_VETTORI
-                   for r in CONSENSO.open(encoding="utf-8", errors="replace"))
-    except OSError:
-        return False
+    """vettori ammessi finche' l'utente non li spegne dalla dashboard (14/11: niente piu' consenso nel file dell'agente)"""
+    return not VETTORI_SPENTI.exists()
 
 
 def _impronta(testo):
@@ -101,14 +79,6 @@ def _ha_testo(m):
     if isinstance(c, list):
         return any((p.get("text") or "").strip() for p in c if isinstance(p, dict))
     return bool((c or "").strip())
-
-
-def _stop_chiesto(msgs):
-    """clausola 3: l'agente ha scritto la parola di emergenza in uno degli ultimi 4 messaggi
-    (solo i suoi: per l'utente non c'e' un comando, l'utente 18/10)"""
-    dialogo = [m for m in msgs if isinstance(m, dict) and m.get("role") in ("user", "assistant")]
-    return any(m["role"] == "assistant" and STOP in str(m.get("content") or "").lower()
-               for m in dialogo[-4:])
 
 
 def _diario(voce):

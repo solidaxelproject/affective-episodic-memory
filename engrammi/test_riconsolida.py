@@ -16,7 +16,7 @@ import lux_engrammi as X  # noqa: E402
 X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"   # 1.21.0 (prima 1.18.0): da_precedente = copia identica; la migrazione 1.17.0 e la prova test_contatori_117.py
 X.DIARIO_RIFLESSO, X.GIORNATA = f"{T}/diario.jsonl", f"{T}/giornata.jsonl"
 X.da_precedente()
-z = np.load(X.NPZ)
+z = X.carica_npz(X.NPZ)
 assert np.isnan(z["rodaggio_da"])
 zz = dict(z)
 zz["M"] = np.zeros((0, 4 + len(X.EMOZIONI)))   # la copia parte senza momenti (quelli veri della 1.14.0 restano li')
@@ -50,13 +50,13 @@ scrivi(X.GIORNATA, [{"ts": 1500.0, "autore": AGENTE, "testo": "r1", "firma": F1,
                     {"ts": 3100.0, "autore": AGENTE, "testo": "forzato", "firma": F2, "forzato": True, "flusso": "pensatoio"},
                     {"ts": 3200.0, "autore": AGENTE, "testo": "r3", "firma": F2, "flusso": "pensatoio"},
                     {"ts": 9000.0 + X.FINESTRA_MOMENTO + 1, "autore": AGENTE, "testo": "tardi", "firma": F1}])
-prima = {k: np.load(X.NPZ)[k] for k in ("C", "C0", "F", "A")}
+prima = {k: X.carica_npz(X.NPZ)[k] for k in ("C", "C0", "F", "A")}
 stato = {k: np.load(X.STATO)[k] for k in ("S", "S0", "U")}
 
 # effetto zero (rodaggio_da NaN): solo M
 r = X.riconsolida(oggi=100.0)
 assert r["momenti"] == 3 and r["spostati"] == 0 and r["effetto"] == 0.0, r
-z = np.load(X.NPZ)
+z = X.carica_npz(X.NPZ)
 assert all(np.array_equal(prima[k], z[k]) for k in prima), "effetto zero ha toccato C/C0/F/A"
 assert all(np.array_equal(stato[k], np.load(X.STATO)[k]) for k in stato), "effetto zero ha toccato lo stato"
 M = z["M"]
@@ -75,14 +75,14 @@ assert X.riconsolida(oggi=100.0)["momenti"] == 0 and os.path.getmtime(X.NPZ) == 
 scrivi(X.GIORNATA, [{"ts": 9500.0, "autore": AGENTE, "testo": "r9", "firma": F2, "flusso": "pensatoio"}])
 assert X.riconsolida(oggi=100.0)["momenti"] == 1
 scrivi(X.GIORNATA, [{"ts": 5100.0, "autore": AGENTE, "testo": "r5", "firma": F1, "flusso": "chat"}])
-assert X.riconsolida(oggi=100.0)["momenti"] == 1 and len(np.load(X.NPZ)["M"]) == 5
+assert X.riconsolida(oggi=100.0)["momenti"] == 1 and len(X.carica_npz(X.NPZ)["M"]) == 5
 
 # rodaggio (punto 9)
 assert [X._rodaggio(g) for g in (0, 9.9, 10, 19, 25, 30, 400)] == [0.1, 0.1, 0.3, 0.3, 0.7, 1.0, 1.0]
 
 # una correzione (embedder vero) tiene C0 allineata, M e rodaggio_da
 cod = X.correggi(L.ricordi[n2]["codice"], "Il gatto si chiamava Neve, non Bianca.", ts=7777.0)
-z = np.load(X.NPZ)
+z = X.carica_npz(X.NPZ)
 assert len(z["C0"]) == len(z["A"]) == len(z["C"]) and len(z["M"]) == 5 and np.isnan(z["rodaggio_da"]), "chiavi 1.14 perse"
 assert np.array_equal(z["C0"][:len(prima["C0"])], prima["C0"])
 L = X.Lux.struttura(X.DIR)
@@ -90,7 +90,7 @@ nc = L.da_codice[cod]
 assert nc >= X.PRIMO_CORREZIONE and n2 in L.errati
 
 # effetto acceso: soglia 0, rodaggio pieno
-zz = dict(np.load(X.NPZ))
+zz = dict(X.carica_npz(X.NPZ))
 zz["rodaggio_da"] = np.float64(500.0)   # accensione nel futuro: ancora niente
 np.savez(X.NPZ + ".tmp.npz", **zz)
 os.replace(X.NPZ + ".tmp.npz", X.NPZ)
@@ -99,12 +99,12 @@ scrivi(X.DIARIO_RIFLESSO, [{"ts": 15000.0, "memorinvolontaria": ["x"], "nid": [n
 scrivi(X.GIORNATA, [{"ts": 15100.0, "autore": AGENTE, "testo": "r15", "firma": F1, "flusso": "chat"}])
 r = X.riconsolida(oggi=90.0)
 assert r["momenti"] == 1 and r["spostati"] == 0, r
-zz = dict(np.load(X.NPZ))
+zz = dict(X.carica_npz(X.NPZ))
 zz["rodaggio_da"] = np.float64(50.0)
 np.savez(X.NPZ + ".tmp.npz", **zz)
 os.replace(X.NPZ + ".tmp.npz", X.NPZ)
 X.SOGLIA_SORPRESA = 0.0
-prima = {k: np.load(X.NPZ)[k] for k in ("C", "C0")}
+prima = {k: X.carica_npz(X.NPZ)[k] for k in ("C", "C0")}
 stato = {k: np.load(X.STATO)[k] for k in ("S", "S0")}
 scrivi(X.DIARIO_RIFLESSO, [{"ts": 20000.0, "memorinvolontaria": ["f"], "nid": [n1], "flusso": "chat"},
                            {"ts": 20001.0, "memorinvolontaria": ["g"], "nid": [n2], "flusso": "chat"},
@@ -112,7 +112,7 @@ scrivi(X.DIARIO_RIFLESSO, [{"ts": 20000.0, "memorinvolontaria": ["f"], "nid": [n
 scrivi(X.GIORNATA, [{"ts": 20100.0, "autore": AGENTE, "testo": "r20", "firma": F1, "flusso": "chat"}])
 r = X.riconsolida(oggi=90.0)
 assert r["momenti"] == 3 and r["effetto"] == 1.0, r
-z, s = np.load(X.NPZ), np.load(X.STATO)
+z, s = X.carica_npz(X.NPZ), np.load(X.STATO)
 js = [j for j in L.per_ricordo[n1] if L.C0[j].any()]
 cambiati = np.nonzero((z["C"] != prima["C"]).any(1))[0].tolist()
 assert cambiati and set(cambiati) <= set(js), "spostati archi di altri ricordi (o niente)"

@@ -1,0 +1,41 @@
+{
+ "aggiungi_ricordo": "3fdba35f04dc8c462986c992bcf875546257113072a909c162f7e470e581e278",
+ "avvicina": "7fa6297c3bac3a772537ebacea68312dcf8efb701115c3aead87a586065957b4",
+ "consegna": "740f283947d4a1a743c01566e7d942649cc919e378251fce8a2707ca1629c590",
+ "correggi": "9cd13297931b59112f4ea8aa6dc118d56930b45305dd902f8602d5c1b9f4715d",
+ "costruzione": {
+  "lux-meta.json": "0dc5b23af784611d4d809abc6dd314c75a8d491e5435275fbe7af6155af98f02",
+  "lux.npz": "3b51767a876d7da1c659265833ce93c72161f406c36d66a692a009caccfaa8be"
+ },
+ "da_precedente": {
+  "lux-meta.json": "3b259772cc905ea34de267fe0b9abcb147fedbcf2af5b12e00248b2b7c228b93",
+  "lux-stato.npz": "d7f53d787d5afb42bdfea77b25bc7122ad04d34fabef9bcf63b9b1027e84104a",
+  "lux.npz": "7d34faf426fe09e272538c795ba83587968260ea5da1b67b3ee42be6bb1a101e"
+ },
+ "dopo_aggiunte": {
+  "lux-meta.json": "3b259772cc905ea34de267fe0b9abcb147fedbcf2af5b12e00248b2b7c228b93",
+  "lux-stato.npz": "7dd7f72bb42f3d32f2c6c14383d2072f50678ff1b0753d874f9f243a182a202d",
+  "lux.npz": "7d34faf426fe09e272538c795ba83587968260ea5da1b67b3ee42be6bb1a101e"
+ },
+ "dopo_consegne": {
+  "lux-meta.json": "0dc5b23af784611d4d809abc6dd314c75a8d491e5435275fbe7af6155af98f02",
+  "lux-stato.npz": "65902bc7a8ab63680e6a6bc781fd712853dd13af3b84f77f4fb391e618c07a9d",
+  "lux.npz": "3b51767a876d7da1c659265833ce93c72161f406c36d66a692a009caccfaa8be"
+ },
+ "dopo_notte": {
+  "lux-meta.json": "3b259772cc905ea34de267fe0b9abcb147fedbcf2af5b12e00248b2b7c228b93",
+  "lux-stato.npz": "d7f53d787d5afb42bdfea77b25bc7122ad04d34fabef9bcf63b9b1027e84104a",
+  "lux.npz": "7d34faf426fe09e272538c795ba83587968260ea5da1b67b3ee42be6bb1a101e"
+ },
+ "fonti": "be7b36e0c0ab9edb53a757b65f992c700968eecf476dd44bfa719b857858b659",
+ "forza": "dbbb55ea14941a3b294f8a6bb8eab96e68474452717d68356d14368d6eaecb53",
+ "frasi": "dabc19b8f5b92db6424a984adde2acb7b32a03c838833d3c02d4d46d56253eb8",
+ "pota_ponti": "0fbe9a28469b9492d9c71702e08a87ac8359b9ec4be2452e51f809adf466fb57",
+ "riaccendi": "fe265ac8b78e4f567cec02c87cde8ccdd3715c991f689d0f08137cb16ce80a9c",
+ "richiama": "4f350714e543d80b446b51641892fc19dfae13bc5b5cae8738306060982069ae",
+ "ricombina": "cb45d92927e65ef455d197178fa011f7a49042c822d652f55749202d0bf8c4e4",
+ "ricomponi": "4b4d227e3901206374e4a54b3beae3b496fa991166c34956512e2433f5f93dcc",
+ "riconsolida": "7cac178bb828fb345624feab4490a0115d6e28d08ea0f2b97c8a7fdbb2daf72a",
+ "risposta_tool": "3b39690aa674cffbb1cba6f0917a507fb97ed195fe60493afaa91cacadd4eeb4",
+ "sbiadisci": "c1093a51abc4b8566920df1dfabed8712155e7caca46943a400d61ac4c8286b9"
+}

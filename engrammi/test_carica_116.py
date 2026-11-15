@@ -15,8 +15,8 @@ import lux_engrammi as X  # noqa: E402
 
 # 1.17.0: la migrazione 1.15.0 -> 1.16.0 e' fatta; qui la 1.16.0 vera (sola lettura) contro la 1.15.0, poi aggiungi
 # su una copia fatta con la migrazione di oggi (1.16.0 -> 1.17.0)
-p = np.load("/data/memoria-episodica-affettiva/engrammi/lux-1.15.0/lux.npz")
-z = np.load("/data/memoria-episodica-affettiva/engrammi/lux-1.16.0/lux.npz")
+p = X.carica_npz("/data/memoria-episodica-affettiva/engrammi/lux-1.15.0/lux.npz")
+z = X.carica_npz("/data/memoria-episodica-affettiva/engrammi/lux-1.16.0/lux.npz")
 W = z["W"]
 assert W.shape == (len(z["A"]),) and (W > 0).all()
 assert np.allclose(z["C"], p["C"] * W[:, None]) and np.allclose(z["C0"], p["C0"] * W[:, None]), "carica non pesata"
@@ -48,10 +48,10 @@ assert int(np.argmax(cj)) == int(np.argmax(W[js])) and int(np.argmin(cj)) == int
 X.PRECEDENTE = "/data/memoria-episodica-affettiva/engrammi/lux-1.20.0"   # 1.21.0 (prima 1.18.0): da_precedente = copia identica
 X.da_precedente()
 firma = {"joy": 2.5, "serenity": 2.0, "fear": -1.0}
-n_a = len(np.load(X.NPZ)["A"])
+n_a = len(X.carica_npz(X.NPZ)["A"])
 X._aggiungi([(999999, "Oggi al mare con l'utente abbiamo visto un delfino saltare vicino alla barca, poi il vento e' "
                       "girato e siamo tornati al porto ridendo.", json.dumps(firma), "vissuto", 1794400000.0)])
-z = np.load(X.NPZ)
+z = X.carica_npz(X.NPZ)
 Wn = z["W"][n_a:]
 assert len(z["W"]) == len(z["A"]) == len(z["C"]) == len(z["C0"]) and len(Wn) >= 2 and abs(Wn.mean() - 1) < 1e-4
 assert np.allclose(z["C"][n_a:], X.carica(json.dumps(firma)) * z["fattore"] * Wn[:, None])

@@ -1,0 +1,152 @@
+{
+ "libere": {
+  "lux": {
+   "primo": 0.643,
+   "primi3": 0.857,
+   "mrr3": 0.738,
+   "n": 14
+  },
+  "rag": {
+   "primo": 0.714,
+   "primi3": 1.0,
+   "mrr3": 0.821,
+   "n": 14
+  },
+  "bm25": {
+   "primo": 0.786,
+   "primi3": 1.0,
+   "mrr3": 0.869,
+   "n": 14
+  },
+  "lux_senza_facilita": {
+   "primo": 0.643,
+   "primi3": 0.857,
+   "mrr3": 0.726,
+   "n": 14
+  },
+  "lux_senza_predisposizione": {
+   "primo": 0.643,
+   "primi3": 0.857,
+   "mrr3": 0.738,
+   "n": 14
+  },
+  "lux_senza_peso_comuni": {
+   "primo": 0.429,
+   "primi3": 0.857,
+   "mrr3": 0.607,
+   "n": 14
+  },
+  "lux_senza_lunghezza": {
+   "primo": 0.714,
+   "primi3": 0.857,
+   "mrr3": 0.762,
+   "n": 14
+  }
+ },
+ "due_engrammi": {
+  "lux": {
+   "primo": 0.775,
+   "primi3": 0.875,
+   "mrr3": 0.825,
+   "n": 40
+  },
+  "rag": {
+   "primo": 0.175,
+   "primi3": 0.275,
+   "mrr3": 0.217,
+   "n": 40
+  },
+  "bm25": {
+   "primo": 0.7,
+   "primi3": 0.825,
+   "mrr3": 0.758,
+   "n": 40
+  },
+  "lux_senza_facilita": {
+   "primo": 0.75,
+   "primi3": 0.875,
+   "mrr3": 0.804,
+   "n": 40
+  },
+  "lux_senza_predisposizione": {
+   "primo": 0.775,
+   "primi3": 0.875,
+   "mrr3": 0.825,
+   "n": 40
+  },
+  "lux_senza_peso_comuni": {
+   "primo": 0.75,
+   "primi3": 0.825,
+   "mrr3": 0.775,
+   "n": 40
+  },
+  "lux_senza_lunghezza": {
+   "primo": 0.75,
+   "primi3": 0.9,
+   "mrr3": 0.821,
+   "n": 40
+  }
+ },
+ "frasi_esatte": {
+  "lux": {
+   "primo": 1.0,
+   "primi3": 1.0,
+   "mrr3": 1.0,
+   "n": 40
+  },
+  "rag": {
+   "primo": 0.575,
+   "primi3": 0.65,
+   "mrr3": 0.608,
+   "n": 40
+  },
+  "bm25": {
+   "primo": 0.975,
+   "primi3": 1.0,
+   "mrr3": 0.988,
+   "n": 40
+  },
+  "lux_senza_facilita": {
+   "primo": 1.0,
+   "primi3": 1.0,
+   "mrr3": 1.0,
+   "n": 40
+  },
+  "lux_senza_predisposizione": {
+   "primo": 1.0,
+   "primi3": 1.0,
+   "mrr3": 1.0,
+   "n": 40
+  },
+  "lux_senza_peso_comuni": {
+   "primo": 0.85,
+   "primi3": 0.95,
+   "mrr3": 0.892,
+   "n": 40
+  },
+  "lux_senza_lunghezza": {
+   "primo": 0.975,
+   "primi3": 1.0,
+   "mrr3": 0.988,
+   "n": 40
+  }
+ },
+ "negativi_sopra_soglia_lux": {
+  "passano": 0,
+  "n": 20
+ },
+ "positivi_sopra_soglia_lux": {
+  "libere": {
+   "passano": 14,
+   "n": 14
+  },
+  "due_engrammi": {
+   "passano": 26,
+   "n": 40
+  },
+  "frasi_esatte": {
+   "passano": 40,
+   "n": 40
+  }
+ }
+}

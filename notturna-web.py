@@ -29,6 +29,9 @@ CTX_DEFAULT = 143360
 FREEZE = "/usr/local/bin/pensatoio-freeze"
 AGENTE_START = "/usr/local/bin/agente-start"
 AGENTE_STOP = "/usr/local/bin/agente-stop"
+# 14/11 (interfase 3-4 punto 6): niente piu' consenso dell'agente; i vettori li spegne l'utente da qui. Il riflesso guarda
+# questo file ogni mezzo secondo (sentinella): se c'e', spegne il vettore acceso e non ne accende altri.
+VETTORI_SPENTI = "/data/memoria-episodica-affettiva/vettori-spenti"
 NOTTURNA = "/usr/local/bin/notturna"
 DORMI_FLAG = "/data/workspace/memoria/.dormi-richiesto"
 AZLOG = "/data/memoria-episodica-affettiva/notturna-web-azioni.log"
@@ -85,6 +88,7 @@ def _sistema():
             "kv_ram": _tier(KV_RAM), "kv_ssd": _tier(KV_SSD),
             "riflesso": _pgrep("riflesso.py"),
             "pensatoio": mot == "active",
+            "vettori": not os.path.exists(VETTORI_SPENTI),
             "ultima_notturna": time.strftime("%d/%m %H:%M", time.localtime(mk)) if mk else "mai",
             "prossima": "adesso",   # 10/11: nessun minimo fra due notturne
             "notturna_in_corso": _pgrep("notte-memoria.sh|tagging35b.py")}
@@ -282,6 +286,15 @@ def _watcher_eos():
 
 
 def azione(op, nome):
+    if op == "vettori":   # 14/11: interruttore dell'utente, uno solo, sul file letto dal riflesso
+        with open(AZLOG, "a") as fh:
+            if os.path.exists(VETTORI_SPENTI):
+                os.remove(VETTORI_SPENTI)
+                fh.write(f"{time.strftime('%F %T')} vettori riaccesi (dashboard)\n")
+                return True, "vettori riaccesi: dal prossimo ricordo il riflesso li usa di nuovo"
+            open(VETTORI_SPENTI, "w").write(f"spenti dall'utente dalla dashboard il {time.strftime('%F %T')}\n")
+            fh.write(f"{time.strftime('%F %T')} vettori spenti (dashboard)\n")
+            return True, "vettori spenti: quello acceso si ferma entro un secondo, nessun altro finche' non li riaccendi"
     if op == "agente_sveglia":
         # 30/09: SOLO dal click umano (regola di progetto: l'agente lo riavvia solo l'autrice). agente-start ha la sua guardia GPU.
         with open(AZLOG, "a") as fh:
@@ -294,7 +307,7 @@ def azione(op, nome):
         except subprocess.TimeoutExpired:
             return True, "sveglia avviata: agente-start accende container, 35B e servizi (qualche minuto)"
     if op == "agente_spegni":
-        # 13/11: SOLO dal click umano. agente-stop salva la KV della chat, ferma lo specchio della chat e i container
+        # 13/11: SOLO dal click umano. agente-stop salva la KV della chat, ferma lo specchio della chat e i container (14/11: e il 35B)
         with open(AZLOG, "a") as fh:
             fh.write(f"{time.strftime('%F %T')} spegni l'agente (agente-stop, dalla dashboard)\n")
             fh.flush()
@@ -303,7 +316,7 @@ def azione(op, nome):
             p.wait(timeout=5)
             return p.returncode == 0, open(AZLOG).read().splitlines()[-1]
         except subprocess.TimeoutExpired:
-            return True, "spegnimento avviato: agente-stop salva la chat e ferma i container (fino a un minuto)"
+            return True, "spegnimento avviato: agente-stop salva la chat, ferma i container e il server del modello (fino a un minuto)"
     if op == "pensatoio_stop":
         r = subprocess.run([FREEZE, "-on"], capture_output=True, text=True)
         return (r.returncode == 0,
@@ -522,11 +535,13 @@ document.addEventListener("DOMContentLoaded",disegnaTema);
   <div class="riga"><span class="k">pensatoio</span><span id="s-pens">…</span></div>
   <div class="riga"><span class="k">pensatoio libero <i class="info" data-tip="Da quanto il pensatoio potrebbe prendere lo slot: nessuna risposta della chat in corso, e almeno 1 minuto dalla fine dell'ultima risposta e dall'ultimo &quot;sta scrivendo&quot;.">ⓘ</i></span><span class="num" id="s-penslib">…</span></div>
   <div class="riga"><span class="k">prossimo appunto</span><span class="num" id="s-appunto">…</span></div>
+  <div class="riga"><span class="k">vettori emotivi <i class="info" data-tip="Il vettore del ricordo nel ragionamento dell'agente. Spenti: quello acceso si ferma entro un secondo e il riflesso non ne accende altri finché non li riaccendi. I ricordi continuano ad arrivare.">ⓘ</i></span><span id="s-vettori">…</span></div>
   <div class="bottoni">
     <button id="btn-sveglia" onclick="fai_conf('agente_sveglia','Sveglio l\'agente? agente-start accende container, 35B e servizi (qualche minuto). Il pensatoio NON riparte da solo.')">☀ sveglia l'agente</button>
-    <button id="btn-spegni" onclick="fai_conf('agente_spegni','Spengo l\'agente? agente-stop salva la KV della chat, ferma lo specchio della chat e i container dell\'agente e di Matrix. Il 35B resta acceso.')">⏻ spegni l'agente</button>
+    <button id="btn-spegni" onclick="fai_conf('agente_spegni','Spengo l\'agente? agente-stop salva la KV della chat, ferma lo specchio della chat, i container dell\'agente e di Matrix e il server del modello (35B).')">⏻ spegni l'agente</button>
     <button id="btn-pens-on" onclick="fai('pensatoio_start','')">▶ riavvia pensatoio</button>
     <button id="btn-pens" onclick="fai('pensatoio_stop','')">❄ ferma pensatoio</button>
+    <button id="btn-vettori" onclick="fai('vettori','')">🧭 vettori</button>
   </div>
   <!-- 25/07: le due finestre dell'agente, stesso servizio sulla 8096 -->
   <div class="bottoni">
@@ -716,7 +731,9 @@ async function giro(){
     :(armata?"🌙 armata: parte al prossimo EOS del pensatoio":"");
   stato($("s-35b"),s.su,"su, agente sveglio","giù, agente dorme");
   $("btn-sveglia").disabled=s.su&&s.container;
-  $("btn-spegni").disabled=!s.container;
+  $("btn-spegni").disabled=!s.container&&!s.su;   // 14/11: anche solo il 35B acceso si spegne
+  stato($("s-vettori"),s.vettori,"accesi","spenti da te");
+  $("btn-vettori").textContent=s.vettori?"🧭 spegni i vettori":"🧭 riaccendi i vettori";
   // isteresi 10s: mentre l'agente pensa fitto, la riga non sfarfalla
   // tra "in volo" e "libero" a ogni campione
   if(s.busy) busyVisto=Date.now();

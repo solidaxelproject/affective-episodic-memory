@@ -90,10 +90,10 @@ touch /data/workspace/memoria/.ultima-notturna
 # 1.14.0 (PIANO-1.14-RICONSOLIDAMENTO.md, punto 9): copia del Lux della notte (sotto il lucchetto del Lux, tiene le
 # ultime 7), poi il riconsolidamento nel servizio, che tiene lo stato in memoria (fallimento non critico)
 LD=$(cd /data/memoria-episodica-affettiva/engrammi && /data/venv-spacy/bin/python -c "import lux_engrammi as X, numpy as np
-print(X.DIR if 'C0' in np.load(X.NPZ).files else '')")   # solo dalla 1.14.0 (prima: niente M da scrivere)
+print(X.DIR if 'M' in np.load(X.NPZ).files else '')")   # solo dalla 1.14.0 (prima: niente M da scrivere; dalla 1.25.0 C0 e' nei blocchi)
 if [ -n "$LD" ] && [ -d "$LD" ]; then
   N="$LD/notti/$(date +%Y%m%d)"
-  mkdir -p "$N" && flock "$LD/.lucchetto" cp -p "$LD/lux.npz" "$LD/lux-stato.npz" "$LD/lux-meta.json" "$N/" \
+  mkdir -p "$N" && flock "$LD/.lucchetto" cp -p "$LD/lux.npz" "$LD/lux-stato.npz" "$LD/lux-meta.json" "$LD"/lux-*-*.npy "$N/" \
     || echo "$(date -Iseconds) copia del Lux della notte FALLITA (non critico)"
   ls -1d "$LD"/notti/2* 2>/dev/null | head -n -7 | xargs -r rm -rf --
   # 1.17.0: i messaggi del giorno riaccendono gli engrammi (contatori del tema aperto), poi il riconsolidamento
