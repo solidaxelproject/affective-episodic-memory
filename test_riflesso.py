@@ -59,6 +59,11 @@ esito[0] = True
 time.sleep(0.8)
 assert any("kill" in v for v in diario), "kill non scritto con lo spegnimento riuscito"
 
+# D5 (l'utente 15/11, PIANO-ALUX-QLUX.md): il riflesso non dichiara piu' uno strumento suo; nei test uno di Hermes
+STRUMENTO = {"type": "function", "function": {"name": "alux", "description": "x",
+                                              "parameters": {"type": "object", "properties": {}}}}
+
+
 def m(ruolo, testo):
     return {"role": ruolo, "content": testo}
 
@@ -269,6 +274,11 @@ RP.RIEPILOGO_PROMUOVI = RP.RIEPILOGO.with_name(".riepilogo-promuovi")
 CA.KV_RAM = R.Path(tempfile.mkdtemp())
 RP.RIEPILOGO_LOG = R.Path(tempfile.mkdtemp()) / "logRiepilogo.md"
 RP.FISSA = R.Path(tempfile.mkdtemp()) / "riepilogo-fissa.json"   # R6: mai quello vero
+# 16/11: il testo della skill compressione-semantica nell'istruzione del riepilogo (mai il volume vero nei test)
+letture_skill = []
+RP._leggi_skill_compressione = lambda: letture_skill.append(1) or "---\nname: compressione-semantica\n---\n\n# Compressione semantica\n\nFcompress{prova}\n"
+assert RP._testo_skill_compressione() == "\n\nEcco la skill:\n\n# Compressione semantica\n\nFcompress{prova}"
+assert RP._testo_skill_compressione() and len(letture_skill) == 1, "letta una volta sola"
 
 
 def scrive(testo, path="/workspace/memoria/logRiepilogo.md", funzione="write_file"):
@@ -361,7 +371,7 @@ def chiedi(path, payload, rompi=None):
 C._chiedi = chiedi
 (CA.KV_RAM / "riepilogo.kv").write_bytes(b"x")
 RP._riepilogo_salva({"blocco": ["r1"], "nuovi": ["n1"]})
-inoltrato = {"messages": [sistema("Conversation started: lunedi"), m("user", "[utente] ciao")], "tools": [M.TOOL]}
+inoltrato = {"messages": [sistema("Conversation started: lunedi"), m("user", "[utente] ciao")], "tools": [STRUMENTO]}
 S._cw[0] = "chat"
 S._vettore_vivo[0] = True
 RP._riassumi(json.dumps(inoltrato).encode(), "ciao l'utente!", "lei mi saluta")
@@ -373,7 +383,7 @@ gen = chiesti[1][1]
 assert gen == {"prompt": ("<|im_start|>system\nTOOLS\n" + inoltrato["messages"][0]["content"]
                + "<|im_end|>\n<|im_start|>user\n[utente] ciao<|im_end|>\n<|im_start|>assistant\n<think>\n"
                + "lei mi saluta\n</think>\n\nciao l'utente!<|im_end|>\n<|im_start|>user\n" + RP.ISTRUZIONE_RIEPILOGO
-               + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"),
+               + RP._testo_skill_compressione() + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"),
                "n_predict": 220, "cache_prompt": True}, gen
 assert RP._riepilogo_carica() == {"blocco": ["r1"], "nuovi": ["n1", "un saluto → ciao"]}, "riga non aggiunta"
 assert RP.RIEPILOGO_LOG.read_text() == "un saluto → ciao\n", "riga non scritta in logRiepilogo.md"
@@ -394,7 +404,7 @@ for sbagliata in (scrive("x", path="/workspace/altro.md"), scrive("x", funzione=
     assert RP._riepilogo_carica() == st0 and "scartato" in diario[-1]["riepilogo"], sbagliata
 dopo = FISSO + INTEST + "\nn1\nun saluto → ciao\n\n"
 tpl = chiesti[2][1]
-assert tpl["tools"] == [M.TOOL] and tpl["messages"][0]["content"] == dopo + SEP + "Conversation started: lunedi"
+assert tpl["tools"] == [STRUMENTO] and tpl["messages"][0]["content"] == dopo + SEP + "Conversation started: lunedi"
 assert chiesti[3][1] == {"prompt": "<|im_start|>system\nTOOLS\n" + dopo, "n_predict": 1, "cache_prompt": True,
                          "checkpoint_tag": "riepilogo"}, \
     "il prefill del riepilogo si taglia subito prima della riga ══"
@@ -471,7 +481,7 @@ def generato():
 
 def coda_istruzione(avviso):
     return ("<|im_start|>user\n" + (RP.AVVISO_90K + "\n\n" if avviso else "") + RP.ISTRUZIONE_RIEPILOGO
-            + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n")
+            + RP._testo_skill_compressione() + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n")
 
 
 RP._riepilogo_salva({"blocco": [], "nuovi": []})
@@ -677,6 +687,22 @@ M._sam_accesa = lambda *a: True
 altro_turno = json.loads(R.Proxy._memoria(None, corpo([m("user", "[utente] parola senza ricordi zzz")]), "chat", ["META"], f3))
 assert f3.get("vettore") or altro_turno["messages"][0]["content"] == "META\n\n[utente] parola senza ricordi zzz", \
     "turno senza vettore: niente riga [emozione]"
+assert "tools" not in altro_turno, "D5: il riflesso non aggiunge strumenti (il nome delle consegne non si chiama)"
+# D2 (l'utente 15/11, PIANO-ALUX-QLUX.md): durante una chiamata di alux o qlux nessuna consegna; dopo, di nuovo
+dentro = [m("user", "[utente] ricordati del mare blu"),
+          {"role": "assistant", "content": "", "tool_calls": [{"id": "a1", "type": "function",
+                                                               "function": {"name": "alux", "arguments": "{}"}}]},
+          {"role": "tool", "tool_call_id": "a1", "content": "Aggiunto alla tua memoria."}]
+assert M._dentro_alux_qlux(dentro) and not M._dentro_alux_qlux(dentro + [m("assistant", "fatto")])
+assert not M._dentro_alux_qlux([m("user", "[utente] ciao")])
+consegne_prima, lux_prima_d2 = [], M._lux_consegna
+M._lux_consegna = lambda testo, esclusi, emozione=None, coda=None, numero=None: consegne_prima.append(testo) or {}
+M._ultima_lettura[0] = ""   # come dopo un riavvio del riflesso: il freno della lettura non c'e'
+M.memoria(corpo(dentro), "chat")
+assert not consegne_prima, "D2: consegna durante alux"
+M.memoria(corpo([m("user", "[utente] un messaggio nuovo sul vento")]), "chat")
+assert len(consegne_prima) == 1, "D2: dopo la chiamata il riflesso consegna di nuovo"
+M._lux_consegna = lux_prima_d2
 fuori = {}
 M._sam_accesa = lambda *a: False
 assert json.loads(R.Proxy._memoria(None, corpo([m("user", "[utente] x")]), "chat", ["META"], fuori))["messages"][0][
@@ -723,7 +749,7 @@ assert "chat" in M._consegne_carica(), "la conversazione della chat in corso but
 passi.clear(); chiesti.clear()
 risposta_sam[0] = "un saluto"
 S._cw[0] = "chat"
-senza = {"messages": [sistema("s"), m("user", "[utente] ciao")], "tools": [M.TOOL]}
+senza = {"messages": [sistema("s"), m("user", "[utente] ciao")], "tools": [STRUMENTO]}
 ora = "[09:07|03/11/2026]"
 righe = ["[pensatoio]", ora]
 
@@ -744,7 +770,7 @@ i = passi.index(("restore", "chat.kv"))
 assert passi[i + 1:] == ["anticipo", "/completion"], passi
 tpl = [x for pa, x in chiesti if pa == "/apply-template" and len(x["messages"]) > 2][-1]
 assert tpl["messages"] == senza["messages"] + [{"role": "assistant", "content": "ciao l'utente!"},
-                                               {"role": "user", "content": "."}] and tpl["tools"] == [M.TOOL], tpl
+                                               {"role": "user", "content": "."}] and tpl["tools"] == [STRUMENTO], tpl
 a = [p for pa, p in chiesti if pa == "/completion"][-1]
 assert a["prompt"].endswith("<|im_start|>assistant\nciao l'utente!<|im_end|>\n") and a["checkpoint_tag"] == "cresta" \
     and a["n_predict"] == 1, a
@@ -915,9 +941,9 @@ n = len(diario)
 for volta in (1, 2):
     f = Finto()
     R.Proxy._post_chat(f, json.dumps({"messages": [sis := {"role": "system", "content": FN + CODA_H},
-                                                   m("user", "[utente] ciao")], "tools": [M.TOOL]}).encode(), True, "chat")
+                                                   m("user", "[utente] ciao")], "tools": [STRUMENTO]}).encode(), True, "chat")
     assert f.inoltrato["messages"][0]["content"] == FV + INTEST + "\nr1\n\n" + CODA_H, f.inoltrato["messages"][0]
-    assert f._hermes == {"system": FN + CODA_H, "tools": [M.TOOL["function"]["name"]]}, f._hermes
+    assert f._hermes == {"system": FN + CODA_H, "tools": [STRUMENTO["function"]["name"]]}, f._hermes
 assert sum("parte fissa" in str(v.get("riepilogo", "")) for v in diario[n:] if isinstance(v, dict)) == 1, \
     "la sostituzione va nel diario una volta per sessione"
 for fissa, h in ((FV, "breve"), (None, FN + CODA_H)):
@@ -936,8 +962,8 @@ RP._fissa_salva({"chat": FV, "riepilogo": FV, "elenco": None})
 S._tok_cw["chat"] = 50_000
 risposta_sam[0] = "un saluto"
 inoltrato_v = {"messages": [{"role": "system", "content": FV + INTEST + "\nr1\n\n" + CODA_H}, m("user", "[utente] ciao")],
-               "tools": [M.TOOL]}
-hermes = {"system": FN + CODA_H, "tools": ["memorinvolontaria"]}
+               "tools": [STRUMENTO]}
+hermes = {"system": FN + CODA_H, "tools": ["alux"]}
 passi.clear(); chiesti.clear()
 S._cw[0] = "chat"
 assert RP._riassumi(json.dumps(inoltrato_v).encode(), "ciao l'utente!", hermes=hermes) == (False, "ok")

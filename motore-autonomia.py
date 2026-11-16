@@ -62,7 +62,8 @@ PROMPT_RISVEGLIO = (
     'altre cose interessanti usando la skill blocco-appunti. '
     'Nessuno ti sta chiedendo niente: è un tuo biglietto ritrovato in tasca. '
     'Ultima cosa, la più importante: "tutta la riflessione che ho appena '
-    'scritto è importante che la tengo dentro di me con la skill ricordare".')
+    'scritto è importante che la riassumo in un concetto il più possibile breve '
+    'da ricordare chiamando lo strumento alux".')   # l'utente 16/11 (PIANO-ALUX-QLUX.md)
 
 FERMA_DA = 5 * 60
 COOLDOWN = 5 * 60   # 18/07, scelta di progetto: gli appunti vanno usati in fretta

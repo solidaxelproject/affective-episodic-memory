@@ -10,7 +10,9 @@ LETTURA_MIN = 400      # manopola: sotto tanti caratteri di prosa, un risultato 
                        # tool è una ricevuta (exit_code, bytes_written), non una lettura
 
 
-TOOL_RICORDO = "memorinvolontaria"
+TOOL_RICORDO = "memorinvolontaria"   # chiave del diario e nome delle vecchie chiamate dell'agente nella storia di Hermes
+NOME_CONSEGNA = "§ricordo:"   # D5 (l'utente 15/11, PIANO-ALUX-QLUX.md): le consegne, che l'agente non puo' chiamare
+_PORTANO_RICORDI = (NOME_CONSEGNA, TOOL_RICORDO, "qlux")
 
 
 _URL = re.compile(r"https?://[^\s\"'<>\\]+")   # 1.24.0: un URL negli argomenti di una chiamata
@@ -20,15 +22,15 @@ _CODICE_TOOL = re.compile(r"^\d+[a-z]?°\n([0-9a-z]{16})$", re.M)
 
 
 def _ids_ricordo(msgs):
-    """id delle chiamate a memorinvolontaria (le finte del riflesso e quelle vere dell'agente, che hanno l'id del server)"""
+    """id delle chiamate che portano ricordi: consegne del riflesso, qlux dell'agente, vecchie memorinvolontaria"""
     return {tc.get("id") for m in msgs if m.get("role") == "assistant" for tc in (m.get("tool_calls") or [])
-            if (tc.get("function") or {}).get("name") == TOOL_RICORDO}
+            if (tc.get("function") or {}).get("name") in _PORTANO_RICORDI}
 
 
 def _e_ricordo(m, ids):
-    """un messaggio tool che e' la risposta di memorinvolontaria"""
+    """un messaggio tool che e' la risposta di una consegna, di qlux o di una vecchia memorinvolontaria"""
     i = str(m.get("tool_call_id", ""))
-    return m.get("role") == "tool" and (i.startswith(TOOL_RICORDO) or i in ids or m.get("name") == TOOL_RICORDO)
+    return m.get("role") == "tool" and (i.startswith("ricordo_") or i in ids or m.get("name") in _PORTANO_RICORDI)
 
 
 def _codici_nei_messaggi(msgs):

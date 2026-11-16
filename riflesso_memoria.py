@@ -25,15 +25,9 @@ _ultima_lettura = [""]  # 25/07: il freno vero, l'impronta del testo già affior
 # ---- MEMORIA INVOLONTARIA (l'utente 11/10, piano del refactoring Lux + richiamo):
 # il Lux degli engrammi sceglie fino a 4 ricordi per messaggio, tutti con la stessa dominante (fase 2 step b, l'utente
 # 09/11 + 11/11; dal 09/11 era uno solo), sopra soglia, mai uno già consegnato nella conversazione; i ricordi
-# entrano insieme in un turno del tool, che
-# è dichiarato sempre così il prefisso della cache non cambia.
+# entrano insieme in un turno del tool col nome §ricordo:, che non e' dichiarato fra gli strumenti: l'agente non puo'
+# chiamarlo (D5, l'utente 15/11, PIANO-ALUX-QLUX.md; prima era memorinvolontaria e l'agente ne imitava le chiamate).
 LUX = "http://127.0.0.1:8132/consegna"
-TOOL = {"type": "function", "function": {
-    "name": FO.TOOL_RICORDO,
-    "description": "Ricordi che affiorano dalla tua memoria, collegati alla conversazione. "
-                   "Arrivano da soli, non serve chiamare questo strumento: usali solo se "
-                   "servono alla risposta.",
-    "parameters": {"type": "object", "properties": {}, "required": []}}}
 # Hermes non conserva i turni aggiunti qui: il riflesso li ricorda e li rimette
 # al loro posto a ogni richiesta (dopo il messaggio che li ha fatti affiorare),
 # così il ricordo resta nel contesto e il prefisso della cache resta stabile.
@@ -82,10 +76,10 @@ def _codici(voce):
 
 def _turni_tool(voce):
     """chiamata + risposta del tool, come le scrive il formato chat dell'API"""
-    cid = f"{FO.TOOL_RICORDO}_{_codici(voce)[0]}"
+    cid = f"ricordo_{_codici(voce)[0]}"
     return [{"role": "assistant", "content": "",
              "tool_calls": [{"id": cid, "type": "function",
-                             "function": {"name": FO.TOOL_RICORDO, "arguments": "{}"}}]},
+                             "function": {"name": FO.NOME_CONSEGNA, "arguments": "{}"}}]},
             {"role": "tool", "tool_call_id": cid, "content": voce["risposta"]}]
 
 
@@ -150,10 +144,10 @@ def _lux_consegna(testo, esclusi, emozione=None, coda=None, numero=None):
 # POST /memorinvolontaria con gli argomenti dell'agente; +lux = ricordo forzato nella coda di firma-subito (entra nel Lux in
 # pochi secondi), qlux = ricerca volontaria, il ricordo piu' vicino, uno per volta. Risposte approvate dall'utente 09/11.
 R_AGGIUNTO = "Aggiunto alla tua memoria."
-R_VUOTO = "Scrivi il ricordo da tenere."
+R_VUOTO_ALUX = "Cosa vuoi ricordare? Scrivilo come vorrai ritrovarlo."   # D3, l'utente 15/11 (PIANO-ALUX-QLUX.md)
+R_VUOTO_QLUX = "Cosa vuoi cercare? Scrivi poche parole o una data."   # D3, l'utente 15/11
 R_NESSUNO = "Nessun ricordo trovato."
 R_GIU = "La memoria non risponde, riprova più tardi."
-R_SENZA = "Usa +lux per aggiungere un ricordo o qlux per cercarne uno."
 _esclusi_chat = [set()]   # codici nell'ultima richiesta della chat, piu' quelli dati da qlux dopo
 _esclusi_lock = threading.Lock()
 MESI = {m: i for i, m in enumerate(("gennaio febbraio marzo aprile maggio giugno luglio agosto settembre ottobre "
@@ -215,19 +209,31 @@ def _lux_cerca(testo, esclusi):
     return json.load(urllib.request.urlopen(req, timeout=30))
 
 
+def _stato_adesso():
+    """alux, D6 (l'utente 15/11, PIANO-ALUX-QLUX.md): lo stato emotivo dell'agente nel momento in cui registra, col ritorno
+    eutimico del tempo passato come lo vede l'omeostato"""
+    try:
+        return VE.omeostato.carica()
+    except Exception as e:
+        C._diario({"+lux": f"stato illeggibile: {e}"})
+        return None
+
+
 def memorinvolontaria(args):
     """la risposta che l'agente riceve dal plugin"""
     aggiungi, cerca = args.get("+lux"), args.get("qlux")
     if aggiungi is None and cerca is None:
-        return R_SENZA
+        return R_GIU
     parti = []
     if aggiungi is not None:
         t = str(aggiungi).strip()
         if t:
-            FI._accoda_forzato(t, _recenti())   # 1.24.0: un ricordo voluto dopo una pagina viene da li'
+            FI._accoda_forzato(t, _recenti(), _stato_adesso())   # 1.24.0: un ricordo voluto dopo una pagina viene da li'
             C._diario({"+lux": t[:80]})
-        parti.append(R_AGGIUNTO if t else R_VUOTO)
-    if cerca is not None:
+        parti.append(R_AGGIUNTO if t else R_VUOTO_ALUX)
+    if cerca is not None and not str(cerca).strip():
+        parti.append(R_VUOTO_QLUX)
+    elif cerca is not None:
         with _esclusi_lock:
             esclusi = set(_esclusi_chat[0])
         try:
@@ -263,6 +269,16 @@ def _emozione_del_turno(msgs, flusso, vettore):
     return _emozione_turno.get(k)
 
 
+def _dentro_alux_qlux(msgs):
+    """D2 (l'utente 15/11, PIANO-ALUX-QLUX.md): l'ultimo messaggio dell'agente chiama alux o qlux e dopo ci sono solo le
+    risposte degli strumenti = la chiamata e' in corso, il riflesso e' in pausa"""
+    for m in reversed(msgs):
+        if m.get("role") != "tool":
+            return m.get("role") == "assistant" and any(
+                (tc.get("function") or {}).get("name") in ("alux", "qlux") for tc in m.get("tool_calls") or [])
+    return False
+
+
 def memoria(body, flusso=None, righe=None, fuori=None):
     """Memoria involontaria: a ogni lettura nuova il Lux sceglie fino a 4 ricordi
     con la stessa dominante (fase 2 step b) nella risposta del tool; i ricordi già consegnati nella conversazione tornano al loro posto.
@@ -283,6 +299,8 @@ def memoria(body, flusso=None, righe=None, fuori=None):
     # solo su ciò che le viene detto (pagine, file, output dei tool).
     i, fonte = FO._fonte_indice(msgs)
     if fonte and msgs[i].get("role") != "user":   # 15/11: una consegna sola dopo ogni suo messaggio, mai sui risultati dei tool
+        fonte = ""
+    if fonte and _dentro_alux_qlux(msgs):   # D2 (15/11): pausa durante alux e qlux
         fonte = ""
     # 25/07, l'utente: il freno è la lettura. Sullo STESSO testo non riaffiora
     # (Hermes rimanda la stessa fonte a ogni giro di tool): un ricordo per messaggio.
@@ -323,9 +341,6 @@ def memoria(body, flusso=None, righe=None, fuori=None):
                 tutte.pop(vecchia, None)     # la voce di prima del 10/11 passa alla chiave senza ora
                 tutte[conv] = {"ts": time.time(), "voci": voci, "coda": coda or []}
                 _consegne_salva(tutte, tieni=conv if flusso == "chat" else None)
-    tools = d.setdefault("tools", [])
-    if not any(t.get("function", {}).get("name") == FO.TOOL_RICORDO for t in tools):
-        tools.append(TOOL)
     _rimetti(msgs, voci)
     vettore = None
     if nuova:

@@ -41,6 +41,30 @@ ISTRUZIONE_RIEPILOGO = (
     "compressione-semantica, in una riga. Se necessario posso inserire il codice di un ricordo che reputo utile per "
     "questo riassunto. Se in questo scambio mi è affiorato un ricordo, aggiungo il suo codice. Lo scrivo con "
     "write_file in /workspace/memoria/logRiepilogo.md.")   # coda: l'utente 10/11; compressione semantica: l'utente 14/11
+# 16/11: il testo intero della skill compressione-semantica dentro l'istruzione del riepilogo. Il riepilogo e' un
+# colpo solo (220 token, la prima chiamata dev'essere write_file): l'agente chiamava skill_view per leggerla e veniva scartato.
+# Letta dal volume dell'agente la prima volta che serve (riavvio del riflesso = rilettura); se non si legge, istruzione senza.
+_skill_compressione = [None]
+
+
+def _leggi_skill_compressione():
+    return subprocess.run(["docker", "exec", "agente", "cat",
+                           "/home/agente/.hermes/skills/compressione-semantica/SKILL.md"],
+                          capture_output=True, text=True, timeout=10, check=True).stdout
+
+
+def _testo_skill_compressione():
+    if _skill_compressione[0] is None:
+        try:
+            t = _leggi_skill_compressione()
+        except Exception as e:
+            C._diario({"riepilogo": f"skill compressione-semantica non letta: {e}"})
+            return ""
+        corpo = t.split("---", 2)[2] if t.startswith("---") else t   # via l'intestazione (name, description)
+        _skill_compressione[0] = "\n\nEcco la skill:\n\n" + corpo.strip()
+    return _skill_compressione[0]
+
+
 SEPARATORE = "══"   # da questa riga in poi il system di Hermes cambia fra le sessioni (MEMORY, data)
 # BLOCCO B (l'utente 10/11, PIANO-RIEPILOGO-KV.md 3.5, K4 K10 K14 K15 K18): l'avviso va PRIMA dell'istruzione, solo
 # nella chiamata del riepilogo (la chat salvata non lo contiene); [cwswitch] in coda al riepilogo = switch subito
@@ -480,7 +504,7 @@ def _riassumi(corpo, risposta, ragionamento="", senza=None, scadenza=None, herme
                 resa += ragionamento + ("" if ragionamento.endswith("\n") else "\n") + "</think>\n\n"
             gen = C._chiedi("/completion", {
                 "prompt": resa + risposta + "<|im_end|>\n<|im_start|>user\n"
-                          + (AVVISO_90K + "\n\n" if avviso else "") + ISTRUZIONE_RIEPILOGO
+                          + (AVVISO_90K + "\n\n" if avviso else "") + ISTRUZIONE_RIEPILOGO + _testo_skill_compressione()
                           + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
                 "n_predict": 220, "cache_prompt": True})   # 160 + la chiamata write_file
             scritta = _riga_scritta(gen.get("content") or "")

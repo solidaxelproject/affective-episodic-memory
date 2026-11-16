@@ -10,11 +10,12 @@ import riflesso_comune as C
 CODA_FIRMA = os.environ.get("CODA_FIRMA", "/data/workspace/memoria/coda-firma.jsonl")
 
 
-def _accoda_forzato(testo, siti=()):
+def _accoda_forzato(testo, siti=(), stato=None):
     fd = os.open(CODA_FIRMA, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
     try:   # una sola write: righe intere anche con la chat che accoda
         os.write(fd, (json.dumps({"ts": time.time(), "autore": "@agente:localhost", "testo": testo,
-                                  "forzato": True, **({"siti": list(siti)} if siti else {})},
+                                  "forzato": True, **({"siti": list(siti)} if siti else {}),
+                                  **({"stato": stato} if stato else {})},   # alux, D6 (15/11): il suo stato adesso
                                  ensure_ascii=False) + "\n").encode())
     finally:
         os.close(fd)

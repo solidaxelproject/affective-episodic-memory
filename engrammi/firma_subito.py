@@ -11,6 +11,7 @@ trascinamento (behavioral tagging) e notturna.
   firma_subito.py notte DA_TS     notturna: persistenza sugli scartati e omeostato dai nodi nati da DA_TS in poi
 Uso: /data/jspace/venv/bin/python /data/memoria-episodica-affettiva/engrammi/firma_subito.py servizio"""
 import json
+import math
 import os
 import re
 import sys
@@ -157,6 +158,25 @@ def firma(contesto, testo):
     return f, max(f.values()), memoria.dominante(f)   # 09/11: dominante fra le emozioni con vettore
 
 
+def da_forte(firma_):
+    """alux, D7 (l'utente 16/11, PIANO-ALUX-QLUX.md): il ricordo nasce sempre forte, la firma riscalata col massimo a
+    soglia + FORTE_DELTA; i negativi non sotto -(soglia + FORTE_DELTA) (valore di CC). None se nessun asse e' positivo"""
+    picco = max(firma_.values())
+    if picco <= 0:
+        return None
+    forte = math.ceil((stats()["s"]["soglia"] + FORTE_DELTA) * 1000) / 1000   # arrotondato in su: resta forte
+    f = {a: round(max(x * forte / picco, -forte), 3) for a, x in firma_.items()}
+    return f, max(f.values()), memoria.dominante(f)
+
+
+def firma_dallo_stato(stato):
+    """alux, D6 (15/11): il colore dallo stato emotivo dell'agente quando registra, sugli assi della firma"""
+    def numero(x):   # un valore storto non ferma la coda: vale 0
+        return float(x) if isinstance(x, (int, float)) and math.isfinite(x) else 0.0
+    stato = stato if isinstance(stato, dict) else {}
+    return da_forte({a: numero(stato.get(a)) for a in stats()["s"]["assi"]})
+
+
 # ---------- nodi ----------
 
 def _lux(rotta, corpo, attesa=30):
@@ -231,7 +251,10 @@ def elabora(m, reg):
         _annota(reg, dict(m, esito="doppione"))
         return False
     try:
-        f, sal, dom = firma(T.contesto_di([x["testo"] for x in vivi]), m["testo"])
+        dallo_stato = firma_dallo_stato(m["stato"]) if forzato and m.get("stato") else None
+        f, sal, dom = dallo_stato or firma(T.contesto_di([x["testo"] for x in vivi]), m["testo"])
+        if forzato and not dallo_stato:   # alux senza stato: forte lo stesso (D7)
+            f, sal, dom = da_forte(f) or (f, sal, dom)
     except ValueError as e:   # la firma di questo messaggio non si fa (testo che il lettore rifiuta)
         _annota(reg, dict(m, esito="errore", errore=str(e)))
         log.warning("firma impossibile: %s (%s)", e, m["testo"][:60])

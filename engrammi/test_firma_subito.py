@@ -492,6 +492,40 @@ assert f"{ESTRANEO} prima Z=0.3" in [t for t, _, _ in preso["sc"]]
 assert len(preso["firme"]) == sum(v["esito"] in ("nodo", "trascinato") for v in reg)
 assert all(list(f) == ASSI for _, f, _ in preso["sc"])
 
+# ---------- 14b. alux (l'utente 15-16/11, PIANO-ALUX-QLUX.md D6-D7): firma dallo stato, sempre forte ----------
+print("14b. alux: firma dallo stato dell'agente, sempre forte", flush=True)
+FORTE_A = FS.stats()["s"]["soglia"] + FS.FORTE_DELTA
+f, sal, dom = FS.firma_dallo_stato({"joy": 0.8, "fear": 0.4, "sadness": -0.3, "triumph": 0.9})   # triumph: non e' un asse
+assert set(f) == set(ASSI) and abs(sal - FORTE_A) < 0.01 and abs(f["joy"] - FORTE_A) < 0.01, (sal, f["joy"])
+assert sal >= FORTE_A, "arrotondata deve restare forte"
+assert FS.firma_dallo_stato({"joy": 0.8, "fear": float("nan"), "anger": None})[0]["fear"] == 0.0   # storti: 0
+assert FS.firma_dallo_stato("non un dict") is None
+assert abs(f["fear"] - FORTE_A / 2) < 0.01 and f["sadness"] < 0 and dom == FS.memoria.dominante(f)
+assert FS.firma_dallo_stato({"joy": -0.1, "fear": -0.5}) is None   # niente di positivo: si legge il testo
+g, sal_g, _ = FS.da_forte({**{a: -0.5 for a in ASSI}, "joy": 0.1})   # firma debole del testo, riscalata
+assert abs(sal_g - FORTE_A) < 0.01 and min(g.values()) >= -FORTE_A - 0.001, min(g.values())
+
+
+def lettura(contesto, testo):   # il ricordo con lo stato non legge il testo; quello senza si', con la firma finta
+    if "il mare" in testo:
+        raise AssertionError("alux con lo stato: il testo non si legge")
+    return firma_finta(contesto, testo)
+
+
+pulisci_coda()
+ta = time.time() - 600
+FS.accoda([voce(ta, "B6alux il mare con l'utente Z=0.1", forzato=True, stato={"joy": 0.8, "fear": 0.4}),
+           voce(ta + 1, "B6alux senza stato Z=0.1 A=fear", forzato=True)])
+FS.firma = lettura
+try:
+    assert FS.passo() == "pronto"
+finally:
+    FS.firma = firma_vera
+r = {v["testo"]: v for v in FS.registro().values() if v["testo"].startswith("B6alux")}
+a1, a2 = r["B6alux il mare con l'utente Z=0.1"], r["B6alux senza stato Z=0.1 A=fear"]
+assert a1["esito"] == "nodo" and a1["dominante"] == "joy" and a1["salienza"] >= FORTE_A, a1
+assert a2["esito"] == "nodo" and a2["dominante"] == "fear" and a2["salienza"] >= FORTE_A, a2
+
 # ---------- 15. riflesso ----------
 print("15. riflesso: righe solo per le risposte finali", flush=True)
 proc.kill()
