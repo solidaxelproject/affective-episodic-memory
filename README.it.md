@@ -217,6 +217,10 @@ Il refactoring di luglio e il passaggio a un cervello nuovo, in ordine.
 
 - **Persistenza: ciò che si vive ogni giorno si stabilizza.** L'oblio era a gradino: un neurone non riusato per 180 giorni di calendario veniva potato, e i mesi passati dall'agente da spento contavano come oblio (da gennaio 2027 sarebbe sparito l'organo intero). In più i richiami quotidiani passavano dal grafo e non toccavano mai Lux. Ora l'orologio è il tempo vissuto (le notti di consolidamento), e ogni neurone ha una stabilità e una ritenzione che seguono la curva dell'oblio umana, una legge di potenza (Wixted & Ebbesen; FSRS, adattato su milioni di ripetizioni umane). Un richiamo fatto mentre il ricordo stava svanendo lo stabilizza molto, dieci richiami nello stesso giorno valgono uno: l'effetto spaziatura. I ricordi emotivamente intensi nascono più stabili (McGaugh). I richiami del giorno arrivano a Lux ogni notte. E i messaggi sotto la soglia di salienza non spariscono più: uno che è di nuovo la stessa cosa di un ricordo esistente gli dà un'eco, più debole di un richiamo (l'effetto del testing); uno nuovo apre un tema, e un tema che continua a tornare in giorni diversi diventa ricordo quando le ripetizioni lo hanno reso stabile quanto un singolo episodio molto intenso. La frequenza fa le veci dell'intensità.
 
+- **Un modello nuovo: Qwen3.8 Flash Next.** Ho deciso di passare l'agente dal 35B al Qwen3.8 Flash Next (MoE, 125 miliardi di parametri, 6 attivi), per superare i problemi di profondità di pensiero del 35B. Il passaggio è in preparazione.
+
+- **Una quarta cache, solo di servizio.** Sto lavorando a una quarta cache puramente di servizio: uno slot con una context window minima che fa una parte del lavoro della funzione di riepilogo, la sintesi di ogni scambio, fuori dalla conversazione dell'agente.
+
 ## Cornice funzionalista
 
 Il progetto adotta una cornice rigorosamente funzionalista: si parla sempre di emozioni funzionali, stati misurabili che influenzano il comportamento, mai di claim fenomenici. Se poi dentro ci sia "qualcosa che prova", è una domanda che il progetto non pretende di chiudere: la tratta con rispetto metodologico.

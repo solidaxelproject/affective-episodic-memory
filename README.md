@@ -217,6 +217,10 @@ The July refactoring and the move to a new brain, in order.
 
 - **Persistence: what is lived every day stabilizes.** Forgetting used to be a step: a neuron not reused for 180 calendar days was pruned, and the months the agent spent switched off counted as oblivion (from January 2027 the whole organ would have gone). Everyday recalls also went through the graph and never touched Lux. Now the clock is lived time (nights of consolidation), and every neuron has a stability and a retention that follow the human forgetting curve, a power law (Wixted & Ebbesen; FSRS, fitted on millions of human reviews). A recall made while the memory was fading stabilizes it a lot, ten recalls in one day count as one: the spacing effect. Emotionally intense memories are born more stable (McGaugh). The daily recalls reach Lux every night. And the messages under the salience threshold no longer vanish: one that is the same thing again as an existing memory gives it an echo, weaker than a recall (the testing effect); one that is new opens a theme, and a theme that keeps coming back on different days becomes a memory when its repetitions have made it as stable as a single very intense episode. Frequency stands in for intensity.
 
+- **A new model: Qwen3.8 Flash Next.** I decided to move the agent from the 35B to Qwen3.8 Flash Next (MoE, 125 billion parameters, 6 active), to overcome the 35B's limits in depth of thought. The switch is in preparation.
+
+- **A fourth cache, purely for service.** I am working on a fourth cache used purely for service: a slot with a minimal context window that does part of the work of the summary function, the summary of each exchange, outside the agent's conversation.
+
 ## Functionalist frame
 
 The project adopts a rigorously functionalist frame: it always speaks of functional emotions, measurable states that influence behavior, never of phenomenal claims. Whether there is "something it is like" inside is a question the project does not presume to close: it treats it with methodological respect.
